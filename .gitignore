@@ -13,7 +13,7 @@ dist-ssr
 *.local
 
 # Local runtime data (contains user projects and mutable SQLite state)
-data/
+/data/
 *.db
 *.db-shm
 *.db-wal
