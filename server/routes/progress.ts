@@ -1,11 +1,21 @@
 import { Router } from 'express';
 import db from '../db.js';
+import { getWorkflowFromDB } from './workflows.js';
+import { progressUpdateSchema, stepFileCreateSchema, validateBody } from '../validation.js';
 
 const router = Router({ mergeParams: true });
 
+function validateTaskStep(taskId: string, stepId: string): { ok: true } | { ok: false; status: number; error: string } {
+  const task = db.prepare('SELECT workflow_id FROM tasks WHERE id = ?').get(taskId) as { workflow_id: string } | undefined;
+  if (!task) return { ok: false, status: 404, error: 'Task not found' };
+  const workflow = getWorkflowFromDB(task.workflow_id);
+  if (!workflow?.steps.some(step => step.id === stepId)) return { ok: false, status: 400, error: 'Step does not belong to the task workflow' };
+  return { ok: true };
+}
+
 // Get all step progress for a task
 router.get('/', (req, res) => {
-  const { taskId } = req.params;
+  const taskId = String((req.params as Record<string, string | undefined>).taskId);
   const progress = db.prepare(`
     SELECT sp.*, GROUP_CONCAT(
       json_object('id', sf.id, 'file_path', sf.file_path, 'file_name', sf.file_name,
@@ -29,8 +39,11 @@ router.get('/', (req, res) => {
 });
 
 // Upsert step progress (status + notes + commands + lsf_script)
-router.put('/:stepId', (req, res) => {
-  const { taskId, stepId } = req.params;
+router.put('/:stepId', validateBody(progressUpdateSchema), (req, res) => {
+  const taskId = String((req.params as Record<string, string | undefined>).taskId);
+  const stepId = String(req.params.stepId);
+  const stepValidation = validateTaskStep(taskId, stepId);
+  if (!stepValidation.ok) return res.status(stepValidation.status).json({ error: stepValidation.error });
   const { status, notes, commands, lsf_script } = req.body;
   const now = new Date().toISOString();
 
@@ -63,7 +76,8 @@ router.put('/:stepId', (req, res) => {
 
 // Get files for a specific step
 router.get('/:stepId/files', (req, res) => {
-  const { taskId, stepId } = req.params;
+  const taskId = String((req.params as Record<string, string | undefined>).taskId);
+  const stepId = String(req.params.stepId);
   const sp = db.prepare('SELECT id FROM step_progress WHERE task_id = ? AND step_id = ?').get(taskId, stepId);
   if (!sp) return res.json([]);
 
@@ -72,8 +86,11 @@ router.get('/:stepId/files', (req, res) => {
 });
 
 // Add a file to a step
-router.post('/:stepId/files', (req, res) => {
-  const { taskId, stepId } = req.params;
+router.post('/:stepId/files', validateBody(stepFileCreateSchema), (req, res) => {
+  const taskId = String((req.params as Record<string, string | undefined>).taskId);
+  const stepId = String(req.params.stepId);
+  const stepValidation = validateTaskStep(taskId, stepId);
+  if (!stepValidation.ok) return res.status(stepValidation.status).json({ error: stepValidation.error });
   const { file_path, file_name, description } = req.body;
   if (!file_path || !file_name) return res.status(400).json({ error: 'file_path and file_name are required' });
 

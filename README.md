@@ -40,11 +40,17 @@ npm start
 
 ```powershell
 npm run lint
+npm run typecheck:server
+npm test
 npm run build
+# 或一次运行全部检查
+npm run check
 ```
 
 ## 数据说明
 
 `data/` 中的 SQLite 数据库以及 `repository/` 中的真实科研输入输出不会提交到 Git。它们属于本地用户数据，应单独备份和管理。
+
+数据库升级使用 `schema_migrations` 记录迁移版本。执行涉及数据库结构的升级前，应先在 `data/backups/` 创建并校验备份。
 
 项目协作与安全约定见 [AGENTS.md](AGENTS.md)，历史进度见 [progress.md](progress.md)，架构、接口和数据字典见 [doc/](doc/)。

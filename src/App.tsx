@@ -7,12 +7,14 @@ import TaskWorkflowPage from './pages/TaskWorkflowPage';
 import WorkflowPage from './pages/WorkflowPage';
 import HPCPage from './pages/HPCPage';
 import ExperiencePage from './pages/ExperiencePage';
+import ApiErrorToast from './components/ApiErrorToast';
 
 export default function App() {
   return (
     <WorkflowProvider>
       <HashRouter>
         <div className="flex h-screen overflow-hidden">
+          <ApiErrorToast />
           <Sidebar />
           <main className="flex-1 overflow-hidden bg-[#131320]">
             <Routes>

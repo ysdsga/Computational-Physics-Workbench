@@ -2,24 +2,21 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
+import { resolveWithinRoot, relativeToRoot } from '../pathSafety.js';
+import { mkdirSchema, parseInput, relativePathSchema, validateBody } from '../validation.js';
 
 const router = Router({ mergeParams: true });
 
 // Browse files in project working directory
 router.get('/', (req, res) => {
-  const { projectId } = req.params;
-  const subPath = (req.query.path as string) || '';
+  const projectId = String((req.params as Record<string, string | undefined>).projectId);
+  const subPath = parseInput(relativePathSchema, (req.query.path as string) || '');
 
   const project = db.prepare('SELECT working_dir FROM projects WHERE id = ?').get(projectId) as { working_dir: string } | undefined;
   if (!project) return res.status(404).json({ error: 'Project not found' });
   if (!project.working_dir) return res.status(400).json({ error: 'Project has no working directory set' });
 
-  const targetPath = path.resolve(project.working_dir, subPath);
-
-  // Security: ensure the path is within working_dir
-  if (!targetPath.startsWith(path.resolve(project.working_dir))) {
-    return res.status(403).json({ error: 'Access denied: path outside working directory' });
-  }
+  const targetPath = resolveWithinRoot(project.working_dir, subPath);
 
   try {
     if (!fs.existsSync(targetPath)) {
@@ -39,7 +36,7 @@ router.get('/', (req, res) => {
         isDirectory: dirent.isDirectory(),
         size: stat.size,
         modified: stat.mtime.toISOString(),
-        relativePath: path.relative(project.working_dir, fullPath),
+        relativePath: relativeToRoot(project.working_dir, fullPath),
       };
     }).sort((a, b) => {
       // Directories first, then alphabetical
@@ -54,22 +51,18 @@ router.get('/', (req, res) => {
 });
 
 // Create a directory
-router.post('/mkdir', (req, res) => {
-  const { projectId } = req.params;
+router.post('/mkdir', validateBody(mkdirSchema), (req, res) => {
+  const projectId = String((req.params as Record<string, string | undefined>).projectId);
   const { path: subPath, name } = req.body;
-  if (!name) return res.status(400).json({ error: 'Directory name is required' });
-
   const project = db.prepare('SELECT working_dir FROM projects WHERE id = ?').get(projectId) as { working_dir: string } | undefined;
-  if (!project || !project.working_dir) return res.status(400).json({ error: 'Project has no working directory' });
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!project.working_dir) return res.status(400).json({ error: 'Project has no working directory' });
 
-  const targetPath = path.resolve(project.working_dir, subPath || '', name);
-  if (!targetPath.startsWith(path.resolve(project.working_dir))) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const targetPath = resolveWithinRoot(project.working_dir, subPath || '', name);
 
   try {
     fs.mkdirSync(targetPath, { recursive: true });
-    res.status(201).json({ success: true, path: path.relative(project.working_dir, targetPath) });
+    res.status(201).json({ success: true, path: relativeToRoot(project.working_dir, targetPath) });
   } catch (err) {
     res.status(500).json({ error: `Failed to create directory: ${(err as Error).message}` });
   }
@@ -77,17 +70,14 @@ router.post('/mkdir', (req, res) => {
 
 // Read file content (text files only, max 1MB)
 router.get('/read', (req, res) => {
-  const { projectId } = req.params;
-  const filePath = req.query.path as string;
-  if (!filePath) return res.status(400).json({ error: 'Path is required' });
+  const projectId = String((req.params as Record<string, string | undefined>).projectId);
+  const filePath = parseInput(relativePathSchema.refine(value => value.length > 0, 'Path is required'), req.query.path);
 
   const project = db.prepare('SELECT working_dir FROM projects WHERE id = ?').get(projectId) as { working_dir: string } | undefined;
-  if (!project || !project.working_dir) return res.status(400).json({ error: 'Project has no working directory' });
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!project.working_dir) return res.status(400).json({ error: 'Project has no working directory' });
 
-  const targetPath = path.resolve(project.working_dir, filePath);
-  if (!targetPath.startsWith(path.resolve(project.working_dir))) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
+  const targetPath = resolveWithinRoot(project.working_dir, filePath);
 
   try {
     const stat = fs.statSync(targetPath);

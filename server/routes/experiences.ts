@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
+import { experienceCreateSchema, experienceUpdateSchema, validateBody } from '../validation.js';
 
 const router = Router();
 
@@ -30,7 +31,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create experience
-router.post('/', (req, res) => {
+router.post('/', validateBody(experienceCreateSchema), (req, res) => {
   const { title, content, tags, related_project_id, related_task_id, related_step_id } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Title and content are required' });
 
@@ -50,7 +51,7 @@ router.post('/', (req, res) => {
 });
 
 // Update experience
-router.put('/:id', (req, res) => {
+router.put('/:id', validateBody(experienceUpdateSchema), (req, res) => {
   const { title, content, tags, related_project_id, related_task_id, related_step_id } = req.body;
   const now = new Date().toISOString();
 

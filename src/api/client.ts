@@ -2,14 +2,27 @@ import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, Work
 
 const BASE = '/api';
 
+function reportApiError(message: string) {
+  window.dispatchEvent(new CustomEvent('workbench:api-error', { detail: { message } }));
+}
+
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (error) {
+    const message = `无法连接工作台服务：${(error as Error).message}`;
+    reportApiError(message);
+    throw new Error(message);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const message = err.error || `HTTP ${res.status}`;
+    reportApiError(message);
+    throw new Error(message);
   }
   return res.json();
 }

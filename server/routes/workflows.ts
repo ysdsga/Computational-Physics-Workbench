@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../db.js';
 import { WORKFLOWS as BUILTIN_WORKFLOWS } from '../../src/data/workflows.js';
 import type { WorkflowTemplate } from '../../src/types/index.js';
+import { validateBody, workflowSaveSchema } from '../validation.js';
 
 const router = Router();
 
@@ -55,14 +56,14 @@ router.get('/all/full', (_req, res) => {
 
 // Get full workflow template (with stages + steps)
 router.get('/:id', (req, res) => {
-  const wf = getWorkflowFromDB(req.params.id);
+  const wf = getWorkflowFromDB(String(req.params.id));
   if (!wf) return res.status(404).json({ error: 'Workflow not found' });
   res.json(wf);
 });
 
 // Save full workflow template (stages + steps)
-router.put('/:id', (req, res) => {
-  const { id } = req.params;
+router.put('/:id', validateBody(workflowSaveSchema), (req, res) => {
+  const id = String(req.params.id);
   const { name, description, stages, steps } = req.body;
 
   if (!stages || !Array.isArray(stages)) return res.status(400).json({ error: 'stages array is required' });
@@ -86,7 +87,7 @@ router.put('/:id', (req, res) => {
 
 // Reset workflow template to built-in default
 router.post('/:id/reset', (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params.id);
   const builtin = BUILTIN_WORKFLOWS.find(w => w.id === id);
   if (!builtin) return res.status(404).json({ error: 'No built-in template for this workflow ID' });
 

@@ -62,6 +62,7 @@ export interface Task {
   description: string;
   workflow_id: string;
   status: TaskStatus;
+  folder_name: string;
   created_at: string;
   updated_at: string;
   progress?: StepProgress[];

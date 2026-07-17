@@ -193,7 +193,7 @@ export default function HPCPage() {
         <HpcWizard
           taskId={selectedTaskId}
           workflowId={workflowId}
-          taskName={selectedTask?.name ?? ''}
+          taskName={selectedTask?.folder_name || selectedTask?.name || ''}
           hpcConfig={hpcConfig}
           progressMap={progressMap}
           onProgressChanged={loadTaskData}

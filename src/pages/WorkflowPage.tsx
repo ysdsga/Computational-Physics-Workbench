@@ -150,7 +150,7 @@ export default function WorkflowPage() {
               taskId={selectedTaskId}
               workflowId={workflow.id}
               projectId={selectedTask.project_id}
-              taskName={selectedTask.name}
+              taskFolderName={selectedTask.folder_name || selectedTask.name}
               progress={currentStepProgress}
               onClose={() => setSelectedStep(null)}
               onProgressChanged={loadProgress}

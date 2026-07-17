@@ -9,13 +9,13 @@ interface Props {
   taskId: string;
   workflowId: string;
   projectId: string;
-  taskName: string;
+  taskFolderName: string;
   progress: StepProgress | undefined;
   onClose: () => void;
   onProgressChanged: () => void;
 }
 
-export default function StepDetail({ step, taskId, workflowId, projectId, taskName, progress, onClose, onProgressChanged }: Props) {
+export default function StepDetail({ step, taskId, workflowId, projectId, taskFolderName, progress, onClose, onProgressChanged }: Props) {
   const workflow = useWorkflow(workflowId);
   const stage = getStageForStepOf(workflow, step.id);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -29,7 +29,7 @@ export default function StepDetail({ step, taskId, workflowId, projectId, taskNa
   const [cmdDraft, setCmdDraft] = useState<string[]>([]);
 
   // Stage folder path (shared by all steps in the same stage)
-  const stageFolderPath = stage ? `${taskName}/${stage.id}` : '';
+  const stageFolderPath = stage ? `${taskFolderName}/${stage.id}` : '';
   const [folderEntries, setFolderEntries] = useState<FileEntry[]>([]);
   const [folderExists, setFolderExists] = useState(true);
   const [associatedFiles, setAssociatedFiles] = useState<StepFile[]>([]);

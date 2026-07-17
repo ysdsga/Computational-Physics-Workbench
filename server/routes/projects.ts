@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
+import { projectCreateSchema, projectUpdateSchema, validateBody } from '../validation.js';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ router.get('/:id', (req, res) => {
 });
 
 // Create project
-router.post('/', (req, res) => {
+router.post('/', validateBody(projectCreateSchema), (req, res) => {
   const { name, description, material, working_dir } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required' });
 
@@ -34,7 +35,7 @@ router.post('/', (req, res) => {
 });
 
 // Update project
-router.put('/:id', (req, res) => {
+router.put('/:id', validateBody(projectUpdateSchema), (req, res) => {
   const { name, description, material, working_dir, hpc_config } = req.body;
   const now = new Date().toISOString();
 
