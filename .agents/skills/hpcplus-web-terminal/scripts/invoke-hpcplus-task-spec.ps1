@@ -4,11 +4,14 @@ param(
   [string]$TaskSpecId,
 
   [string]$WorkbenchUrl = 'http://127.0.0.1:3001',
-  [string]$WindowTitle = 'HPCPlus平台',
+  [string]$WindowTitle = '',
   [switch]$PrepareOnly
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($WindowTitle)) {
+  $WindowTitle = 'HPCPlus' + [char]0x5E73 + [char]0x53F0
+}
 $baseUrl = $WorkbenchUrl.TrimEnd('/')
 Import-Module (Join-Path $PSScriptRoot 'HpcPlusBridge.Core.psm1') -Force
 

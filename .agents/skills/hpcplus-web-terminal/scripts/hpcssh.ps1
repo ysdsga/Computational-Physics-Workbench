@@ -1,6 +1,6 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
-  [string]$WindowTitle = 'HPCPlus平台',
+  [string]$WindowTitle = '',
   [Parameter(Mandatory = $true)]
   [string]$ApprovedWorkingDirectory,
   [int]$TimeoutSeconds = 30,
@@ -14,6 +14,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($WindowTitle)) {
+  $WindowTitle = 'HPCPlus' + [char]0x5E73 + [char]0x53F0
+}
 if (-not $Args -or $Args.Count -eq 0) {
   @'
 Usage:

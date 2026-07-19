@@ -12,7 +12,7 @@ param(
   [Parameter(Mandatory = $true, ParameterSetName = 'DryRun')]
   [switch]$DryRun,
 
-  [string]$WindowTitle = 'HPCPlus平台',
+  [string]$WindowTitle = '',
   [Parameter(Mandatory = $true, ParameterSetName = 'Execute')]
   [Parameter(Mandatory = $true, ParameterSetName = 'DryRun')]
   [string]$ApprovedWorkingDirectory,
@@ -29,6 +29,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($WindowTitle)) {
+  # Keep the source ASCII-safe for Windows PowerShell 5.1, which otherwise
+  # decodes UTF-8-without-BOM string literals through the active code page.
+  $WindowTitle = 'HPCPlus' + [char]0x5E73 + [char]0x53F0
+}
 $modulePath = Join-Path $PSScriptRoot 'HpcPlusBridge.Core.psm1'
 Import-Module $modulePath -Force
 
