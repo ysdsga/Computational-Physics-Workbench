@@ -13,6 +13,8 @@ const DEFAULT_HPC: HpcConfig = {
   moduleWannier: 'wannier90/3.1',
   moduleTRIQS: 'triqs/3.3',
   nprocs: '16',
+  connectionMode: 'web-terminal',
+  portalWindowTitle: 'HPCPlus平台',
 };
 
 export default function HPCPage() {
@@ -127,18 +129,17 @@ export default function HPCPage() {
       {/* Config panel (collapsible) */}
       {showConfig && selectedTaskId && (
         <div className="px-5 py-4 border-b border-[#2d2d44] bg-[#252536]">
+          <div className="mb-3 max-w-2xl rounded-lg border border-[#3b82f6]/20 bg-[#3b82f6]/5 px-3 py-2">
+            <p className="text-xs text-[#b8c7e8]">连接方式：桌面 Edge PWA 网页终端</p>
+            <p className="mt-1 text-[10px] text-[#6b6b80]">不使用 SSH、SCP、门户接口或自动上传下载；这里只保存远端计算环境参数。</p>
+          </div>
           <div className="grid grid-cols-2 gap-3 max-w-2xl">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">超算主机</label>
-              <input value={configDraft.host} onChange={e => setConfigDraft({ ...configDraft, host: e.target.value })}
+            <div className="col-span-2">
+              <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">Edge PWA 窗口标题</label>
+              <input value={configDraft.portalWindowTitle ?? 'HPCPlus平台'}
+                onChange={e => setConfigDraft({ ...configDraft, connectionMode: 'web-terminal', portalWindowTitle: e.target.value })}
                 className="w-full bg-[#1a1a2e] border border-[#383850] rounded px-2 py-1.5 text-xs text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]"
-                placeholder="login.shanghai-super.com" />
-            </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">用户名</label>
-              <input value={configDraft.user} onChange={e => setConfigDraft({ ...configDraft, user: e.target.value })}
-                className="w-full bg-[#1a1a2e] border border-[#383850] rounded px-2 py-1.5 text-xs text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]"
-                placeholder="your_username" />
+                placeholder="HPCPlus平台" />
             </div>
             <div className="col-span-2">
               <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">远程工作目录</label>

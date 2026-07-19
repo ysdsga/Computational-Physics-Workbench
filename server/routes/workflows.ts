@@ -6,6 +6,25 @@ import { validateBody, workflowSaveSchema } from '../validation.js';
 
 const router = Router();
 
+function enrichScientificContract(workflow: WorkflowTemplate): WorkflowTemplate {
+  const builtin = BUILTIN_WORKFLOWS.find(item => item.id === workflow.id);
+  return {
+    ...workflow,
+    steps: workflow.steps.map(step => {
+      const builtinStep = builtin?.steps.find(item => item.id === step.id);
+      return {
+        ...step,
+        dependsOn: step.dependsOn ?? builtinStep?.dependsOn ?? [],
+        preconditions: step.preconditions ?? builtinStep?.preconditions ?? [],
+        scientificChecks: step.scientificChecks ?? builtinStep?.scientificChecks ?? [],
+        successCriteria: step.successCriteria ?? builtinStep?.successCriteria ?? [],
+        failureHandling: step.failureHandling ?? builtinStep?.failureHandling ?? [],
+        approvalPoints: step.approvalPoints ?? builtinStep?.approvalPoints ?? [],
+      };
+    }),
+  };
+}
+
 // Seed workflow_templates table from built-in defaults if empty
 function seedIfEmpty() {
   const count = db.prepare('SELECT COUNT(*) as c FROM workflow_templates').get() as { c: number };
@@ -28,10 +47,11 @@ export function getWorkflowFromDB(workflowId: string): WorkflowTemplate | undefi
     | undefined;
   if (row) {
     const parsed = JSON.parse(row.data) as { stages: WorkflowTemplate['stages']; steps: WorkflowTemplate['steps'] };
-    return { id: row.id, name: row.name, description: row.description, stages: parsed.stages, steps: parsed.steps };
+    return enrichScientificContract({ id: row.id, name: row.name, description: row.description, stages: parsed.stages, steps: parsed.steps });
   }
   // Fallback to built-in
-  return BUILTIN_WORKFLOWS.find(w => w.id === workflowId);
+  const builtin = BUILTIN_WORKFLOWS.find(w => w.id === workflowId);
+  return builtin ? enrichScientificContract(builtin) : undefined;
 }
 
 // List all workflow templates (metadata only — for dropdowns)
@@ -49,7 +69,7 @@ router.get('/all/full', (_req, res) => {
     { id: string; name: string; description: string; data: string }[];
   const result = rows.map(row => {
     const parsed = JSON.parse(row.data) as { stages: WorkflowTemplate['stages']; steps: WorkflowTemplate['steps'] };
-    return { id: row.id, name: row.name, description: row.description, stages: parsed.stages, steps: parsed.steps };
+    return enrichScientificContract({ id: row.id, name: row.name, description: row.description, stages: parsed.stages, steps: parsed.steps });
   });
   res.json(result);
 });

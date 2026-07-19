@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
-import { CheckCircle2, Circle, Copy, Terminal, Edit3, Save, ChevronDown, ChevronRight, Upload, Download, Plus, Trash2 } from 'lucide-react';
-import type { StepProgress, StepStatus, HpcConfig } from '../types';
+import { useState, useCallback, useEffect } from 'react';
+import { CheckCircle2, Circle, Copy, Terminal, Edit3, Save, ChevronDown, ChevronRight, Plus, Trash2, ClipboardCheck } from 'lucide-react';
+import type { StepProgress, StepStatus, HpcConfig, TaskSpec, WorkflowStep } from '../types';
 import { useWorkflow, getStagesOf, getStepsOf } from '../contexts/WorkflowContext';
-import { progressApi } from '../api/client';
+import { progressApi, taskSpecsApi } from '../api/client';
+import TaskSpecPanel from './TaskSpecPanel';
 
 interface Props {
   taskId: string;
@@ -54,6 +55,45 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
   const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set(steps.map(s => s.id)));
   const [editingCmds, setEditingCmds] = useState<string | null>(null);
   const [cmdDraft, setCmdDraft] = useState<string[]>([]);
+  const [taskSpecs, setTaskSpecs] = useState<TaskSpec[]>([]);
+  const [creatingSpecKey, setCreatingSpecKey] = useState<string | null>(null);
+
+  const loadTaskSpecs = useCallback(async () => {
+    setTaskSpecs(await taskSpecsApi.list(taskId));
+  }, [taskId]);
+
+  useEffect(() => {
+    void loadTaskSpecs();
+  }, [loadTaskSpecs]);
+
+  const handleSpecChanged = useCallback((updated: TaskSpec) => {
+    setTaskSpecs(previous => previous.map(spec => spec.id === updated.id ? updated : spec));
+  }, []);
+
+  const createTaskSpec = async (step: WorkflowStep, command: string, title: string, key: string, executionPayload = '') => {
+    setCreatingSpecKey(key);
+    try {
+      const created = await taskSpecsApi.create(taskId, {
+        step_id: step.id,
+        title,
+        command,
+        execution_payload: executionPayload,
+        step_dependencies: step.dependsOn ?? [],
+        input_files: step.inputFiles ?? [],
+        expected_outputs: step.outputFiles ?? [],
+        preconditions: step.preconditions ?? [],
+        scientific_checks: step.scientificChecks ?? [],
+        success_criteria: step.successCriteria ?? ['命令退出码为 0', '科学结果由研究者根据输出与收敛证据人工验证'],
+        approval_points: step.approvalPoints ?? [],
+        failure_handling: step.failureHandling ?? [],
+        failure_policy: 'manual-review',
+        timeout_seconds: 30,
+      });
+      setTaskSpecs(previous => [...previous, created]);
+    } finally {
+      setCreatingSpecKey(null);
+    }
+  };
 
   const toggleExpand = (stepId: string) => {
     setExpandedScripts(prev => {
@@ -82,21 +122,17 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
     onProgressChanged();
   };
 
-  if (!hpcConfig || !hpcConfig.host) {
+  if (!hpcConfig || !hpcConfig.remotePath) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center max-w-md">
           <Terminal size={40} className="mx-auto text-[#383850] mb-3" />
           <p className="text-sm text-[#6b6b80] mb-2">未配置超算环境</p>
-          <p className="text-xs text-[#4a4a60]">请在上方填写超算连接信息后查看提交向导</p>
+          <p className="text-xs text-[#4a4a60]">请在上方填写远端工作目录和计算环境参数后查看提交向导</p>
         </div>
       </div>
     );
   }
-
-  // Build wizard steps: prepend upload, append download
-  const uploadCmd = `scp -r ${taskName} ${hpcConfig.user}@${hpcConfig.host}:${hpcConfig.remotePath}/`;
-  const downloadCmd = `scp -r ${hpcConfig.user}@${hpcConfig.host}:${hpcConfig.remotePath}/${taskName}/check/* ./${taskName}/check/`;
 
   // Group steps by stage
   const stepsByStage = stages.map(stage => ({
@@ -108,21 +144,15 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
 
   return (
     <div className="flex-1 overflow-y-auto p-5">
-      {/* Upload step */}
+      {/* Web-terminal transport boundary */}
       <div className="mb-4">
-        <div className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl p-4">
+        <div className="bg-[#1a1a2e] border border-[#3b82f6]/30 rounded-xl p-4">
           <div className="flex items-start gap-3">
-            <Upload size={16} className="text-[#3b82f6] mt-0.5 flex-shrink-0" />
+            <Terminal size={16} className="text-[#3b82f6] mt-0.5 flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-white mb-1">步骤 0: 上传文件到超算</div>
-              <p className="text-xs text-[#9898b0] mb-3">将本地任务文件夹上传到超算远程目录</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs text-[#e2e2f0] bg-[#0d1117] rounded px-3 py-2 font-mono border border-[#2d2d44] break-all">
-                  $ {uploadCmd}
-                </code>
-                <CopyButton text={uploadCmd} label="复制命令" />
-              </div>
-              <p className="text-[10px] text-[#f59e0b]/70 mt-2">在本地终端执行此命令，确保在项目工作目录下运行</p>
+              <div className="text-sm font-medium text-white mb-1">执行通道：HPCPlus 网页终端</div>
+              <p className="text-xs text-[#9898b0]">先由用户在桌面 Edge PWA 中登录并连接终端，再逐条复制或通过受限桥接执行下方命令。</p>
+              <p className="text-[10px] text-[#f59e0b]/80 mt-2">不使用 SSH/SCP，不自动上传下载，不遍历门户；提交作业和修改远端文件前需要单独确认。</p>
             </div>
           </div>
         </div>
@@ -151,6 +181,7 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
 
               const resolvedLsf = effectiveLsf ? replacePlaceholders(effectiveLsf, hpcConfig, taskName, stage.id) : null;
               const resolvedCommands = effectiveCommands.map(cmd => replacePlaceholders(cmd, hpcConfig, taskName, stage.id));
+              const specsForStep = taskSpecs.filter(spec => spec.step_id === step.id);
 
               const isEditing = editingScript === step.id;
               const isExpanded = expandedScripts.has(step.id);
@@ -231,6 +262,14 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
                                   $ {cmd}
                                 </code>
                                 <CopyButton text={cmd} />
+                                <button
+                                  disabled={creatingSpecKey === `${step.id}:command:${i}`}
+                                  onClick={() => void createTaskSpec(step, cmd, `${step.name}：命令 ${i + 1}`, `${step.id}:command:${i}`)}
+                                  className="flex items-center gap-1 whitespace-nowrap rounded bg-[#3b82f6]/10 px-2 py-1 text-[10px] text-[#60a5fa] hover:bg-[#3b82f6]/20 disabled:opacity-50"
+                                  title="生成可审查、可审批的执行计划，不会立即执行"
+                                >
+                                  <ClipboardCheck size={10} /> 生成计划
+                                </button>
                               </div>
                             ))}
                           </div>
@@ -294,6 +333,14 @@ export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, pro
                                   bsub &lt; {step.id}.lsf
                                 </code>
                                 <CopyButton text={`bsub < ${step.id}.lsf`} label="复制" />
+                                <button
+                                  disabled={creatingSpecKey === `${step.id}:submit`}
+                                  onClick={() => void createTaskSpec(step, `bsub < ${step.id}.lsf`, `${step.name}：提交 LSF 作业`, `${step.id}:submit`, resolvedLsf ?? '')}
+                                  className="flex items-center gap-1 rounded bg-[#f59e0b]/10 px-2 py-1 text-[10px] text-[#fbbf24] hover:bg-[#f59e0b]/20 disabled:opacity-50"
+                                  title="提交类计划必须经过显式审批"
+                                >
+                                  <ClipboardCheck size={10} /> 生成提交计划
+                                </button>
                               </div>
                             )}
                           </>
@@ -340,6 +387,10 @@ module load ${`$`}{MODULE_QE}
                         )}
                       </div>
 
+                      {specsForStep.length > 0 && (
+                        <TaskSpecPanel specs={specsForStep} onChanged={handleSpecChanged} />
+                      )}
+
                       {/* Tips */}
                       {step.tips && (
                         <p className="text-[10px] text-[#f59e0b]/70 mt-2 flex items-start gap-1">
@@ -354,26 +405,6 @@ module load ${`$`}{MODULE_QE}
           </div>
         </div>
       ))}
-
-      {/* Download step */}
-      <div className="mb-4">
-        <div className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <Download size={16} className="text-[#22c55e] mt-0.5 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-white mb-1">最后一步: 下载结果到本地</div>
-              <p className="text-xs text-[#9898b0] mb-3">将超算上的计算结果下载回本地</p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs text-[#e2e2f0] bg-[#0d1117] rounded px-3 py-2 font-mono border border-[#2d2d44] break-all">
-                  $ {downloadCmd}
-                </code>
-                <CopyButton text={downloadCmd} label="复制命令" />
-              </div>
-              <p className="text-[10px] text-[#f59e0b]/70 mt-2">在本地终端执行，下载 check 阶段的结果文件</p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

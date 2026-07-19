@@ -126,6 +126,9 @@ export default function ExperiencePage() {
                       </span>
                     </div>
                   )}
+                  {exp.source_task_spec_id && (
+                    <div className="mb-2 text-[10px] font-mono text-[#6b6b80]">来源 Task Spec：{exp.source_task_spec_id}</div>
+                  )}
                   <div className="text-[10px] text-[#4a4a60]">{new Date(exp.updated_at).toLocaleString('zh-CN')}</div>
                 </div>
               );

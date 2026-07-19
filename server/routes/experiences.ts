@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
+import { HttpError } from '../errors.js';
 import { experienceCreateSchema, experienceUpdateSchema, validateBody } from '../validation.js';
 
 const router = Router();
@@ -32,17 +33,37 @@ router.get('/:id', (req, res) => {
 
 // Create experience
 router.post('/', validateBody(experienceCreateSchema), (req, res) => {
-  const { title, content, tags, related_project_id, related_task_id, related_step_id } = req.body;
+  const { title, content, tags, source_task_spec_id } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Title and content are required' });
+
+  let relatedProjectId = req.body.related_project_id ?? null;
+  let relatedTaskId = req.body.related_task_id ?? null;
+  let relatedStepId = req.body.related_step_id ?? null;
+  if (source_task_spec_id) {
+    const source = db.prepare(`
+      SELECT ts.task_id, ts.step_id, t.project_id
+      FROM task_specs ts JOIN tasks t ON t.id = ts.task_id
+      WHERE ts.id = ?
+    `).get(source_task_spec_id) as { task_id: string; step_id: string; project_id: string } | undefined;
+    if (!source) throw new HttpError(400, 'Source Task Spec does not exist');
+    if (relatedProjectId && relatedProjectId !== source.project_id) throw new HttpError(400, 'Related project conflicts with source Task Spec');
+    if (relatedTaskId && relatedTaskId !== source.task_id) throw new HttpError(400, 'Related task conflicts with source Task Spec');
+    if (relatedStepId && relatedStepId !== source.step_id) throw new HttpError(400, 'Related step conflicts with source Task Spec');
+    relatedProjectId = source.project_id;
+    relatedTaskId = source.task_id;
+    relatedStepId = source.step_id;
+  }
 
   const id = `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date().toISOString();
   const tagsJson = JSON.stringify(tags || []);
 
-  db.prepare(`INSERT INTO experiences (id, title, content, tags, related_project_id, related_task_id, related_step_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO experiences (
+      id, title, content, tags, related_project_id, related_task_id, related_step_id,
+      source_task_spec_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id, title, content, tagsJson,
-    related_project_id || null, related_task_id || null, related_step_id || null,
+    relatedProjectId, relatedTaskId, relatedStepId, source_task_spec_id ?? null,
     now, now
   );
 

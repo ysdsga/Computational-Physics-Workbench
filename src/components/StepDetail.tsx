@@ -3,6 +3,7 @@ import { X, CheckCircle2, Circle, SkipForward, PlayCircle, Save, Plus, Trash2, F
 import type { WorkflowStep, StepStatus, StepProgress, StepFile, FileEntry } from '../types';
 import { useWorkflow, getStageForStepOf } from '../contexts/WorkflowContext';
 import { progressApi, stepFilesApi, filesApi } from '../api/client';
+import ScientificContract from './ScientificContract';
 
 interface Props {
   step: WorkflowStep;
@@ -161,6 +162,8 @@ export default function StepDetail({ step, taskId, workflowId, projectId, taskFo
           <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">说明</label>
           <p className="text-sm text-[#9898b0] leading-relaxed bg-[#252536] rounded-lg p-3">{step.description}</p>
         </div>
+
+        <ScientificContract step={step} />
 
         {/* Input/Output Files (template hints) */}
         {step.inputFiles && step.inputFiles.length > 0 && (

@@ -109,6 +109,160 @@ const migrations = [
     const update = db.prepare('UPDATE tasks SET folder_name = ? WHERE id = ?');
     for (const task of tasks) update.run(sanitizeTaskFolderName(task.name), task.id);
   } },
+  { version: 5, name: 'task specs and execution audit', run: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_specs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        step_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        remote_workdir TEXT NOT NULL,
+        command TEXT NOT NULL,
+        execution_payload TEXT NOT NULL DEFAULT '',
+        dependencies TEXT NOT NULL DEFAULT '[]',
+        step_dependencies TEXT NOT NULL DEFAULT '[]',
+        input_files TEXT NOT NULL DEFAULT '[]',
+        expected_outputs TEXT NOT NULL DEFAULT '[]',
+        preconditions TEXT NOT NULL DEFAULT '[]',
+        scientific_checks TEXT NOT NULL DEFAULT '[]',
+        success_criteria TEXT NOT NULL DEFAULT '[]',
+        approval_points TEXT NOT NULL DEFAULT '[]',
+        failure_handling TEXT NOT NULL DEFAULT '[]',
+        failure_policy TEXT NOT NULL DEFAULT 'stop',
+        timeout_seconds INTEGER NOT NULL DEFAULT 30,
+        risk_class TEXT NOT NULL DEFAULT 'unclassified',
+        approval_required INTEGER NOT NULL DEFAULT 1,
+        command_hash TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_events (
+        id TEXT PRIMARY KEY,
+        task_spec_id TEXT NOT NULL REFERENCES task_specs(id) ON DELETE CASCADE,
+        decision TEXT NOT NULL,
+        command_hash TEXT NOT NULL,
+        actor TEXT NOT NULL DEFAULT 'user',
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS command_runs (
+        id TEXT PRIMARY KEY,
+        task_spec_id TEXT NOT NULL REFERENCES task_specs(id) ON DELETE CASCADE,
+        attempt_no INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'executing',
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        exit_code INTEGER,
+        output_summary TEXT NOT NULL DEFAULT '',
+        evidence TEXT NOT NULL DEFAULT '[]',
+        error_message TEXT NOT NULL DEFAULT '',
+        verification_note TEXT NOT NULL DEFAULT '',
+        command_hash TEXT NOT NULL DEFAULT '',
+        task_spec_snapshot TEXT NOT NULL DEFAULT '{}',
+        UNIQUE(task_spec_id, attempt_no)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_task_specs_task_step ON task_specs(task_id, step_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_approval_events_spec ON approval_events(task_spec_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_command_runs_spec ON command_runs(task_spec_id, attempt_no);
+    `);
+  } },
+  { version: 6, name: 'command run task spec snapshot', run: () => {
+    if (!hasColumn('command_runs', 'command_hash')) {
+      db.exec("ALTER TABLE command_runs ADD COLUMN command_hash TEXT NOT NULL DEFAULT ''");
+    }
+    if (!hasColumn('command_runs', 'task_spec_snapshot')) {
+      db.exec("ALTER TABLE command_runs ADD COLUMN task_spec_snapshot TEXT NOT NULL DEFAULT '{}'");
+    }
+  } },
+  { version: 7, name: 'scientific task spec contract', run: () => {
+    const columns = [
+      ['step_dependencies', "TEXT NOT NULL DEFAULT '[]'"],
+      ['input_files', "TEXT NOT NULL DEFAULT '[]'"],
+      ['preconditions', "TEXT NOT NULL DEFAULT '[]'"],
+      ['scientific_checks', "TEXT NOT NULL DEFAULT '[]'"],
+      ['approval_points', "TEXT NOT NULL DEFAULT '[]'"],
+      ['failure_handling', "TEXT NOT NULL DEFAULT '[]'"],
+    ] as const;
+    for (const [column, definition] of columns) {
+      if (!hasColumn('task_specs', column)) {
+        db.exec(`ALTER TABLE task_specs ADD COLUMN ${column} ${definition}`);
+      }
+    }
+  } },
+  { version: 8, name: 'lsf scheduler monitoring audit', run: () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduler_jobs (
+        id TEXT PRIMARY KEY,
+        task_spec_id TEXT NOT NULL REFERENCES task_specs(id) ON DELETE CASCADE,
+        scheduler TEXT NOT NULL DEFAULT 'lsf',
+        job_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'SUBMITTED',
+        submitted_at TEXT NOT NULL,
+        last_polled_at TEXT,
+        next_poll_after TEXT,
+        last_log_read_at TEXT,
+        next_log_read_after TEXT,
+        latest_summary TEXT NOT NULL DEFAULT '',
+        error_message TEXT NOT NULL DEFAULT '',
+        UNIQUE(task_spec_id, job_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS scheduler_poll_events (
+        id TEXT PRIMARY KEY,
+        scheduler_job_id TEXT NOT NULL REFERENCES scheduler_jobs(id) ON DELETE CASCADE,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'executing',
+        scheduler_state TEXT NOT NULL DEFAULT '',
+        raw_summary TEXT NOT NULL DEFAULT '',
+        remote_exit_code INTEGER,
+        error_message TEXT NOT NULL DEFAULT '',
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_spec ON scheduler_jobs(task_spec_id, submitted_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduler_polls_job ON scheduler_poll_events(scheduler_job_id, started_at);
+    `);
+  } },
+  { version: 9, name: 'bounded scheduler log read audit', run: () => {
+    if (!hasColumn('scheduler_jobs', 'last_log_read_at')) {
+      db.exec('ALTER TABLE scheduler_jobs ADD COLUMN last_log_read_at TEXT');
+    }
+    if (!hasColumn('scheduler_jobs', 'next_log_read_after')) {
+      db.exec('ALTER TABLE scheduler_jobs ADD COLUMN next_log_read_after TEXT');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS scheduler_log_events (
+        id TEXT PRIMARY KEY,
+        scheduler_job_id TEXT NOT NULL REFERENCES scheduler_jobs(id) ON DELETE CASCADE,
+        relative_path TEXT NOT NULL,
+        line_count INTEGER NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'executing',
+        output_summary TEXT NOT NULL DEFAULT '',
+        remote_exit_code INTEGER,
+        error_message TEXT NOT NULL DEFAULT '',
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduler_logs_job ON scheduler_log_events(scheduler_job_id, started_at);
+    `);
+  } },
+  { version: 10, name: 'experience task spec provenance', run: () => {
+    if (!hasColumn('experiences', 'source_task_spec_id')) {
+      db.exec('ALTER TABLE experiences ADD COLUMN source_task_spec_id TEXT REFERENCES task_specs(id) ON DELETE SET NULL');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_experiences_task_spec ON experiences(source_task_spec_id, updated_at)');
+  } },
+  { version: 11, name: 'task spec execution payload snapshot', run: () => {
+    if (!hasColumn('task_specs', 'execution_payload')) {
+      db.exec("ALTER TABLE task_specs ADD COLUMN execution_payload TEXT NOT NULL DEFAULT ''");
+    }
+  } },
 ];
 
 const applyMigration = db.transaction((migration: typeof migrations[number]) => {

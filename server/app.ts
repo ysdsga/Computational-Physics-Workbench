@@ -10,6 +10,8 @@ import progressRouter from './routes/progress.js';
 import filesRouter from './routes/files.js';
 import experiencesRouter from './routes/experiences.js';
 import workflowsRouter from './routes/workflows.js';
+import taskSpecsRouter from './routes/taskSpecs.js';
+import schedulerJobsRouter from './routes/schedulerJobs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +23,9 @@ export function createApp() {
 
   app.use('/api/workflows', workflowsRouter);
   app.use('/api/projects', projectsRouter);
+  app.use('/api/tasks/:taskId/task-specs', taskSpecsRouter);
+  app.use('/api/task-specs', taskSpecsRouter);
+  app.use('/api/scheduler-jobs', schedulerJobsRouter);
   app.use('/api/tasks', tasksRouter);
   app.use('/api/experiences', experiencesRouter);
   app.use('/api/projects/:projectId/tasks', tasksRouter);
@@ -63,4 +68,3 @@ export function createApp() {
 
   return app;
 }
-

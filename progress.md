@@ -2,6 +2,21 @@
 
 > 最后更新：2026-07-17
 
+## HPCPlus 网页终端通道（2026-07-19）
+
+- HPC 向导切换为桌面 Edge PWA 网页终端模式，移除 SSH/SCP 上传下载引导。
+- 新增项目内 `.agents/skills/hpcplus-web-terminal/`，提供单命令桥接、命令风险分级、并发锁、输出标记和失败即停策略。
+- 新增 Task Spec、不可变审批事件和 command run 审计；审批绑定完整内容哈希，编辑后必须重新检查和审批。
+- LSF 提交计划把完整脚本作为 `execution_payload` 纳入风险分类、内容哈希、审批对话框和执行快照，避免只审批 `bsub` 外壳。
+- One-shot 工作流的每个步骤新增结构化依赖、前置条件、科学检查、成功判据、失败处理和人工审批点；旧数据库模板读取时安全补充缺失字段。
+- HPC 向导可从每条模板命令或 LSF 提交命令生成计划，并分开记录技术执行与人工科学验证。
+- 新增受控 Task Spec 执行器；成功进入 `verifying`，超时或发送后失联进入 `unknown`，不自动重试。
+- 桥接完成判定要求同一次执行的开始/结束标记对；精确识别新增的 `403 Forbidden`、SSCT 断线和会话过期文本并立即安全停止，历史断线后已重连不会误报。
+- 所有桥接执行（包括 LSF 状态查询）必须携带并核验 Task Spec 已审批工作目录；用户命令仅允许相对路径，绝对/home-relative 路径被前后端一致阻止。
+- 新增 LSF 作业登记、`monitoring` 状态、不可变轮询/日志事件；状态查询和有界日志读取均由服务端生成命令并强制至少 60 秒间隔。
+- Task Spec 结束、失败、阻塞或未知后可由研究者人工沉淀经验；经验自动链接来源计划、项目、任务和步骤，不自动生成科学结论。
+- 桥接层不访问门户 API、不遍历网页、不传输文件；开发和回归测试没有执行任何真实 HPC 命令。
+
 ---
 
 ## 项目位置
@@ -50,7 +65,7 @@ npm run build      # 重新构建前端
 
 ### 1. 后端搭建 ✅
 - Express 5 服务器，端口 3001
-- SQLite 数据库初始化，5 张表：`projects`, `tasks`, `step_progress`, `step_files`, `experiences`
+- SQLite 数据库初始化，包含项目、任务、工作流、步骤进度、经验、Task Spec、审批事件和执行审计等表
 - 完整 REST API 路由：
   - `/api/workflows` — 工作流模板列表
   - `/api/projects` — 项目 CRUD
@@ -60,6 +75,7 @@ npm run build      # 重新构建前端
   - `/api/projects/:pid/files` — 文件仓库（浏览/创建目录/读取文件）
   - `/api/experiences` — 经验库 CRUD
   - `/api/step-files/:id` — 删除文件关联
+  - `/api/tasks/:tid/task-specs`、`/api/task-specs/*` — 计划、审批、执行与验证审计
 - **修复的两个 Express 5 坑**：
   - Router 需要 `{ mergeParams: true }` 才能访问父路由参数
   - 不支持 `app.get('*', ...)`，改用中间件做 SPA fallback

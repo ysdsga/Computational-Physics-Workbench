@@ -44,7 +44,7 @@ const DFT_DMFT_ONESHOT_STAGES: WorkflowStage[] = [
   },
 ];
 
-const DFT_DMFT_ONESHOT_STEPS: WorkflowStep[] = [
+const DFT_DMFT_ONESHOT_RAW_STEPS: WorkflowStep[] = [
   // === Stage 0: Preparation ===
   {
     id: 'prep-01',
@@ -345,6 +345,104 @@ mpirun -np ${`$`}{NPROCS} python solid_dmft.py dmft_config.ini`,
     tips: '自洽误差应单调下降或在某个小值附近波动。如果发散或振荡过大，需要检查参数。',
   },
 ];
+
+const STEP_DEPENDENCIES: Record<string, string[]> = {
+  'prep-02': ['prep-01'],
+  'prep-03': ['prep-01'],
+  'prep-04': ['prep-01'],
+  'prep-05': ['prep-04'],
+  'prep-06': ['prep-01'],
+  'dft-01': ['prep-03'],
+  'dft-02': ['prep-03'],
+  'dft-03': ['dft-02'],
+  'dft-04': ['dft-02'],
+  'wan-01': ['prep-04', 'dft-03'],
+  'wan-02': ['dft-03', 'wan-01'],
+  'wan-03': ['wan-02'],
+  'wan-04': ['dft-04'],
+  'wan-05': ['wan-03'],
+  'dmft-01': ['prep-05', 'wan-05'],
+  'dmft-02': ['dmft-01', 'wan-05'],
+  'dmft-03': ['prep-06', 'dmft-02'],
+  'chk-01': ['dmft-03'],
+  'chk-02': ['dmft-03'],
+};
+
+const SCIENTIFIC_CHECKS: Record<string, string[]> = {
+  'prep-01': ['研究目标、物理量、方法适用范围和所需精度已经明确记录'],
+  'prep-02': ['测试体系的已知基准与软件版本记录完整，测试仅用于验证环境而非替代目标体系验证'],
+  'prep-03': ['结构、元素、赝势来源与版本一致；所有数值参数均有研究者给出的依据'],
+  'prep-04': ['投影轨道、能窗和能带数来自已审查的 DFT/PDOS 证据，而非自动猜测'],
+  'prep-05': ['关联原子、壳层、轨道顺序和局域坐标与 Wannier 模型一致'],
+  'prep-06': ['U/J、双计数、温度、求解器及统计参数均由研究者明确确认并记录来源'],
+  'dft-01': ['结构优化达到项目定义的力/应力判据，最终结构没有非预期对称性或磁态变化'],
+  'dft-02': ['电子自洽达到输入中定义的目标；k 网格、截断能和赝势收敛依据已经记录'],
+  'dft-03': ['使用已确认的 SCF 电荷密度，k 点集合与后续 Wannier 接口要求一致'],
+  'dft-04': ['费米能附近的轨道成分证据足以支持后续投影选择'],
+  'wan-01': ['nnkp 与已确认的晶格、k 点集合、投影和能窗配置一致'],
+  'wan-02': ['重叠矩阵和投影矩阵完整生成，未出现接口或 Bloch 态不一致错误'],
+  'wan-03': ['Wannier 展宽与收敛行为已检查，未把程序退出码当作模型质量判据'],
+  'wan-04': ['目标能区的轨道成分已经通过投影态密度证据核对'],
+  'wan-05': ['在研究者指定的目标能窗和容差内核对 Wannier/TB 与 DFT 能带'],
+  'dmft-01': ['Converter 壳层定义与已验证的 Wannier 哈密顿量和关联子空间一致'],
+  'dmft-02': ['HDF5 中壳层、轨道维数、占据和 hopping 信息与输入模型一致'],
+  'dmft-03': ['自能、占据、符号问题、Monte Carlo 统计和 DMFT 收敛按项目判据检查'],
+  'chk-01': ['物理量的稳定性、误差和异常值已经结合求解器统计共同判断'],
+  'chk-02': ['收敛序列不存在未解释的发散、持续振荡或数据缺失'],
+};
+
+const APPROVAL_POINTS: Record<string, string[]> = {
+  'prep-01': ['研究者确认研究问题、方法边界和不可由智能体决定的科学参数'],
+  'prep-02': ['研究者确认测试体系、配置文件和计算资源后再运行环境测试'],
+  'prep-03': ['研究者确认结构、赝势、k/q 网格、截断能和收敛阈值'],
+  'prep-04': ['研究者确认投影轨道、投影窗口、冻结窗口和能带数'],
+  'prep-05': ['研究者确认关联壳层、轨道顺序和局域坐标映射'],
+  'prep-06': ['研究者确认 U/J、双计数、温度、求解器和统计参数'],
+  'dft-01': ['研究者确认结构自由度、磁性设置和结构优化判据'],
+  'dft-02': ['研究者确认赝势、网格、截断能和电子收敛设置'],
+  'dft-03': ['研究者确认 NSCF k 点集合与 Wannier 计划一致'],
+  'wan-01': ['研究者确认投影、窗口和能带数后再生成接口数据'],
+  'wan-03': ['研究者确认 disentanglement 和投影设置后再构建哈密顿量'],
+  'dmft-01': ['研究者确认关联壳层定义与 Wannier 子空间一致'],
+  'dmft-02': ['研究者确认 Converter 输入映射后再写入 HDF5'],
+  'dmft-03': ['研究者确认 U/J、双计数、温度、求解器、资源和停止条件后再提交'],
+};
+
+const DEFAULT_FAILURE_HANDLING = [
+  '停止所有依赖此步骤的后续动作并保留原始输入、输出和调度日志',
+  '先诊断失败原因；如需修改命令或科学设置，创建新内容哈希并重新审批',
+  '超时、输出不完整或远端状态未知时标记 unknown，禁止自动重试',
+];
+
+const DFT_DMFT_ONESHOT_STEPS: WorkflowStep[] = DFT_DMFT_ONESHOT_RAW_STEPS.map(step => {
+  const dependencies = STEP_DEPENDENCIES[step.id] ?? [];
+  const inputPrecondition = step.inputFiles?.length
+    ? ['所需输入文件已存在，文件版本、来源和所属任务目录已经核对']
+    : [];
+  const dependencyPrecondition = dependencies.length
+    ? ['所有前置步骤已经完成或由研究者明确标记为跳过']
+    : [];
+  const technicalCriteria = step.commands?.length
+    ? ['命令退出码为 0，且输出中没有未处理的错误终止标记']
+    : [];
+  const outputCriteria = step.outputFiles?.length
+    ? ['预期输出文件存在、非空，并且属于当前任务和当前步骤']
+    : [];
+
+  return {
+    ...step,
+    dependsOn: dependencies,
+    preconditions: [...dependencyPrecondition, ...inputPrecondition],
+    scientificChecks: SCIENTIFIC_CHECKS[step.id] ?? ['研究者已根据步骤目标检查结果，未以程序退出码代替科学判断'],
+    successCriteria: [
+      ...technicalCriteria,
+      ...outputCriteria,
+      '研究者确认所有科学检查项均有可追溯证据',
+    ],
+    failureHandling: DEFAULT_FAILURE_HANDLING,
+    approvalPoints: APPROVAL_POINTS[step.id] ?? [],
+  };
+});
 
 // === Workflow Registry ===
 export const WORKFLOWS: WorkflowTemplate[] = [

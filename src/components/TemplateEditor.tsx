@@ -123,8 +123,10 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
     });
   };
 
-  // === Array field helpers (commands, inputFiles, outputFiles) ===
-  const updateArrayField = (stepId: string, field: 'commands' | 'inputFiles' | 'outputFiles', value: string[]) => {
+  // === Array field helpers ===
+  const updateArrayField = (stepId: string, field:
+    'commands' | 'inputFiles' | 'outputFiles' | 'dependsOn' | 'preconditions' |
+    'scientificChecks' | 'successCriteria' | 'failureHandling' | 'approvalPoints', value: string[]) => {
     updateStep(stepId, { [field]: value } as Partial<WorkflowStep>);
   };
 
@@ -307,6 +309,18 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
                             onChange={v => updateArrayField(step.id, 'inputFiles', v)} placeholder="scf.in" />
                           <ArrayField label="输出文件" values={step.outputFiles ?? []}
                             onChange={v => updateArrayField(step.id, 'outputFiles', v)} placeholder="scf.out" />
+                          <ArrayField label="前置步骤 ID" values={step.dependsOn ?? []}
+                            onChange={v => updateArrayField(step.id, 'dependsOn', v)} placeholder="dft-02" />
+                          <ArrayField label="前置条件" values={step.preconditions ?? []}
+                            onChange={v => updateArrayField(step.id, 'preconditions', v)} placeholder="输入文件与版本已经核对" />
+                          <ArrayField label="科学检查项" values={step.scientificChecks ?? []}
+                            onChange={v => updateArrayField(step.id, 'scientificChecks', v)} placeholder="按项目定义的判据检查收敛" />
+                          <ArrayField label="成功判据" values={step.successCriteria ?? []}
+                            onChange={v => updateArrayField(step.id, 'successCriteria', v)} placeholder="预期输出存在且科学检查通过" />
+                          <ArrayField label="失败处理" values={step.failureHandling ?? []}
+                            onChange={v => updateArrayField(step.id, 'failureHandling', v)} placeholder="停止依赖步骤并保留原始日志" />
+                          <ArrayField label="人工审批点" values={step.approvalPoints ?? []}
+                            onChange={v => updateArrayField(step.id, 'approvalPoints', v)} placeholder="研究者确认科学参数后再执行" />
                           <Field label="LSF 脚本模板">
                             <textarea value={step.lsfScript ?? ''} onChange={e => updateStep(step.id, { lsfScript: e.target.value })}
                               rows={6} placeholder="#BSUB -J job_name..."

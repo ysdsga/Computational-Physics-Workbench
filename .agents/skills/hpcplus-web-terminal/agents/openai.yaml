@@ -1,0 +1,4 @@
+interface:
+  display_name: "HPCPlus Web Terminal"
+  short_description: "Relay reviewed commands through HPCPlus web terminal"
+  default_prompt: "Use $hpcplus-web-terminal to run one reviewed command through the open HPCPlus Edge web terminal."

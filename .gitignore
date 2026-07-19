@@ -29,6 +29,8 @@ repository/
 # Test and coverage output
 coverage/
 .vite/
+/.dft-dmft-test-*
+/output/playwright/
 
 # Editor directories and files
 .vscode/*

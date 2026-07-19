@@ -1,4 +1,4 @@
-import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate } from '../types';
+import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, TaskSpec, ExecutionEvidence } from '../types';
 
 const BASE = '/api';
 
@@ -52,6 +52,66 @@ export const progressApi = {
     api<StepProgress>(`/tasks/${taskId}/progress/${stepId}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
+// === Task Specs and execution audit ===
+export const taskSpecsApi = {
+  list: (taskId: string) => api<TaskSpec[]>(`/tasks/${taskId}/task-specs`),
+  create: (taskId: string, data: {
+    step_id: string;
+    title: string;
+    command: string;
+    execution_payload?: string;
+    remote_workdir?: string;
+    dependencies?: string[];
+    step_dependencies?: string[];
+    input_files?: string[];
+    expected_outputs?: string[];
+    preconditions?: string[];
+    scientific_checks?: string[];
+    success_criteria?: string[];
+    approval_points?: string[];
+    failure_handling?: string[];
+    failure_policy?: 'stop' | 'manual-review';
+    timeout_seconds?: number;
+  }) => api<TaskSpec>(`/tasks/${taskId}/task-specs`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (specId: string, data: Partial<{
+    title: string;
+    command: string;
+    execution_payload: string;
+    remote_workdir: string;
+    dependencies: string[];
+    step_dependencies: string[];
+    input_files: string[];
+    expected_outputs: string[];
+    preconditions: string[];
+    scientific_checks: string[];
+    success_criteria: string[];
+    approval_points: string[];
+    failure_handling: string[];
+    failure_policy: 'stop' | 'manual-review';
+    timeout_seconds: number;
+  }>) => api<TaskSpec>(`/task-specs/${specId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  check: (specId: string) => api<TaskSpec>(`/task-specs/${specId}/check`, { method: 'POST', body: '{}' }),
+  approve: (specId: string, decision: 'approved' | 'rejected', note?: string) =>
+    api<TaskSpec>(`/task-specs/${specId}/approvals`, {
+      method: 'POST',
+      body: JSON.stringify({ decision, actor: 'user', note }),
+    }),
+  startRun: (specId: string) => api<TaskSpec>(`/task-specs/${specId}/runs`, { method: 'POST', body: '{}' }),
+  finishRun: (runId: string, data: {
+    status: 'completed' | 'failed' | 'unknown';
+    exit_code?: number | null;
+    output_summary?: string;
+    evidence?: ExecutionEvidence[];
+    error_message?: string;
+    scheduler_job?: { scheduler: 'lsf'; job_id: string };
+  }) => api<TaskSpec>(`/task-specs/runs/${runId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  verify: (specId: string, data: {
+    decision: 'completed' | 'failed' | 'blocked';
+    note?: string;
+    evidence?: ExecutionEvidence[];
+  }) => api<TaskSpec>(`/task-specs/${specId}/verify`, { method: 'POST', body: JSON.stringify(data) }),
+};
+
 // === Step Files ===
 export const stepFilesApi = {
   list: (taskId: string, stepId: string) => api<StepFile[]>(`/tasks/${taskId}/progress/${stepId}/files`),
@@ -80,7 +140,7 @@ export const experiencesApi = {
     const q = qs.toString();
     return api<Experience[]>(`/experiences${q ? `?${q}` : ''}`);
   },
-  create: (data: { title: string; content: string; tags?: string[]; related_project_id?: string; related_task_id?: string; related_step_id?: string }) =>
+  create: (data: { title: string; content: string; tags?: string[]; related_project_id?: string; related_task_id?: string; related_step_id?: string; source_task_spec_id?: string }) =>
     api<Experience>('/experiences', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<{ title: string; content: string; tags: string[]; related_project_id: string; related_task_id: string; related_step_id: string }>) =>
     api<Experience>(`/experiences/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

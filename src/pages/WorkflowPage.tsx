@@ -7,6 +7,7 @@ import Flowchart from '../components/Flowchart';
 import StepDetail from '../components/StepDetail';
 import ProgressBar from '../components/ProgressBar';
 import TemplateEditor from '../components/TemplateEditor';
+import ScientificContract from '../components/ScientificContract';
 import type { Project, Task, StepProgress, WorkflowStep } from '../types';
 
 export default function WorkflowPage() {
@@ -202,6 +203,7 @@ function PreviewStepDetail({ step, workflowId, onClose }: { step: WorkflowStep; 
           <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">说明</label>
           <p className="text-sm text-[#9898b0] leading-relaxed bg-[#252536] rounded-lg p-3">{step.description}</p>
         </div>
+        <ScientificContract step={step} />
         {step.inputFiles && step.inputFiles.length > 0 && (
           <div>
             <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">需要准备的文件</label>

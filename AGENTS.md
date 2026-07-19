@@ -75,6 +75,13 @@ npm run build
 - 不提交 `node_modules/`、`dist/`、数据库运行文件或大体积计算输出。若初始化 Git，应先完善 `.gitignore` 再添加文件。
 - API 或 UI 中显示 shell/LSF 命令时，把它们视为用户数据；不要未经确认自动在本机或 HPC 执行。
 
+## HPCPlus 网页终端边界
+
+- HPCPlus 只作为用户手动登录并连接后的网页版命令行通道。不要对门户做 DOM/API 爬取、菜单遍历、自动上传下载或并发页面操作。
+- 项目内桥接 skill 位于 `.agents/skills/hpcplus-web-terminal/`。它只允许单会话、单命令、有界输出；出现 403、断线、超时或输出标记缺失时立即停止，禁止自动重试。
+- 执行写文件、移动/删除、提交/取消作业等远端状态变更前，必须展示完整命令并取得用户针对该动作的明确确认。
+- `C:\Users\pikaqiu\.workbuddy-ai\skills\computational-physics-workbench` 以及 `D:\Documents\Try\a\Skill-Workspace Anchor\` 下的旧桥接脚本只可作为参考，禁止修改。
+
 ## 修改工作方式
 
 1. 先阅读与任务直接相关的实现、类型、API 和文档，不只依赖 `progress.md`。
@@ -98,6 +105,6 @@ npm run build
 - 工作流模板数据库持久化、可视化编辑和重置。
 - 步骤笔记、自定义命令、文件关联。
 - 经验库。
-- HPC 配置与 LSF 提交向导（复制粘贴模式，不直接连接 SSH）。
+- HPC 配置与 LSF 提交向导（桌面 Edge PWA 网页终端模式，不连接 SSH，不自动传输文件）。
 
 继续开发前可参考 `progress.md` 和 `doc/`，但最终以当前代码、数据库 schema 和实际运行结果为准。
