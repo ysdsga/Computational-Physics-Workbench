@@ -43,7 +43,10 @@ Assert-True ($background.IsBlocked -and $background.BlockedReasons -contains 'de
 $scoped = New-HpcPlusScopedCommand -Command 'pwd; hostname' -ApprovedWorkingDirectory "/home/user/DFT DMFT/任务"
 Assert-True ($scoped -match '^cd -- ') 'scoped command should set the approved directory'
 Assert-True ($scoped -match '\$PWD') 'scoped command should verify the resulting directory'
-Assert-True ($scoped -match 'pwd; hostname$') 'scoped command should preserve the reviewed command'
+Assert-True ($scoped -match '\( pwd; hostname \)$') 'scoped command should group the complete reviewed command behind the directory guard'
+$guardPosition = $scoped.IndexOf('&& (')
+$separatorPosition = $scoped.IndexOf(';')
+Assert-True ($guardPosition -ge 0 -and $separatorPosition -gt $guardPosition) 'command separators must remain inside the guarded group'
 $invalidScopeFailed = $false
 try { New-HpcPlusScopedCommand -Command 'pwd' -ApprovedWorkingDirectory '/home/user/../other' | Out-Null } catch { $invalidScopeFailed = $true }
 Assert-True $invalidScopeFailed 'scoped command should reject a non-normalized directory'

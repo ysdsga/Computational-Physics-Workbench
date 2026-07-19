@@ -147,7 +147,9 @@ function New-HpcPlusScopedCommand {
   }
 
   $quoted = "'" + $workdir.Replace("'", "'`"'`"'") + "'"
-  "cd -- $quoted && [ `"`$PWD`" = $quoted ] && $Command"
+  # Group the entire reviewed command so shell separators inside it cannot
+  # escape the approved-directory guard when cd or the PWD check fails.
+  "cd -- $quoted && [ `"`$PWD`" = $quoted ] && ( $Command )"
 }
 
 function Get-HpcPlusEnvelopeResult {

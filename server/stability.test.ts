@@ -8,6 +8,16 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 let app: Express;
 let db: BetterSqlite3.Database;
+let recoverInterruptedExecutionState: (
+  database?: BetterSqlite3.Database,
+  recoveredAt?: string,
+) => {
+  command_runs: number;
+  task_specs: number;
+  scheduler_polls: number;
+  scheduler_jobs: number;
+  scheduler_logs: number;
+};
 let tempRoot: string;
 let workingDir: string;
 
@@ -51,6 +61,7 @@ beforeAll(async () => {
   process.env.DFT_DMFT_DB_PATH = dbPath;
   const dbModule = await import('./db.js');
   db = dbModule.default;
+  recoverInterruptedExecutionState = dbModule.recoverInterruptedExecutionState;
   const appModule = await import('./app.js');
   app = appModule.createApp();
 });
@@ -120,6 +131,98 @@ describe('stability foundations', () => {
       .get('/api/projects/proj-old/files')
       .query({ path: '../outside' })
       .expect(400);
+  });
+
+  it('recovers interrupted command, scheduler poll and bounded log records as unknown without retry', async () => {
+    await request(app)
+      .put('/api/projects/proj-old')
+      .send({
+        hpc_config: JSON.stringify({
+          host: '',
+          user: '',
+          remotePath: '/home/bnu001/dft-dmft',
+          moduleQE: 'qe/7.2',
+          moduleWannier: 'wannier90/3.1',
+          moduleTRIQS: 'triqs/3.3',
+          nprocs: '16',
+          connectionMode: 'web-terminal',
+          portalWindowTitle: 'HPCPlus平台',
+        }),
+      })
+      .expect(200);
+
+    const commandSpec = await request(app)
+      .post('/api/tasks/task-old/task-specs')
+      .send({
+        step_id: 'dft-02',
+        title: '中断命令恢复',
+        command: 'pwd',
+        step_dependencies: [],
+        approval_points: [],
+        scientific_checks: [],
+      })
+      .expect(201);
+    const commandReady = await request(app)
+      .post(`/api/task-specs/${commandSpec.body.id}/check`)
+      .send({})
+      .expect(200);
+    expect(commandReady.body.status).toBe('ready');
+    const commandExecuting = await request(app)
+      .post(`/api/task-specs/${commandSpec.body.id}/runs`)
+      .send({})
+      .expect(201);
+    const commandRunId = commandExecuting.body.runs[0].id as string;
+
+    const monitorSpec = await request(app)
+      .post('/api/tasks/task-old/task-specs')
+      .send({
+        step_id: 'dft-02',
+        title: '中断监控恢复',
+        command: 'bjobs 54321',
+        step_dependencies: [],
+        approval_points: [],
+        scientific_checks: [],
+      })
+      .expect(201);
+    const recoveryJobId = 'sched-recovery';
+    const recoveryTime = '2026-07-19T07:00:00.000Z';
+    db.prepare("UPDATE task_specs SET status = 'monitoring' WHERE id = ?").run(monitorSpec.body.id);
+    db.prepare(`
+      INSERT INTO scheduler_jobs (id, task_spec_id, job_id, submitted_at)
+      VALUES (?, ?, ?, ?)
+    `).run(recoveryJobId, monitorSpec.body.id, '54321', recoveryTime);
+
+    const poll = await request(app)
+      .post(`/api/scheduler-jobs/${recoveryJobId}/polls`)
+      .send({})
+      .expect(201);
+    const logRead = await request(app)
+      .post(`/api/scheduler-jobs/${recoveryJobId}/log-reads`)
+      .send({ relative_path: 'recovery.out', lines: 40 })
+      .expect(201);
+
+    const summary = recoverInterruptedExecutionState(db, recoveryTime);
+    expect(summary).toEqual({
+      command_runs: 1,
+      task_specs: 2,
+      scheduler_polls: 1,
+      scheduler_jobs: 1,
+      scheduler_logs: 1,
+    });
+    expect(db.prepare('SELECT status FROM command_runs WHERE id = ?').get(commandRunId)).toEqual({ status: 'unknown' });
+    expect(db.prepare('SELECT status FROM task_specs WHERE id = ?').get(commandSpec.body.id)).toEqual({ status: 'unknown' });
+    expect(db.prepare('SELECT status FROM task_specs WHERE id = ?').get(monitorSpec.body.id)).toEqual({ status: 'unknown' });
+    expect(db.prepare('SELECT status, scheduler_state FROM scheduler_poll_events WHERE id = ?').get(poll.body.poll.id))
+      .toEqual({ status: 'unknown', scheduler_state: 'UNKNOWN' });
+    expect(db.prepare('SELECT status FROM scheduler_jobs WHERE id = ?').get(recoveryJobId)).toEqual({ status: 'UNKNOWN' });
+    expect(db.prepare('SELECT status FROM scheduler_log_events WHERE id = ?').get(logRead.body.log_read.id)).toEqual({ status: 'unknown' });
+    expect(recoverInterruptedExecutionState(db, recoveryTime)).toEqual({
+      command_runs: 0,
+      task_specs: 0,
+      scheduler_polls: 0,
+      scheduler_jobs: 0,
+      scheduler_logs: 0,
+    });
   });
 
   it('returns JSON for unknown API endpoints', async () => {

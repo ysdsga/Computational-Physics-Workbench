@@ -276,4 +276,89 @@ for (const migration of migrations) {
   if (!applied) applyMigration(migration);
 }
 
+export interface InterruptedExecutionRecovery {
+  command_runs: number;
+  task_specs: number;
+  scheduler_polls: number;
+  scheduler_jobs: number;
+  scheduler_logs: number;
+}
+
+export function recoverInterruptedExecutionState(
+  database: Database.Database = db,
+  recoveredAt = new Date().toISOString(),
+): InterruptedExecutionRecovery {
+  const commandMessage = 'Workbench restarted while this command run was executing. Remote state is unknown; no automatic retry was attempted.';
+  const pollMessage = 'Workbench restarted while this scheduler poll was executing. Job state is unknown; no automatic retry was attempted.';
+  const logMessage = 'Workbench restarted while this bounded log read was executing. Read state is unknown; no automatic retry was attempted.';
+
+  const recover = database.transaction(() => {
+    const commandRuns = database.prepare(`
+      SELECT id, task_spec_id FROM command_runs WHERE status = 'executing'
+    `).all() as Array<{ id: string; task_spec_id: string }>;
+    const polls = database.prepare(`
+      SELECT p.id, p.scheduler_job_id, j.task_spec_id
+      FROM scheduler_poll_events p
+      JOIN scheduler_jobs j ON j.id = p.scheduler_job_id
+      WHERE p.status = 'executing'
+    `).all() as Array<{ id: string; scheduler_job_id: string; task_spec_id: string }>;
+    const logs = database.prepare(`
+      SELECT id FROM scheduler_log_events WHERE status = 'executing'
+    `).all() as Array<{ id: string }>;
+
+    const updateRun = database.prepare(`
+      UPDATE command_runs SET status = 'unknown', finished_at = ?, error_message = ?
+      WHERE id = ? AND status = 'executing'
+    `);
+    for (const run of commandRuns) updateRun.run(recoveredAt, commandMessage, run.id);
+
+    const taskSpecIds = new Set(commandRuns.map(run => run.task_spec_id));
+    for (const poll of polls) taskSpecIds.add(poll.task_spec_id);
+    const updateTaskSpec = database.prepare(`
+      UPDATE task_specs SET status = 'unknown', updated_at = ?
+      WHERE id = ? AND status IN ('executing', 'monitoring')
+    `);
+    let recoveredTaskSpecs = 0;
+    for (const taskSpecId of taskSpecIds) {
+      recoveredTaskSpecs += updateTaskSpec.run(recoveredAt, taskSpecId).changes;
+    }
+
+    const updatePoll = database.prepare(`
+      UPDATE scheduler_poll_events SET status = 'unknown', scheduler_state = 'UNKNOWN',
+        error_message = ?, finished_at = ?
+      WHERE id = ? AND status = 'executing'
+    `);
+    for (const poll of polls) updatePoll.run(pollMessage, recoveredAt, poll.id);
+
+    const schedulerJobIds = new Set(polls.map(poll => poll.scheduler_job_id));
+    const updateSchedulerJob = database.prepare(`
+      UPDATE scheduler_jobs SET status = 'UNKNOWN', error_message = ? WHERE id = ?
+    `);
+    let recoveredSchedulerJobs = 0;
+    for (const schedulerJobId of schedulerJobIds) {
+      recoveredSchedulerJobs += updateSchedulerJob.run(pollMessage, schedulerJobId).changes;
+    }
+
+    const updateLog = database.prepare(`
+      UPDATE scheduler_log_events SET status = 'unknown', error_message = ?, finished_at = ?
+      WHERE id = ? AND status = 'executing'
+    `);
+    for (const log of logs) updateLog.run(logMessage, recoveredAt, log.id);
+
+    return {
+      command_runs: commandRuns.length,
+      task_specs: recoveredTaskSpecs,
+      scheduler_polls: polls.length,
+      scheduler_jobs: recoveredSchedulerJobs,
+      scheduler_logs: logs.length,
+    };
+  });
+
+  return recover();
+}
+
+// Any row still marked executing belongs to an interrupted server lifetime.
+// Conservatively finalize it as unknown before accepting new API requests.
+recoverInterruptedExecutionState();
+
 export default db;

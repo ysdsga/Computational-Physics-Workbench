@@ -70,12 +70,37 @@ using System.Runtime.InteropServices;
 public static class HpcPlusBridgeNative {
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint sourceThreadId, uint targetThreadId, bool attach);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
   public const uint LEFTDOWN = 0x0002;
   public const uint LEFTUP = 0x0004;
+
+  public static bool TryActivateWindow(IntPtr hWnd) {
+    ShowWindow(hWnd, 9);
+    IntPtr foreground = GetForegroundWindow();
+    uint foregroundThread = foreground == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foreground, IntPtr.Zero);
+    uint currentThread = GetCurrentThreadId();
+    bool attached = false;
+    try {
+      if (foregroundThread != 0 && foregroundThread != currentThread) {
+        attached = AttachThreadInput(currentThread, foregroundThread, true);
+      }
+      BringWindowToTop(hWnd);
+      SetForegroundWindow(hWnd);
+      SetFocus(hWnd);
+    } finally {
+      if (attached) AttachThreadInput(currentThread, foregroundThread, false);
+    }
+    return GetForegroundWindow() == hWnd;
+  }
 }
 '@
 Add-Type -TypeDefinition $nativeCode -ErrorAction SilentlyContinue
@@ -123,6 +148,25 @@ function Get-WindowTextLines {
   @($lines)
 }
 
+function Invoke-HpcPlusClipboardAction {
+  param(
+    [Parameter(Mandatory = $true)][scriptblock]$Action,
+    [Parameter(Mandatory = $true)][string]$Description,
+    [ValidateRange(1, 50)][int]$Attempts = 20
+  )
+
+  $lastError = $null
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      return & $Action
+    } catch {
+      $lastError = $_.Exception
+      if ($attempt -lt $Attempts) { Start-Sleep -Milliseconds 100 }
+    }
+  }
+  throw "$Description failed after $Attempts attempts. $($lastError.Message)"
+}
+
 function Write-UnknownBridgeResult {
   param(
     [Parameter(Mandatory = $true)][string]$Message,
@@ -137,6 +181,7 @@ function Write-UnknownBridgeResult {
       RemoteExitCode = $null
       Output = $boundedOutput
       Error = $Message
+      LocalWarning = $clipboardWarning
     } | ConvertTo-Json -Depth 4 -Compress
     exit 0
   }
@@ -149,6 +194,7 @@ $mutex = New-Object System.Threading.Mutex($false, 'Local\DFTDMFT-HPCPlus-WebTer
 $lockTaken = $false
 $commandSent = $false
 $latestLines = @()
+$clipboardWarning = ''
 try {
   $lockTaken = $mutex.WaitOne(0)
   if (-not $lockTaken) {
@@ -227,12 +273,13 @@ try {
     throw 'HPCPlus window has no native window handle.'
   }
 
-  [void][HpcPlusBridgeNative]::ShowWindow($handle, 9)
-  Start-Sleep -Milliseconds 150
-  if (-not [HpcPlusBridgeNative]::SetForegroundWindow($handle)) {
+  if (-not [HpcPlusBridgeNative]::TryActivateWindow($handle)) {
     throw 'Could not bring the HPCPlus window to the foreground.'
   }
   Start-Sleep -Milliseconds 200
+  if ([HpcPlusBridgeNative]::GetForegroundWindow() -ne $handle) {
+    throw 'HPCPlus lost foreground focus before terminal input; no command was sent.'
+  }
 
   $terminalRect = $terminal.Current.BoundingRectangle
   $clickX = [int]($terminalRect.X + ($terminalRect.Width / 2))
@@ -244,16 +291,30 @@ try {
   [HpcPlusBridgeNative]::mouse_event([HpcPlusBridgeNative]::LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
   Start-Sleep -Milliseconds 150
 
-  $previousClipboard = [System.Windows.Forms.Clipboard]::GetDataObject()
+  $previousClipboard = Invoke-HpcPlusClipboardAction -Description 'Reading the existing clipboard' -Action {
+    [System.Windows.Forms.Clipboard]::GetDataObject()
+  }
   try {
-    [System.Windows.Forms.Clipboard]::SetText($envelope.WrappedCommand)
+    Invoke-HpcPlusClipboardAction -Description 'Placing the reviewed command on the clipboard' -Action {
+      [System.Windows.Forms.Clipboard]::SetText($envelope.WrappedCommand)
+    }
     [System.Windows.Forms.SendKeys]::SendWait('^v')
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     $commandSent = $true
   } finally {
     Start-Sleep -Milliseconds 100
-    if ($null -ne $previousClipboard) {
-      [System.Windows.Forms.Clipboard]::SetDataObject($previousClipboard, $true)
+    try {
+      if ($null -ne $previousClipboard) {
+        Invoke-HpcPlusClipboardAction -Description 'Restoring the existing clipboard' -Action {
+          [System.Windows.Forms.Clipboard]::SetDataObject($previousClipboard, $true)
+        }
+      } else {
+        Invoke-HpcPlusClipboardAction -Description 'Restoring the empty clipboard' -Action {
+          [System.Windows.Forms.Clipboard]::Clear()
+        }
+      }
+    } catch {
+      $clipboardWarning = "The remote command may have run, but the previous local clipboard could not be restored. $($_.Exception.Message)"
     }
     if ($haveCursor) {
       [void][HpcPlusBridgeNative]::SetCursorPos($cursor.X, $cursor.Y)
@@ -279,6 +340,7 @@ try {
           RemoteExitCode = $result.ExitCode
           Output = $boundedOutput
           Error = ''
+          LocalWarning = $clipboardWarning
         } | ConvertTo-Json -Depth 4 -Compress
         exit 0
       }
@@ -296,6 +358,7 @@ try {
       RemoteExitCode = $null
       Output = @(Select-HpcPlusBoundedLines -Lines $latestLines -MaxLines $LastLines -MaxCharacters $MaxOutputCharacters)
       Error = "The bridge failed after sending the command; remote state is unknown and the command was not retried. $($_.Exception.Message)"
+      LocalWarning = $clipboardWarning
     } | ConvertTo-Json -Depth 4 -Compress
     exit 0
   }
