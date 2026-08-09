@@ -13,55 +13,66 @@ import workflowsRouter from './routes/workflows.js';
 import researchPlansRouter from './routes/researchPlans.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const app = express();
-const PORT = 3001;
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+/** Build the Express app (routes + static + SPA fallback). No side effects. */
+export function createApp() {
+  const app = express();
+  app.use(cors());
+  app.use(express.json({ limit: '10mb' }));
 
-// Routes
-app.use('/api/workflows', workflowsRouter);
-app.use('/api/projects', projectsRouter);
-app.use('/api/tasks', tasksRouter);
-app.use('/api/experiences', experiencesRouter);
-app.use('/api/research-plans', researchPlansRouter);
+  // Routes
+  app.use('/api/workflows', workflowsRouter);
+  app.use('/api/projects', projectsRouter);
+  app.use('/api/tasks', tasksRouter);
+  app.use('/api/experiences', experiencesRouter);
+  app.use('/api/research-plans', researchPlansRouter);
 
-// Nested routes need parent params
-app.use('/api/projects/:projectId/tasks', tasksRouter);
-app.use('/api/projects/:projectId/files', filesRouter);
-app.use('/api/tasks/:taskId/progress', progressRouter);
+  // Nested routes need parent params
+  app.use('/api/projects/:projectId/tasks', tasksRouter);
+  app.use('/api/projects/:projectId/files', filesRouter);
+  app.use('/api/tasks/:taskId/progress', progressRouter);
 
-// Step file deletion (standalone)
-app.delete('/api/step-files/:fileId', (req, res) => {
-  const result = db.prepare('DELETE FROM step_files WHERE id = ?').run(req.params.fileId);
-  if (result.changes === 0) return res.status(404).json({ error: 'File not found' });
-  res.json({ success: true });
-});
+  // Step file deletion (standalone)
+  app.delete('/api/step-files/:fileId', (req, res) => {
+    const result = db.prepare('DELETE FROM step_files WHERE id = ?').run(req.params.fileId);
+    if (result.changes === 0) return res.status(404).json({ error: 'File not found' });
+    res.json({ success: true });
+  });
 
-// Serve static frontend in production (no-cache for HTML to ensure latest build)
-const distPath = path.join(__dirname, '..', 'dist');
-app.use(express.static(distPath, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
+  // Serve static frontend in production (no-cache for HTML to ensure latest build)
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    },
+  }));
+
+  // SPA fallback: serve index.html for non-API routes
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(path.join(distPath, 'index.html'));
+    } else {
+      next();
     }
-  },
-}));
+  });
+  return app;
+}
 
-// SPA fallback: serve index.html for non-API routes
-app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api/')) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.sendFile(path.join(distPath, 'index.html'));
-  } else {
-    next();
-  }
-});
+// Default port 3001; overridable via WORKBENCH_PORT (tests use 0 = random free port)
+const PORT = process.env.WORKBENCH_PORT ? Number(process.env.WORKBENCH_PORT) : 3001;
 
+const app = createApp();
 const server = app.listen(PORT, () => {
-  console.log(`[DFT+DMFT Workbench] Server running at http://localhost:${PORT}`);
+  const actualPort = (server.address() as { port: number }).port;
+  console.log(`[DFT+DMFT Workbench] Server running at http://localhost:${actualPort}`);
   console.log(`[DFT+DMFT Workbench] 按 Ctrl+C 停止服务`);
 });
+
+// Exported for tests (smoke tests import this module and manage the server)
+export { server };
 
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {

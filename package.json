@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
     "lint": "oxlint",
+    "test": "node --test --import tsx tests/smoke.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

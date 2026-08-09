@@ -4,14 +4,23 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '..', 'data', 'workbench.db');
+// Default: <project root>/data/workbench.db
+// Overridable via WORKBENCH_DB_PATH so tests can point at a throwaway DB
+// (keeps the real user database untouched).
+const DB_PATH = process.env.WORKBENCH_DB_PATH
+  ? path.resolve(process.env.WORKBENCH_DB_PATH)
+  : path.join(__dirname, '..', 'data', 'workbench.db');
 
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 // Ensure research-plans directory exists (new markdown-file based module)
-const PLANS_DIR = path.join(__dirname, '..', 'research-plans');
+// In tests, redirect to a temp dir via WORKBENCH_PLANS_DIR to avoid
+// touching the real research-plans/ folder.
+const PLANS_DIR = process.env.WORKBENCH_PLANS_DIR
+  ? path.resolve(process.env.WORKBENCH_PLANS_DIR)
+  : path.join(__dirname, '..', 'research-plans');
 if (!fs.existsSync(PLANS_DIR)) fs.mkdirSync(PLANS_DIR, { recursive: true });
 
 db.exec(`
@@ -113,3 +122,12 @@ try {
 //   `version` column removed; file mtime is the source of truth for edits.
 
 export default db;
+
+/** Close the DB connection (used by tests to release file handles on Windows). */
+export function closeDb(): void {
+  try {
+    db.close();
+  } catch {
+    /* already closed */
+  }
+}
