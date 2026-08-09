@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@theme {
+  --color-stage-prep: #3b82f6;
+  --color-stage-dft: #22c55e;
+  --color-stage-wannier: #f59e0b;
+  --color-stage-dmft: #8b5cf6;
+  --color-stage-check: #ef4444;
+  --color-surface: #1e1e2e;
+  --color-surface-alt: #252536;
+  --color-surface-hover: #2d2d44;
+  --color-border: #383850;
+  --color-text-primary: #e2e2f0;
+  --color-text-secondary: #9898b0;
+  --color-text-muted: #6b6b80;
+}
+
+body {
+  margin: 0;
+  background: #131320;
+  color: var(--color-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #383850;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #484868;
+}
+
+/* === Research plan markdown rendering === */
+.research-plan-markdown {
+  color: #e2e2f0;
+  line-height: 1.7;
+  font-size: 14px;
+}
+.research-plan-markdown h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 1.5em 0 0.6em;
+  color: #fff;
+  border-bottom: 1px solid #383850;
+  padding-bottom: 0.3em;
+}
+.research-plan-markdown h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 1.3em 0 0.5em;
+  color: #fff;
+}
+.research-plan-markdown h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 1.1em 0 0.4em;
+  color: #e2e2f0;
+}
+.research-plan-markdown h4 { font-size: 14px; font-weight: 600; margin: 1em 0 0.3em; color: #e2e2f0; }
+.research-plan-markdown p { margin: 0.6em 0; }
+.research-plan-markdown ul, .research-plan-markdown ol { margin: 0.6em 0; padding-left: 1.6em; }
+.research-plan-markdown li { margin: 0.25em 0; }
+.research-plan-markdown code {
+  background: #2d2d44;
+  color: #f9a8d4;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.88em;
+}
+.research-plan-markdown pre {
+  background: #1a1a28;
+  border: 1px solid #383850;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.research-plan-markdown pre code {
+  background: transparent;
+  color: #e2e2f0;
+  padding: 0;
+}
+.research-plan-markdown blockquote {
+  border-left: 3px solid #8b5cf6;
+  margin: 0.8em 0;
+  padding: 0.3em 1em;
+  color: #9898b0;
+  background: rgba(139, 92, 246, 0.05);
+}
+.research-plan-markdown table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 13px;
+}
+.research-plan-markdown th, .research-plan-markdown td {
+  border: 1px solid #383850;
+  padding: 6px 10px;
+  text-align: left;
+}
+.research-plan-markdown th {
+  background: #252536;
+  font-weight: 600;
+  color: #fff;
+}
+.research-plan-markdown tr:nth-child(even) td {
+  background: rgba(37, 37, 54, 0.4);
+}
+.research-plan-markdown a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+.research-plan-markdown a:hover { text-decoration: underline; }
+.research-plan-markdown hr {
+  border: none;
+  border-top: 1px solid #383850;
+  margin: 1.5em 0;
+}
+.research-plan-markdown strong { color: #fff; font-weight: 600; }
