@@ -61,6 +61,7 @@ export interface Task {
   name: string;
   description: string;
   workflow_id: string;
+  workflow: WorkflowTemplate;
   status: TaskStatus;
   created_at: string;
   updated_at: string;

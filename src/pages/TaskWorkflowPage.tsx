@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Edit3 } from 'lucide-react';
 import { tasksApi, progressApi } from '../api/client';
-import { useWorkflow } from '../contexts/WorkflowContext';
 import Flowchart from '../components/Flowchart';
 import StepDetail from '../components/StepDetail';
 import ProgressBar from '../components/ProgressBar';
-import type { Task, StepProgress, WorkflowStep } from '../types';
+import TemplateEditor from '../components/TemplateEditor';
+import type { Task, StepProgress, WorkflowTemplate, WorkflowStep } from '../types';
 
 export default function TaskWorkflowPage() {
   const { taskId } = useParams<{ taskId: string }>();
@@ -14,6 +14,7 @@ export default function TaskWorkflowPage() {
   const [task, setTask] = useState<Task | null>(null);
   const [progressList, setProgressList] = useState<StepProgress[]>([]);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
 
   const load = useCallback(async () => {
     if (!taskId) return;
@@ -27,11 +28,16 @@ export default function TaskWorkflowPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const workflow = useWorkflow(task?.workflow_id ?? '');
-
   if (!task) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">加载中...</div>;
 
+  const workflow = task.workflow;
   if (!workflow) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">未知工作流: {task.workflow_id}</div>;
+
+  const saveTaskWorkflow = async (nextWorkflow: WorkflowTemplate) => {
+    const saved = await tasksApi.updateWorkflow(task.id, nextWorkflow);
+    setTask(current => current ? { ...current, workflow: saved } : current);
+    setSelectedStep(null);
+  };
 
   // Build progress map
   const progressMap: Record<string, StepProgress> = {};
@@ -52,17 +58,21 @@ export default function TaskWorkflowPage() {
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6]/80 border border-[#8b5cf6]/20">
             {workflow.name}
           </span>
+          <button onClick={() => setShowEditor(true)}
+            className="ml-auto flex items-center gap-1.5 px-2.5 py-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa] hover:bg-[#3b82f6]/10 rounded-lg transition-colors">
+            <Edit3 size={11} /> 编辑任务流程
+          </button>
         </div>
         {task.description && <p className="text-xs text-[#6b6b80] mt-1">{task.description}</p>}
       </div>
 
       {/* Progress bar */}
-      <ProgressBar workflowId={workflow.id} progressMap={progressMap} />
+      <ProgressBar workflow={workflow} progressMap={progressMap} />
 
       {/* Flowchart + Detail */}
       <div className="flex flex-1 overflow-hidden">
         <Flowchart
-          workflowId={workflow.id}
+          workflow={workflow}
           progressMap={progressMap}
           onSelectStep={setSelectedStep}
           selectedStepId={selectedStep?.id ?? null}
@@ -71,7 +81,7 @@ export default function TaskWorkflowPage() {
           <StepDetail
             step={selectedStep}
             taskId={task.id}
-            workflowId={workflow.id}
+            workflow={workflow}
             projectId={task.project_id}
             taskName={task.name}
             progress={currentStepProgress}
@@ -80,6 +90,15 @@ export default function TaskWorkflowPage() {
           />
         )}
       </div>
+
+      {showEditor && (
+        <TemplateEditor
+          workflow={workflow}
+          mode="task"
+          onSave={saveTaskWorkflow}
+          onClose={() => setShowEditor(false)}
+        />
+      )}
     </div>
   );
 }

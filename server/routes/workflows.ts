@@ -5,23 +5,27 @@ import type { WorkflowTemplate } from '../../src/types/index.js';
 
 const router = Router();
 
-// Seed workflow_templates table from built-in defaults if empty
-function seedIfEmpty() {
-  const count = db.prepare('SELECT COUNT(*) as c FROM workflow_templates').get() as { c: number };
-  if (count.c === 0) {
-    const now = new Date().toISOString();
-    const insert = db.prepare('INSERT INTO workflow_templates (id, name, description, data, updated_at) VALUES (?, ?, ?, ?, ?)');
+// Insert newly shipped built-in templates without overwriting user edits.
+function seedMissingBuiltins() {
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO workflow_templates (id, name, description, data, updated_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  let inserted = 0;
+  db.transaction(() => {
     for (const wf of BUILTIN_WORKFLOWS) {
       const data = JSON.stringify({ stages: wf.stages, steps: wf.steps });
-      insert.run(wf.id, wf.name, wf.description, data, now);
+      inserted += insert.run(wf.id, wf.name, wf.description, data, now).changes;
     }
-    console.log(`[Workflows] Seeded ${BUILTIN_WORKFLOWS.length} built-in workflow templates`);
+  })();
+  if (inserted > 0) {
+    console.log(`[Workflows] Seeded ${inserted} missing built-in workflow templates`);
   }
 }
 
 // Get full workflow template from DB, fall back to built-in
 export function getWorkflowFromDB(workflowId: string): WorkflowTemplate | undefined {
-  seedIfEmpty();
+  seedMissingBuiltins();
   const row = db.prepare('SELECT * FROM workflow_templates WHERE id = ?').get(workflowId) as
     | { id: string; name: string; description: string; data: string }
     | undefined;
@@ -35,7 +39,7 @@ export function getWorkflowFromDB(workflowId: string): WorkflowTemplate | undefi
 
 // List all workflow templates (metadata only — for dropdowns)
 router.get('/', (_req, res) => {
-  seedIfEmpty();
+  seedMissingBuiltins();
   const rows = db.prepare('SELECT id, name, description FROM workflow_templates ORDER BY id').all() as
     { id: string; name: string; description: string }[];
   res.json(rows);
@@ -43,7 +47,7 @@ router.get('/', (_req, res) => {
 
 // Get ALL full workflow templates (with stages + steps — for frontend context)
 router.get('/all/full', (_req, res) => {
-  seedIfEmpty();
+  seedMissingBuiltins();
   const rows = db.prepare('SELECT * FROM workflow_templates ORDER BY id').all() as
     { id: string; name: string; description: string; data: string }[];
   const result = rows.map(row => {

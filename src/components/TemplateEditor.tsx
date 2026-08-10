@@ -1,18 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Save, RotateCcw, Plus, Trash2, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { useWorkflowContext } from '../contexts/WorkflowContext';
-import type { WorkflowStage, WorkflowStep, WorkflowSubStep } from '../types';
+import type { WorkflowTemplate, WorkflowStage, WorkflowStep, WorkflowSubStep } from '../types';
 
 interface Props {
-  workflowId: string;
+  workflowId?: string;
+  workflow?: WorkflowTemplate;
+  mode?: 'template' | 'task';
+  onSave?: (workflow: WorkflowTemplate) => Promise<void>;
   onClose: () => void;
 }
 
 const PRESET_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
-export default function TemplateEditor({ workflowId, onClose }: Props) {
+export default function TemplateEditor({ workflowId, workflow, mode = 'template', onSave, onClose }: Props) {
   const { workflows, saveTemplate, resetTemplate } = useWorkflowContext();
-  const original = workflows.find(w => w.id === workflowId);
+  const original = workflow ?? workflows.find(w => w.id === workflowId);
+  const isTaskWorkflow = mode === 'task';
 
   const [stages, setStages] = useState<WorkflowStage[]>([]);
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
@@ -38,9 +42,10 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
   const checkDirty = useCallback((newStages: WorkflowStage[], newSteps: WorkflowStep[]) => {
     if (!original) return;
     const changed = JSON.stringify(newStages) !== JSON.stringify(original.stages) ||
-                    JSON.stringify(newSteps) !== JSON.stringify(original.steps);
+                    JSON.stringify(newSteps) !== JSON.stringify(original.steps) ||
+                    name !== original.name || description !== original.description;
     setDirty(changed);
-  }, [original]);
+  }, [original, name, description]);
 
   // === Stage operations ===
   const updateStage = (stageId: string, patch: Partial<WorkflowStage>) => {
@@ -131,12 +136,21 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
   // === Save ===
   const handleSave = () => {
     setConfirm({
-      title: '保存模板',
-      message: `确定要保存对工作流模板的修改吗？\n\n修改将影响所有使用此模板的新任务。已有任务的进度数据不会被删除，但步骤定义可能不再匹配。`,
+      title: isTaskWorkflow ? '保存任务流程' : '保存模板',
+      message: isTaskWorkflow
+        ? `确定要保存当前任务的工作流修改吗？\n\n修改只影响这个任务，不会改变原始模板或其他任务。已有计算目录和进度数据不会被删除。`
+        : `确定要保存对工作流模板的修改吗？\n\n修改只影响之后新创建的任务，已有任务仍使用各自的独立工作流。`,
       onConfirm: async () => {
         setSaving(true);
         try {
-          await saveTemplate(workflowId, { name, description, stages, steps });
+          if (!original) return;
+          const nextWorkflow = { id: original.id, name, description, stages, steps };
+          if (isTaskWorkflow) {
+            if (!onSave) throw new Error('Task workflow save handler is missing');
+            await onSave(nextWorkflow);
+          } else {
+            await saveTemplate(original.id, { name, description, stages, steps });
+          }
           setConfirm(null);
           setDirty(false);
         } catch (err) {
@@ -155,7 +169,8 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
       message: `⚠️ 警告：这将丢弃所有自定义修改，恢复为内置默认模板。\n\n此操作不可撤销！确定继续吗？`,
       onConfirm: async () => {
         try {
-          await resetTemplate(workflowId);
+          if (!original) return;
+          await resetTemplate(original.id);
           setConfirm(null);
         } catch (err) {
           alert('重置失败: ' + (err as Error).message);
@@ -192,15 +207,17 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-[#2d2d44] bg-[#1a1a2e] flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h2 className="text-base font-semibold text-white">编辑工作流模板</h2>
+          <h2 className="text-base font-semibold text-white">{isTaskWorkflow ? '编辑任务工作流' : '编辑工作流模板'}</h2>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6]/80 border border-[#8b5cf6]/20">{name}</span>
           {dirty && <span className="text-[10px] text-[#f59e0b] flex items-center gap-1"><AlertTriangle size={11} /> 未保存</span>}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleReset} disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-colors">
-            <RotateCcw size={12} /> 重置为默认
-          </button>
+          {!isTaskWorkflow && (
+            <button onClick={handleReset} disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-[#f59e0b] hover:bg-[#f59e0b]/10 rounded-lg transition-colors">
+              <RotateCcw size={12} /> 重置为默认
+            </button>
+          )}
           <button onClick={handleSave} disabled={!dirty || saving}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#3b82f6] text-white hover:bg-[#2563eb] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             <Save size={12} /> {saving ? '保存中...' : '保存'}
@@ -214,19 +231,23 @@ export default function TemplateEditor({ workflowId, onClose }: Props) {
       {/* Warning banner */}
       <div className="px-5 py-2 bg-[#f59e0b]/5 border-b border-[#f59e0b]/15 flex items-center gap-2 flex-shrink-0">
         <AlertTriangle size={13} className="text-[#f59e0b] flex-shrink-0" />
-        <p className="text-[10px] text-[#f59e0b]/80">修改模板会影响所有新创建的任务。已有任务的进度数据保留，但步骤定义可能不再匹配。删除操作需确认。</p>
+        <p className="text-[10px] text-[#f59e0b]/80">
+          {isTaskWorkflow
+            ? '这是当前任务的独立工作流。修改不会影响原始模板或其他任务；删除流程节点也不会删除已有计算文件和历史进度。'
+            : '修改模板只影响之后新创建的任务，已有任务的独立工作流不会变化。删除操作需确认。'}
+        </p>
       </div>
 
       {/* Workflow meta editor */}
       <div className="px-5 py-3 border-b border-[#2d2d44] bg-[#1a1a2e] flex-shrink-0">
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">模板名称</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">{isTaskWorkflow ? '流程名称' : '模板名称'}</label>
             <input value={name} onChange={e => { setName(e.target.value); setDirty(true); }}
               className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-1.5 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]" />
           </div>
           <div className="flex-[2]">
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">模板描述</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">{isTaskWorkflow ? '流程描述' : '模板描述'}</label>
             <input value={description} onChange={e => { setDescription(e.target.value); setDirty(true); }}
               className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-1.5 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]" />
           </div>

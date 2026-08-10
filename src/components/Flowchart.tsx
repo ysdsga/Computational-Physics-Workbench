@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useWorkflow, getStagesOf, getStepsForStageOf } from '../contexts/WorkflowContext';
-import type { WorkflowStep, StepStatus, StepProgress } from '../types';
+import { getStagesOf, getStepsForStageOf } from '../contexts/WorkflowContext';
+import type { WorkflowTemplate, WorkflowStep, StepStatus, StepProgress } from '../types';
 
 const STEP_WIDTH = 170;
 const STEP_HEIGHT = 72;
@@ -19,16 +19,15 @@ const statusColors: Record<StepStatus, { fill: string; stroke: string; text: str
 };
 
 interface Props {
-  workflowId: string;
+  workflow: WorkflowTemplate;
   progressMap: Record<string, StepProgress>;
   onSelectStep: (step: WorkflowStep) => void;
   selectedStepId: string | null;
 }
 
-export default function Flowchart({ workflowId, progressMap, onSelectStep, selectedStepId }: Props) {
+export default function Flowchart({ workflow, progressMap, onSelectStep, selectedStepId }: Props) {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
 
-  const workflow = useWorkflow(workflowId);
   const stages = getStagesOf(workflow);
   const stageLayouts = stages.map(stage => ({
     stage,

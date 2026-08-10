@@ -32,6 +32,7 @@ db.exec(`
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     workflow_id TEXT NOT NULL,
+    workflow_snapshot TEXT DEFAULT NULL,
     status TEXT DEFAULT 'active',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -154,6 +155,9 @@ try {
 } catch { /* column already exists */ }
 try {
   db.exec(`ALTER TABLE projects ADD COLUMN hpc_config TEXT DEFAULT NULL`);
+} catch { /* column already exists */ }
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN workflow_snapshot TEXT DEFAULT NULL`);
 } catch { /* column already exists */ }
 
 export default db;

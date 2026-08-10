@@ -133,7 +133,7 @@ export default function ProjectDetailPage() {
             ) : (
               <div className="space-y-2">
                 {tasks.map(t => {
-                  const wf = workflows.find(w => w.id === t.workflow_id);
+                  const wf = t.workflow ?? workflows.find(w => w.id === t.workflow_id);
                   return (
                     <div key={t.id} className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl p-4 hover:border-[#383850] transition-colors group">
                       <div className="flex items-center justify-between">

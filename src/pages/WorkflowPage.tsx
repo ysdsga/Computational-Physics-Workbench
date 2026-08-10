@@ -7,7 +7,7 @@ import Flowchart from '../components/Flowchart';
 import StepDetail from '../components/StepDetail';
 import ProgressBar from '../components/ProgressBar';
 import TemplateEditor from '../components/TemplateEditor';
-import type { Project, Task, StepProgress, WorkflowStep } from '../types';
+import type { Project, Task, StepProgress, WorkflowTemplate, WorkflowStep } from '../types';
 
 export default function WorkflowPage() {
   const navigate = useNavigate();
@@ -58,7 +58,9 @@ export default function WorkflowPage() {
 
   useEffect(() => { loadProgress(); }, [loadProgress]);
 
-  const workflow = useWorkflow(selectedWorkflowId) ?? workflows[0];
+  const templateWorkflow = useWorkflow(selectedWorkflowId);
+  const selectedTask = allTasks.find(t => t.task.id === selectedTaskId)?.task;
+  const workflow = selectedTask?.workflow ?? templateWorkflow ?? workflows[0];
   if (!workflow) return <div className="flex items-center justify-center h-full text-[#6b6b80]">无工作流</div>;
 
   // Build progress map
@@ -66,7 +68,14 @@ export default function WorkflowPage() {
   progressList.forEach(p => { progressMap[p.step_id] = p; });
 
   const currentStepProgress = selectedStep ? progressMap[selectedStep.id] : undefined;
-  const selectedTask = allTasks.find(t => t.task.id === selectedTaskId)?.task;
+  const saveSelectedTaskWorkflow = async (nextWorkflow: WorkflowTemplate) => {
+    if (!selectedTask) return;
+    const saved = await tasksApi.updateWorkflow(selectedTask.id, nextWorkflow);
+    setAllTasks(current => current.map(entry => entry.task.id === selectedTask.id
+      ? { ...entry, task: { ...entry.task, workflow: saved } }
+      : entry));
+    setSelectedStep(null);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -78,7 +87,10 @@ export default function WorkflowPage() {
           <div className="relative">
             <select
               value={selectedTaskId}
-              onChange={e => setSelectedTaskId(e.target.value)}
+              onChange={e => {
+                setSelectedTaskId(e.target.value);
+                setSelectedStep(null);
+              }}
               className="appearance-none bg-[#252536] border border-[#383850] rounded-lg pl-3 pr-8 py-1.5 text-xs text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6] cursor-pointer min-w-[200px]"
             >
               <option value="">📋 模板预览模式</option>
@@ -90,10 +102,29 @@ export default function WorkflowPage() {
             </select>
             <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#6b6b80] pointer-events-none" />
           </div>
-          {/* Workflow badge */}
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6]/80 border border-[#8b5cf6]/20">
-            {workflow.name}
-          </span>
+          {/* Template selector in preview mode; selected tasks use their own workflow snapshot. */}
+          {!selectedTaskId ? (
+            <div className="relative">
+              <select
+                aria-label="预览工作流模板"
+                value={workflow.id}
+                onChange={e => {
+                  setSelectedWorkflowId(e.target.value);
+                  setSelectedStep(null);
+                }}
+                className="appearance-none bg-[#8b5cf6]/10 text-[#a78bfa] border border-[#8b5cf6]/30 rounded-lg pl-3 pr-8 py-1.5 text-xs focus:outline-none focus:border-[#8b5cf6] cursor-pointer max-w-[420px]"
+              >
+                {workflows.map(item => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8b5cf6] pointer-events-none" />
+            </div>
+          ) : (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6]/80 border border-[#8b5cf6]/20">
+              {workflow.name}
+            </span>
+          )}
           {/* Info hint */}
           {!selectedTaskId && (
             <div className="flex items-center gap-1 text-[10px] text-[#4a4a60]">
@@ -117,10 +148,10 @@ export default function WorkflowPage() {
                 ? 'text-[#6b6b80] hover:text-white hover:bg-[#2d2d44]'
                 : 'text-[#f59e0b] hover:text-[#f59e0b]/80 hover:bg-[#f59e0b]/10 ml-auto'
             }`}
-            title="编辑工作流模板"
+            title={selectedTask ? '编辑当前任务的独立工作流' : '编辑工作流模板'}
           >
             <Edit3 size={11} />
-            编辑模板
+            {selectedTask ? '编辑任务流程' : '编辑模板'}
           </button>
         </div>
         {projects.length === 0 && (
@@ -132,13 +163,13 @@ export default function WorkflowPage() {
 
       {/* Progress bar (only when a task is selected) */}
       {selectedTaskId && !loadingProgress && (
-        <ProgressBar workflowId={workflow.id} progressMap={progressMap} />
+        <ProgressBar workflow={workflow} progressMap={progressMap} />
       )}
 
       {/* Flowchart + Detail */}
       <div className="flex flex-1 overflow-hidden">
         <Flowchart
-          workflowId={workflow.id}
+          workflow={workflow}
           progressMap={progressMap}
           onSelectStep={setSelectedStep}
           selectedStepId={selectedStep?.id ?? null}
@@ -148,7 +179,7 @@ export default function WorkflowPage() {
             <StepDetail
               step={selectedStep}
               taskId={selectedTaskId}
-              workflowId={workflow.id}
+              workflow={workflow}
               projectId={selectedTask.project_id}
               taskName={selectedTask.name}
               progress={currentStepProgress}
@@ -156,25 +187,33 @@ export default function WorkflowPage() {
               onProgressChanged={loadProgress}
             />
           ) : (
-            <PreviewStepDetail step={selectedStep} workflowId={workflow.id} onClose={() => setSelectedStep(null)} />
+            <PreviewStepDetail step={selectedStep} workflow={workflow} onClose={() => setSelectedStep(null)} />
           )
         )}
       </div>
 
       {/* Template Editor Overlay */}
       {showEditor && (
-        <TemplateEditor
-          workflowId={workflow.id}
-          onClose={() => setShowEditor(false)}
-        />
+        selectedTask ? (
+          <TemplateEditor
+            workflow={workflow}
+            mode="task"
+            onSave={saveSelectedTaskWorkflow}
+            onClose={() => setShowEditor(false)}
+          />
+        ) : (
+          <TemplateEditor
+            workflowId={workflow.id}
+            onClose={() => setShowEditor(false)}
+          />
+        )
       )}
     </div>
   );
 }
 
 // Read-only step detail for preview mode (no task selected)
-function PreviewStepDetail({ step, workflowId, onClose }: { step: WorkflowStep; workflowId: string; onClose: () => void }) {
-  const workflow = useWorkflow(workflowId);
+function PreviewStepDetail({ step, workflow, onClose }: { step: WorkflowStep; workflow: WorkflowTemplate; onClose: () => void }) {
   const stage = getStageForStepOf(workflow, step.id);
 
   return (

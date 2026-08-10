@@ -29,6 +29,8 @@ export const tasksApi = {
   get: (id: string) => api<Task>(`/tasks/${id}`),
   create: (projectId: string, data: Partial<Task>) => api<Task>(`/projects/${projectId}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<Task>) => api<Task>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateWorkflow: (id: string, workflow: WorkflowTemplate) =>
+    api<WorkflowTemplate>(`/tasks/${id}/workflow`, { method: 'PUT', body: JSON.stringify(workflow) }),
   delete: (id: string) => api<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
 };
 

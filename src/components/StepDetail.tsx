@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, CheckCircle2, Circle, SkipForward, PlayCircle, Save, Plus, Trash2, FileText, Folder, Eye, Link2, Unlink, Edit3 } from 'lucide-react';
-import type { WorkflowStep, StepStatus, StepProgress, StepFile, FileEntry } from '../types';
-import { useWorkflow, getStageForStepOf } from '../contexts/WorkflowContext';
+import type { WorkflowTemplate, WorkflowStep, StepStatus, StepProgress, StepFile, FileEntry } from '../types';
+import { getStageForStepOf } from '../contexts/WorkflowContext';
 import { progressApi, stepFilesApi, filesApi } from '../api/client';
 
 interface Props {
   step: WorkflowStep;
   taskId: string;
-  workflowId: string;
+  workflow: WorkflowTemplate;
   projectId: string;
   taskName: string;
   progress: StepProgress | undefined;
@@ -15,8 +15,7 @@ interface Props {
   onProgressChanged: () => void;
 }
 
-export default function StepDetail({ step, taskId, workflowId, projectId, taskName, progress, onClose, onProgressChanged }: Props) {
-  const workflow = useWorkflow(workflowId);
+export default function StepDetail({ step, taskId, workflow, projectId, taskName, progress, onClose, onProgressChanged }: Props) {
   const stage = getStageForStepOf(workflow, step.id);
   const [editingNotes, setEditingNotes] = useState(false);
   const [noteDraft, setNoteDraft] = useState(progress?.notes ?? '');

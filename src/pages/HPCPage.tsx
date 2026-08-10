@@ -64,7 +64,9 @@ export default function HPCPage() {
 
   const selectedTask = allTasks.find(t => t.task.id === selectedTaskId)?.task;
   const selectedProject = allTasks.find(t => t.task.id === selectedTaskId)?.project;
-  const workflowId = selectedTask?.workflow_id ?? workflows[0]?.id ?? '';
+  const workflow = selectedTask?.workflow
+    ?? workflows.find(item => item.id === selectedTask?.workflow_id)
+    ?? workflows[0];
 
   const progressMap: Record<string, StepProgress> = {};
   progressList.forEach(p => { progressMap[p.step_id] = p; });
@@ -189,15 +191,17 @@ export default function HPCPage() {
             <p className="text-xs text-[#4a4a60]">逐步引导你完成 DFT+DMFT 的超算提交流程</p>
           </div>
         </div>
-      ) : (
+      ) : workflow ? (
         <HpcWizard
           taskId={selectedTaskId}
-          workflowId={workflowId}
+          workflow={workflow}
           taskName={selectedTask?.name ?? ''}
           hpcConfig={hpcConfig}
           progressMap={progressMap}
           onProgressChanged={loadTaskData}
         />
+      ) : (
+        <div className="flex-1 flex items-center justify-center text-sm text-[#6b6b80]">任务工作流不可用</div>
       )}
     </div>
   );

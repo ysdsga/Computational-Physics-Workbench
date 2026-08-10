@@ -74,6 +74,214 @@ test('core API endpoints respond', async () => {
   }
 });
 
+test('new one-shot software-stack templates are seeded and create their stage folders', async () => {
+  const expectedTemplates: Record<string, { stages: string[]; requiredSteps: string[] }> = {
+    'qe-w90-triqs-spontaneous-magnetic-oneshot': {
+      stages: ['prep', 'dft_nm', 'wannier_nm', 'dmft', 'check'],
+      requiredSteps: ['qenm-dft-02', 'qenm-wan-04', 'qenm-dmft-02', 'qenm-dmft-05', 'qenm-check-01'],
+    },
+    'wien2k-dmftproj-triqs-oneshot': {
+      stages: ['prep', 'wien', 'projector', 'dmft', 'check'],
+      requiredSteps: ['wien-dft-03', 'wien-proj-03', 'wien-dmft-01', 'wien-dmft-03', 'wien-check-01'],
+    },
+  };
+
+  const workflowsResponse = await fetch(`${base}/api/workflows/all/full`);
+  assert.equal(workflowsResponse.status, 200);
+  const workflows = (await workflowsResponse.json()) as {
+    id: string;
+    stages: { id: string }[];
+    steps: { id: string; stageId: string }[];
+  }[];
+  assert.ok(!workflows.some(item => item.id === 'qe-w90-triqs-magnetic-oneshot'));
+  for (const [workflowId, expected] of Object.entries(expectedTemplates)) {
+    const workflow = workflows.find(item => item.id === workflowId);
+    assert.ok(workflow, `${workflowId} should be seeded`);
+    assert.deepEqual(workflow.stages.map(stage => stage.id), expected.stages);
+    assert.equal(new Set(workflow.steps.map(step => step.id)).size, workflow.steps.length);
+    assert.ok(workflow.steps.every(step => expected.stages.includes(step.stageId)));
+    assert.ok(workflow.steps.length <= 20, `${workflowId} should remain a concise workflow skeleton`);
+    for (const stepId of expected.requiredSteps) {
+      assert.ok(workflow.steps.some(step => step.id === stepId), `${workflowId} should include ${stepId}`);
+    }
+  }
+
+  const workingDir = path.join(tmpRoot, 'workflow-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await fetch(`${base}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'workflow-project', working_dir: workingDir }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const project = (await projectResponse.json()) as { id: string };
+
+  let taskNumber = 0;
+  for (const [workflowId, expected] of Object.entries(expectedTemplates)) {
+    taskNumber += 1;
+    const taskName = `stack-${taskNumber}`;
+    const taskResponse = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: taskName, workflow_id: workflowId }),
+    });
+    assert.equal(taskResponse.status, 201);
+    for (const stageId of expected.stages) {
+      assert.ok(
+        fs.existsSync(path.join(workingDir, taskName, stageId)),
+        `${workflowId} should create ${stageId}`,
+      );
+    }
+  }
+});
+
+test('each task keeps and edits an independent workflow snapshot', async () => {
+  const workflowId = 'task-snapshot-test';
+  const sourceWorkflow = {
+    name: '任务快照测试模板',
+    description: 'source template',
+    stages: [{
+      id: 'source-stage',
+      name: '来源阶段',
+      color: '#3b82f6',
+      colorBg: 'rgba(59,130,246,0.12)',
+      colorBorder: 'rgba(59,130,246,0.4)',
+      description: '',
+    }],
+    steps: [{
+      id: 'source-step',
+      stageId: 'source-stage',
+      order: 1,
+      name: '来源步骤',
+      description: '',
+    }],
+  };
+  const saveSource = await fetch(`${base}/api/workflows/${workflowId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sourceWorkflow),
+  });
+  assert.equal(saveSource.status, 200);
+
+  const workingDir = path.join(tmpRoot, 'task-snapshot-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await fetch(`${base}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'task-snapshot-project', working_dir: workingDir }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const project = (await projectResponse.json()) as { id: string };
+
+  const taskResponse = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'independent-task', workflow_id: workflowId }),
+  });
+  assert.equal(taskResponse.status, 201);
+  const createdTask = (await taskResponse.json()) as {
+    id: string;
+    workflow: { stages: { id: string }[]; steps: { id: string }[] };
+  };
+  assert.deepEqual(createdTask.workflow.steps.map(step => step.id), ['source-step']);
+
+  // Simulate an existing pre-snapshot task and verify the compatibility backfill.
+  const migrationDb = new Database(process.env.WORKBENCH_DB_PATH!);
+  migrationDb.prepare('UPDATE tasks SET workflow_snapshot = NULL WHERE id = ?').run(createdTask.id);
+  migrationDb.close();
+  const migratedResponse = await fetch(`${base}/api/tasks/${createdTask.id}`);
+  assert.equal(migratedResponse.status, 200);
+  const migratedTask = (await migratedResponse.json()) as typeof createdTask;
+  assert.deepEqual(migratedTask.workflow.steps.map(step => step.id), ['source-step']);
+
+  const changeTemplate = await fetch(`${base}/api/workflows/${workflowId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...sourceWorkflow,
+      steps: [...sourceWorkflow.steps, {
+        id: 'template-only-step',
+        stageId: 'source-stage',
+        order: 2,
+        name: '只属于后来模板的步骤',
+        description: '',
+      }],
+    }),
+  });
+  assert.equal(changeTemplate.status, 200);
+
+  const unchangedTaskResponse = await fetch(`${base}/api/tasks/${createdTask.id}`);
+  const unchangedTask = (await unchangedTaskResponse.json()) as typeof createdTask;
+  assert.deepEqual(unchangedTask.workflow.steps.map(step => step.id), ['source-step']);
+
+  const taskWorkflow = {
+    id: workflowId,
+    ...sourceWorkflow,
+    stages: [...sourceWorkflow.stages, {
+      id: 'task-stage',
+      name: '任务新增阶段',
+      color: '#22c55e',
+      colorBg: 'rgba(34,197,94,0.12)',
+      colorBorder: 'rgba(34,197,94,0.4)',
+      description: '',
+    }],
+    steps: [...sourceWorkflow.steps, {
+      id: 'task-only-step',
+      stageId: 'task-stage',
+      order: 1,
+      name: '只属于任务的步骤',
+      description: '',
+    }],
+  };
+  const updateTaskWorkflow = await fetch(`${base}/api/tasks/${createdTask.id}/workflow`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(taskWorkflow),
+  });
+  assert.equal(updateTaskWorkflow.status, 200);
+  assert.ok(fs.existsSync(path.join(workingDir, 'independent-task', 'task-stage')));
+
+  const [finalTaskResponse, finalTemplateResponse] = await Promise.all([
+    fetch(`${base}/api/tasks/${createdTask.id}`),
+    fetch(`${base}/api/workflows/${workflowId}`),
+  ]);
+  const finalTask = (await finalTaskResponse.json()) as typeof createdTask;
+  const finalTemplate = (await finalTemplateResponse.json()) as typeof createdTask.workflow;
+  assert.ok(finalTask.workflow.steps.some(step => step.id === 'task-only-step'));
+  assert.ok(!finalTask.workflow.steps.some(step => step.id === 'template-only-step'));
+  assert.ok(finalTemplate.steps.some(step => step.id === 'template-only-step'));
+  assert.ok(!finalTemplate.steps.some(step => step.id === 'task-only-step'));
+});
+
+test('workflow preview exposes a selector for every built-in template', async () => {
+  const React = await import('react');
+  (globalThis as typeof globalThis & { React: typeof React }).React = React;
+  const [{ renderToStaticMarkup }, { MemoryRouter }, { WorkflowProvider }, { default: WorkflowPage }] = await Promise.all([
+    import('react-dom/server'),
+    import('react-router-dom'),
+    import(pathToFileURL(path.join(ROOT, 'src', 'contexts', 'WorkflowContext.tsx')).href),
+    import(pathToFileURL(path.join(ROOT, 'src', 'pages', 'WorkflowPage.tsx')).href),
+  ]);
+
+  const html = renderToStaticMarkup(
+    React.createElement(
+      MemoryRouter,
+      null,
+      React.createElement(WorkflowProvider, null, React.createElement(WorkflowPage)),
+    ),
+  );
+
+  assert.match(html, /aria-label="预览工作流模板"/);
+  assert.doesNotMatch(html, /qe-w90-triqs-magnetic-oneshot/);
+  for (const workflowId of [
+    'dft-dmft-oneshot',
+    'qe-w90-triqs-spontaneous-magnetic-oneshot',
+    'wien2k-dmftproj-triqs-oneshot',
+  ]) {
+    assert.match(html, new RegExp(`value="${workflowId}"`));
+  }
+});
+
 // ---------------------------------------------------------------
 // 3. 行为保持：项目创建 → 读取 → 更新 → 删除（关键数据可保存/读取）
 // ---------------------------------------------------------------

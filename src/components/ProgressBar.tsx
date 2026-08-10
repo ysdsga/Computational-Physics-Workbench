@@ -1,13 +1,12 @@
-import { useWorkflow, getStagesOf, getStepsForStageOf, getTotalRequiredStepsOf } from '../contexts/WorkflowContext';
-import type { StepProgress } from '../types';
+import { getStagesOf, getStepsForStageOf, getTotalRequiredStepsOf } from '../contexts/WorkflowContext';
+import type { StepProgress, WorkflowTemplate } from '../types';
 
 interface Props {
-  workflowId: string;
+  workflow: WorkflowTemplate;
   progressMap: Record<string, StepProgress>;
 }
 
-export default function ProgressBar({ workflowId, progressMap }: Props) {
-  const workflow = useWorkflow(workflowId);
+export default function ProgressBar({ workflow, progressMap }: Props) {
   const stages = getStagesOf(workflow);
 
   const stats = stages.map(stage => {

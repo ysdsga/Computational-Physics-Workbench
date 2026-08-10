@@ -62,6 +62,7 @@ npm run build
 - SPA fallback 使用普通中间件，不使用 Express 5 不兼容的 `app.get('*', ...)`。
 - 前端路由保持 `HashRouter`，Vite 保持 `base: './'` 与 `vite-plugin-singlefile`，以兼容本地部署。
 - 工作流运行时数据以数据库为准；`src/data/workflows.ts` 只负责内置默认、首次播种和重置回退。相关修改要同时检查数据库 API、Context、模板编辑器和任务目录创建逻辑。
+- 工作流模板只定义跑通计算所必需的完整物理流程和软件步骤，要求完整、清晰、可执行，但不展开材料专属参数、收敛阈值、对照矩阵和不确定度设计；这些细节放在所属项目的研究方案中。
 - SQLite schema 变更必须对现有数据库向后兼容。新增字段使用可重复启动的安全迁移；不要假设数据库是空的。
 - Windows 的 `.bat` 启动脚本保持 ASCII/英文，避免系统代码页导致中文命令乱码。
 - 文件 API 必须把访问限制在 Project 的 `working_dir` 内。处理路径时使用解析后的规范路径，并覆盖同名路径前缀、`..`、绝对路径等逃逸场景。
@@ -95,7 +96,7 @@ npm run build
 
 - 项目与任务 CRUD、任务步骤进度追踪。
 - 工作目录浏览、文本文件读取和目录创建。
-- One-shot DFT+DMFT 工作流及交互流程图。
+- 通用及多软件栈 One-shot DFT+DMFT 工作流（QE/Wannier90/TRIQS、非磁 H0 自发磁性 DMFT、WIEN2k/dmftproj）及交互流程图。
 - 工作流模板数据库持久化、可视化编辑和重置。
 - 步骤笔记、自定义命令、文件关联。
 - 经验库。

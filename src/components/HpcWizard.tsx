@@ -1,12 +1,12 @@
 import { useState, useCallback } from 'react';
 import { CheckCircle2, Circle, Copy, Terminal, Edit3, Save, ChevronDown, ChevronRight, Upload, Download, Plus, Trash2 } from 'lucide-react';
-import type { StepProgress, StepStatus, HpcConfig } from '../types';
-import { useWorkflow, getStagesOf, getStepsOf } from '../contexts/WorkflowContext';
+import type { StepProgress, StepStatus, HpcConfig, WorkflowTemplate } from '../types';
+import { getStagesOf, getStepsOf } from '../contexts/WorkflowContext';
 import { progressApi } from '../api/client';
 
 interface Props {
   taskId: string;
-  workflowId: string;
+  workflow: WorkflowTemplate;
   taskName: string;
   hpcConfig: HpcConfig | null;
   progressMap: Record<string, StepProgress>;
@@ -45,8 +45,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   );
 }
 
-export default function HpcWizard({ taskId, workflowId, taskName, hpcConfig, progressMap, onProgressChanged }: Props) {
-  const workflow = useWorkflow(workflowId);
+export default function HpcWizard({ taskId, workflow, taskName, hpcConfig, progressMap, onProgressChanged }: Props) {
   const stages = getStagesOf(workflow);
   const steps = getStepsOf(workflow);
   const [editingScript, setEditingScript] = useState<string | null>(null);
