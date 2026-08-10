@@ -15,14 +15,6 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// Ensure research-plans directory exists (new markdown-file based module)
-// In tests, redirect to a temp dir via WORKBENCH_PLANS_DIR to avoid
-// touching the real research-plans/ folder.
-const PLANS_DIR = process.env.WORKBENCH_PLANS_DIR
-  ? path.resolve(process.env.WORKBENCH_PLANS_DIR)
-  : path.join(__dirname, '..', 'research-plans');
-if (!fs.existsSync(PLANS_DIR)) fs.mkdirSync(PLANS_DIR, { recursive: true });
-
 db.exec(`
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -85,21 +77,73 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
-  -- research_plans v2 (2026-07-28): markdown-file based, lightweight metadata
-  -- Old v1 with goal/background/methodology/etc. columns is dropped and rebuilt
-  DROP TABLE IF EXISTS research_plans;
-  CREATE TABLE research_plans (
+  -- Research plan content lives in each project's working_dir.
+  -- This table stores only searchable metadata and associations.
+  CREATE TABLE IF NOT EXISTS research_plans (
     id              TEXT PRIMARY KEY,
-    file_name       TEXT NOT NULL UNIQUE,
+    file_name       TEXT NOT NULL,
     title           TEXT NOT NULL,
     project_id      TEXT,
     linked_task_ids TEXT DEFAULT '[]',
     status          TEXT DEFAULT 'draft',
     tags            TEXT DEFAULT '[]',
     created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, file_name)
   );
 `);
+
+// Older v2 databases made file_name globally unique and were also rebuilt on
+// every startup. Convert that constraint once, preserving every metadata row.
+// project_id remains nullable only so an old unassigned row is never discarded;
+// the API no longer creates or exposes unassigned plans.
+const researchPlansTable = db.prepare(
+  "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'research_plans'",
+).get() as { sql: string } | undefined;
+const normalizedResearchPlansSql = researchPlansTable?.sql.replace(/\s+/g, '').toLowerCase() ?? '';
+if (!normalizedResearchPlansSql.includes('unique(project_id,file_name)')) {
+  const columns = db.prepare('PRAGMA table_info(research_plans)').all() as { name: string }[];
+  const columnNames = new Set(columns.map(column => column.name));
+  const requiredColumns = [
+    'id', 'file_name', 'title', 'project_id', 'linked_task_ids',
+    'status', 'tags', 'created_at', 'updated_at',
+  ];
+  if (!requiredColumns.every(column => columnNames.has(column))) {
+    throw new Error('Unsupported legacy research_plans schema; database was left unchanged');
+  }
+
+  const backupPath = path.join(
+    path.dirname(DB_PATH),
+    `${path.basename(DB_PATH, path.extname(DB_PATH))}.before-research-plans-v3.db`,
+  );
+  if (!fs.existsSync(backupPath)) {
+    const escapedBackupPath = backupPath.replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${escapedBackupPath}'`);
+  }
+
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE research_plans_project_scoped (
+        id              TEXT PRIMARY KEY,
+        file_name       TEXT NOT NULL,
+        title           TEXT NOT NULL,
+        project_id      TEXT,
+        linked_task_ids TEXT DEFAULT '[]',
+        status          TEXT DEFAULT 'draft',
+        tags            TEXT DEFAULT '[]',
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        UNIQUE(project_id, file_name)
+      );
+      INSERT INTO research_plans_project_scoped
+        (id, file_name, title, project_id, linked_task_ids, status, tags, created_at, updated_at)
+      SELECT id, file_name, title, project_id, linked_task_ids, status, tags, created_at, updated_at
+      FROM research_plans;
+      DROP TABLE research_plans;
+      ALTER TABLE research_plans_project_scoped RENAME TO research_plans;
+    `);
+  })();
+}
 
 // Migrations: add columns to existing tables (safe for fresh and existing DBs)
 try {
@@ -111,15 +155,6 @@ try {
 try {
   db.exec(`ALTER TABLE projects ADD COLUMN hpc_config TEXT DEFAULT NULL`);
 } catch { /* column already exists */ }
-
-// research_plans v2 (2026-07-28):
-//   Now markdown-file based. The actual content lives in `research-plans/*.md`,
-//   and this table only stores lightweight metadata (file_name, title,
-//   project_id, linked_task_ids, status, tags).
-//   The v1 table (with goal/background/methodology/action_steps/etc.) is
-//   dropped and rebuilt above. On startup, the listing route scans the
-//   research-plans/ dir and auto-inserts metadata for any *.md without a row.
-//   `version` column removed; file mtime is the source of truth for edits.
 
 export default db;
 

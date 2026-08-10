@@ -88,17 +88,21 @@ export const workflowsApi = {
 export interface ResearchPlanInput {
   title?: string;
   content?: string;
-  project_id?: string | null;
   linked_task_ids?: string[];
   status?: ResearchPlanStatus;
   tags?: string[];
+}
+
+export interface ResearchPlanCreateInput extends ResearchPlanInput {
+  title: string;
+  project_id: string;
 }
 
 export interface ResearchPlanImportInput {
   sourcePath?: string;
   fileName?: string;
   content?: string;
-  project_id?: string;
+  project_id: string;
 }
 
 export const researchPlansApi = {
@@ -118,7 +122,7 @@ export const researchPlansApi = {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
-  create: (data: ResearchPlanInput) =>
+  create: (data: ResearchPlanCreateInput) =>
     api<ResearchPlan>('/research-plans', { method: 'POST', body: JSON.stringify(data) }),
   import: (data: ResearchPlanImportInput) =>
     api<ResearchPlan>('/research-plans/import', { method: 'POST', body: JSON.stringify(data) }),

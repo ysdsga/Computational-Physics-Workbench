@@ -77,6 +77,7 @@ export default function ResearchPlansPage() {
   const [importPath, setImportPath] = useState('');
   const [importName, setImportName] = useState('');
   const [importContent, setImportContent] = useState('');
+  const [importProjectId, setImportProjectId] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -135,6 +136,10 @@ export default function ResearchPlansPage() {
   }, [selectedId]);
 
   const projectMap = useMemo(() => new Map(projects.map(p => [p.id, p] as const)), [projects]);
+  const writableProjects = useMemo(
+    () => projects.filter(project => project.working_dir.trim()),
+    [projects],
+  );
   const editingProjectTasks = useMemo(
     () => allTasks.filter(t => t.project_id === (fProjectId || '')),
     [allTasks, fProjectId],
@@ -158,10 +163,19 @@ export default function ResearchPlansPage() {
   // ===== Handlers =====
 
   const handleCreate = async () => {
+    if (projectFilter === 'all') {
+      alert('请先在项目筛选中选择研究方案所属项目');
+      return;
+    }
+    const project = projectMap.get(projectFilter);
+    if (!project?.working_dir.trim()) {
+      alert('所选项目尚未配置工作目录');
+      return;
+    }
     const title = prompt('方案标题：');
     if (!title?.trim()) return;
     try {
-      const p = await researchPlansApi.create({ title: title.trim() });
+      const p = await researchPlansApi.create({ title: title.trim(), project_id: project.id });
       setPlans(prev => [p, ...prev]);
       setSelectedId(p.id);
     } catch (e) {
@@ -170,6 +184,7 @@ export default function ResearchPlansPage() {
   };
 
   const handleImport = async () => {
+    if (!importProjectId) return alert('请选择研究方案所属项目');
     try {
       let p: ResearchPlan;
       if (importMode === 'path') {
@@ -177,18 +192,20 @@ export default function ResearchPlansPage() {
         p = await researchPlansApi.import({
           sourcePath: importPath.trim(),
           fileName: importName.trim() || undefined,
+          project_id: importProjectId,
         });
       } else {
         if (!importContent.trim()) return alert('请粘贴内容');
         p = await researchPlansApi.import({
           content: importContent,
           fileName: importName.trim() || `imported_${Date.now()}.md`,
+          project_id: importProjectId,
         });
       }
       setPlans(prev => [p, ...prev]);
       setSelectedId(p.id);
       setShowImport(false);
-      setImportPath(''); setImportName(''); setImportContent('');
+      setImportPath(''); setImportName(''); setImportContent(''); setImportProjectId('');
     } catch (e) {
       alert(`导入失败：${(e as Error).message}`);
     }
@@ -213,7 +230,6 @@ export default function ResearchPlansPage() {
       const updated = await researchPlansApi.update(selected.id, {
         title: fTitle.trim() || selected.title,
         status: fStatus,
-        project_id: fProjectId || null,
         tags,
         linked_task_ids: fLinkedTaskIds,
       });
@@ -255,10 +271,13 @@ export default function ResearchPlansPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h2 className="text-base font-semibold text-white">研究方案</h2>
-              <p className="text-xs text-[#6b6b80] mt-0.5">Markdown 文件 · 可编辑、可导入、可关联项目</p>
+              <p className="text-xs text-[#6b6b80] mt-0.5">Markdown 文件 · 保存在所属项目工作目录</p>
             </div>
             <div className="flex gap-1.5">
-              <button onClick={() => setShowImport(true)}
+              <button onClick={() => {
+                setImportProjectId(projectFilter === 'all' ? '' : projectFilter);
+                setShowImport(true);
+              }}
                 className="flex items-center gap-1 px-2.5 py-2 bg-[#252536] border border-[#383850] text-[#e2e2f0] text-xs rounded-lg hover:bg-[#2d2d44]">
                 <Upload size={13} /> 导入
               </button>
@@ -368,8 +387,9 @@ export default function ResearchPlansPage() {
                         {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
                       </select>
                       <select value={fProjectId} onChange={e => setFProjectId(e.target.value)}
-                        className="bg-[#252536] border border-[#383850] rounded px-2 py-1 text-[#e2e2f0]">
-                        <option value="">无关联项目</option>
+                        disabled
+                        title="研究方案文件固定保存在创建时选择的项目工作目录中"
+                        className="bg-[#252536] border border-[#383850] rounded px-2 py-1 text-[#9898b0] disabled:cursor-not-allowed">
                         {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                       <input value={fTags} onChange={e => setFTags(e.target.value)} placeholder="标签（逗号分隔）"
@@ -499,6 +519,16 @@ export default function ResearchPlansPage() {
               </button>
             </div>
             <div className="space-y-3">
+              <div>
+                <label className="text-xs text-[#9898b0] mb-1 block">所属项目</label>
+                <select value={importProjectId} onChange={e => setImportProjectId(e.target.value)}
+                  className="w-full bg-[#1a1a28] border border-[#383850] rounded-lg px-3 py-2 text-xs text-[#e2e2f0]">
+                  <option value="">请选择已配置工作目录的项目</option>
+                  {writableProjects.map(project => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </div>
               {importMode === 'path' ? (
                 <div>
                   <label className="text-xs text-[#9898b0] mb-1 block">本机文件绝对路径</label>

@@ -1,12 +1,9 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 
 const router = Router();
-
-// === Fallback directory for plans NOT associated with any project ===
-const GLOBAL_PLANS_DIR = path.resolve(process.cwd(), 'research-plans');
 
 interface PlanRow {
   id: string;
@@ -21,22 +18,42 @@ interface PlanRow {
 }
 
 /**
- * Resolve the base directory for a plan's file.
- * - If the plan has a project_id, use project.working_dir
- * - Otherwise, fall back to the global research-plans/ dir
+ * Resolve a plan file to its owning project's working directory.
  */
-function getBaseDir(projectId: string | null): { dir: string; projectFound: boolean } {
-  if (projectId) {
-    const proj = db.prepare('SELECT working_dir FROM projects WHERE id = ?').get(projectId) as
-      | { working_dir: string | null }
-      | undefined;
-    if (proj?.working_dir) {
-      return { dir: proj.working_dir, projectFound: true };
-    }
+function getProjectDir(projectId: unknown): string {
+  if (typeof projectId !== 'string' || !projectId.trim()) {
+    throw new PlanDirectoryError(400, 'project_id is required');
   }
-  // fallback: global dir
-  if (!fs.existsSync(GLOBAL_PLANS_DIR)) fs.mkdirSync(GLOBAL_PLANS_DIR, { recursive: true });
-  return { dir: GLOBAL_PLANS_DIR, projectFound: false };
+  const proj = db.prepare('SELECT working_dir FROM projects WHERE id = ?').get(projectId) as
+    | { working_dir: string | null }
+    | undefined;
+  if (!proj) throw new PlanDirectoryError(404, 'Project not found');
+  if (!proj.working_dir?.trim()) {
+    throw new PlanDirectoryError(400, 'Project has no working directory configured');
+  }
+  const dir = path.resolve(proj.working_dir);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+    throw new PlanDirectoryError(400, 'Project working directory does not exist');
+  }
+  return dir;
+}
+
+class PlanDirectoryError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+function resolveProjectDir(res: Response, projectId: unknown): string | null {
+  try {
+    return getProjectDir(projectId);
+  } catch (err) {
+    if (err instanceof PlanDirectoryError) {
+      res.status(err.status).json({ error: err.message });
+      return null;
+    }
+    throw err;
+  }
 }
 
 /** Resolve file_name relative to a base dir, blocking path escapes. */
@@ -73,8 +90,13 @@ const newId = () => `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
  * Scan a plan's base dir for *.md and auto-insert metadata rows
  * for files that don't have a DB record yet.
  */
-function syncFilesWithDb(projectId: string | null): void {
-  const { dir } = getBaseDir(projectId);
+function syncFilesWithDb(projectId: string): void {
+  let dir: string;
+  try {
+    dir = getProjectDir(projectId);
+  } catch {
+    return;
+  }
   if (!fs.existsSync(dir)) return;
   let files: string[] = [];
   try {
@@ -90,58 +112,66 @@ function syncFilesWithDb(projectId: string | null): void {
   );
   for (const f of files) {
     // Only auto-insert if no existing row with same file_name AND project_id
-    const pid = projectId || null;
-    const existing = pid
-      ? db.prepare('SELECT id FROM research_plans WHERE file_name = ? AND project_id = ?').get(f, pid)
-      : db.prepare('SELECT id FROM research_plans WHERE file_name = ? AND project_id IS NULL').get(f);
+    const existing = db.prepare(
+      'SELECT id FROM research_plans WHERE file_name = ? AND project_id = ?',
+    ).get(f, projectId);
     if (!existing) {
-      insert.run(newId(), f, fileNameToTitle(f), pid, ts, ts);
+      insert.run(newId(), f, fileNameToTitle(f), projectId, ts, ts);
     }
   }
 }
 
 // ===== LIST =====
 router.get('/', (req, res) => {
-  let query = 'SELECT * FROM research_plans';
+  let query = 'SELECT rp.* FROM research_plans rp JOIN projects p ON p.id = rp.project_id';
   const params: string[] = [];
   const conds: string[] = [];
   const { projectId, status, search } = req.query;
 
-  // If projectId given, also sync files from that project's dir first
+  // Sync only project working directories. The retired root-level
+  // research-plans/ directory is intentionally ignored.
   if (projectId) {
     syncFilesWithDb(projectId as string);
   } else {
-    // sync global dir + all known project dirs
-    syncFilesWithDb(null);
-    const allProjs = db.prepare('SELECT DISTINCT project_id FROM research_plans WHERE project_id IS NOT NULL').all() as
-      | { project_id: string }[]
+    const allProjs = db.prepare(
+      "SELECT id FROM projects WHERE TRIM(COALESCE(working_dir, '')) <> ''",
+    ).all() as
+      | { id: string }[]
       | [];
-    allProjs.forEach(p => syncFilesWithDb(p.project_id));
+    allProjs.forEach(p => syncFilesWithDb(p.id));
   }
 
   if (projectId) {
-    conds.push('project_id = ?');
+    conds.push('rp.project_id = ?');
     params.push(projectId as string);
   }
   if (status) {
-    conds.push('status = ?');
+    conds.push('rp.status = ?');
     params.push(status as string);
   }
   if (search) {
-    conds.push('(title LIKE ? OR tags LIKE ?)');
+    conds.push('(rp.title LIKE ? OR rp.tags LIKE ?)');
     const s = `%${search}%`;
     params.push(s, s);
   }
   if (conds.length) query += ' WHERE ' + conds.join(' AND ');
-  query += ' ORDER BY updated_at DESC';
+  query += ' ORDER BY rp.updated_at DESC';
 
   const rows = db.prepare(query).all(...params) as PlanRow[];
 
   // Annotate with missing flag
   const annotated = rows.map(r => {
-    const { dir } = getBaseDir(r.project_id);
-    const exists = fs.existsSync(path.join(dir, r.file_name));
-    return { ...r, missing: !exists };
+    try {
+      const dir = getProjectDir(r.project_id);
+      const full = safeResolve(dir, r.file_name);
+      const exists = full ? fs.existsSync(full) : false;
+      return { ...r, missing: !exists };
+    } catch (err) {
+      if (err instanceof PlanDirectoryError) {
+        return { ...r, missing: true };
+      }
+      throw err;
+    }
   });
   res.json(annotated);
 });
@@ -153,8 +183,9 @@ router.post('/import', (req, res) => {
     return res.status(400).json({ error: 'Provide either sourcePath or content' });
   }
 
-  const pid = project_id || null;
-  const { dir } = getBaseDir(pid);
+  const pid = typeof project_id === 'string' ? project_id.trim() : '';
+  const dir = resolveProjectDir(res, pid);
+  if (!dir) return;
 
   let targetName: string;
   try {
@@ -206,8 +237,9 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'title is required' });
   }
   const t = String(title).trim();
-  const pid = project_id || null;
-  const { dir } = getBaseDir(pid);
+  const pid = typeof project_id === 'string' ? project_id.trim() : '';
+  const dir = resolveProjectDir(res, pid);
+  if (!dir) return;
   const fileName = titleToFileName(t, dir);
   const safe = safeResolve(dir, fileName);
   if (!safe) return res.status(400).json({ error: 'Invalid derived fileName' });
@@ -236,8 +268,10 @@ router.post('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM research_plans WHERE id = ?').get(req.params.id) as PlanRow | undefined;
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const { dir } = getBaseDir(row.project_id);
-  const exists = fs.existsSync(path.join(dir, row.file_name));
+  const dir = resolveProjectDir(res, row.project_id);
+  if (!dir) return;
+  const full = safeResolve(dir, row.file_name);
+  const exists = full ? fs.existsSync(full) : false;
   res.json({ ...row, missing: !exists });
 });
 
@@ -247,8 +281,10 @@ router.get('/:id/content', (req, res) => {
     | { file_name: string; project_id: string | null }
     | undefined;
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const { dir } = getBaseDir(row.project_id);
-  const full = path.join(dir, row.file_name);
+  const dir = resolveProjectDir(res, row.project_id);
+  if (!dir) return;
+  const full = safeResolve(dir, row.file_name);
+  if (!full) return res.status(400).json({ error: 'Invalid stored file name' });
   if (!fs.existsSync(full)) {
     return res.status(404).json({ error: `File missing on disk: ${row.file_name}` });
   }
@@ -270,8 +306,10 @@ router.put('/:id/content', (req, res) => {
     | { file_name: string; project_id: string | null }
     | undefined;
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const { dir } = getBaseDir(row.project_id);
-  const full = path.join(dir, row.file_name);
+  const dir = resolveProjectDir(res, row.project_id);
+  if (!dir) return;
+  const full = safeResolve(dir, row.file_name);
+  if (!full) return res.status(400).json({ error: 'Invalid stored file name' });
   try {
     fs.writeFileSync(full, String(content), 'utf-8');
     const ts = now();
@@ -288,8 +326,11 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM research_plans WHERE id = ?').get(req.params.id) as PlanRow | undefined;
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
+  if (project_id !== undefined && project_id !== existing.project_id) {
+    return res.status(400).json({ error: 'Changing a research plan project is not supported' });
+  }
+
   const newTitle = title !== undefined ? String(title) : existing.title;
-  const newPid = project_id !== undefined ? (project_id || null) : existing.project_id;
   const newLinks =
     linked_task_ids !== undefined
       ? JSON.stringify(Array.isArray(linked_task_ids) ? linked_task_ids : [])
@@ -301,9 +342,9 @@ router.put('/:id', (req, res) => {
 
   db.prepare(
     `UPDATE research_plans
-     SET title = ?, project_id = ?, linked_task_ids = ?, status = ?, tags = ?, updated_at = ?
+     SET title = ?, linked_task_ids = ?, status = ?, tags = ?, updated_at = ?
      WHERE id = ?`,
-  ).run(newTitle, newPid, newLinks, newStatus, newTags, ts, req.params.id);
+  ).run(newTitle, newLinks, newStatus, newTags, ts, req.params.id);
 
   const row = db.prepare('SELECT * FROM research_plans WHERE id = ?').get(req.params.id) as PlanRow;
   res.json(row);
@@ -317,15 +358,16 @@ router.delete('/:id', (req, res) => {
     | undefined;
   if (!row) return res.status(404).json({ error: 'Not found' });
 
+  const dir = resolveProjectDir(res, row.project_id);
+  if (!dir) return;
+  const full = safeResolve(dir, row.file_name);
+  if (!full) return res.status(400).json({ error: 'Invalid stored file name' });
+
   db.prepare('DELETE FROM research_plans WHERE id = ?').run(req.params.id);
 
-  if (deleteFile) {
-    const { dir } = getBaseDir(row.project_id);
-    const full = path.join(dir, row.file_name);
-    if (fs.existsSync(full)) {
-      try { fs.unlinkSync(full); } catch (err) {
-        console.error(`Failed to delete ${full}: ${(err as Error).message}`);
-      }
+  if (deleteFile && fs.existsSync(full)) {
+    try { fs.unlinkSync(full); } catch (err) {
+      console.error(`Failed to delete ${full}: ${(err as Error).message}`);
     }
   }
   res.json({ success: true });
