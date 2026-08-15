@@ -5,7 +5,7 @@ const router = Router({ mergeParams: true });
 
 // Get all step progress for a task
 router.get('/', (req, res) => {
-  const { taskId } = req.params;
+  const { taskId } = req.params as { taskId: string };
   const progress = db.prepare(`
     SELECT sp.*, GROUP_CONCAT(
       json_object('id', sf.id, 'file_path', sf.file_path, 'file_name', sf.file_name,
@@ -30,7 +30,7 @@ router.get('/', (req, res) => {
 
 // Upsert step progress (status + notes + commands + lsf_script)
 router.put('/:stepId', (req, res) => {
-  const { taskId, stepId } = req.params;
+  const { taskId, stepId } = req.params as { taskId: string; stepId: string };
   const { status, notes, commands, lsf_script } = req.body;
   const now = new Date().toISOString();
 
@@ -63,7 +63,7 @@ router.put('/:stepId', (req, res) => {
 
 // Get files for a specific step
 router.get('/:stepId/files', (req, res) => {
-  const { taskId, stepId } = req.params;
+  const { taskId, stepId } = req.params as { taskId: string; stepId: string };
   const sp = db.prepare('SELECT id FROM step_progress WHERE task_id = ? AND step_id = ?').get(taskId, stepId);
   if (!sp) return res.json([]);
 
@@ -73,7 +73,7 @@ router.get('/:stepId/files', (req, res) => {
 
 // Add a file to a step
 router.post('/:stepId/files', (req, res) => {
-  const { taskId, stepId } = req.params;
+  const { taskId, stepId } = req.params as { taskId: string; stepId: string };
   const { file_path, file_name, description } = req.body;
   if (!file_path || !file_name) return res.status(400).json({ error: 'file_path and file_name are required' });
 

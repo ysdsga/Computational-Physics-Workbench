@@ -11,13 +11,27 @@ import filesRouter from './routes/files.js';
 import experiencesRouter from './routes/experiences.js';
 import workflowsRouter from './routes/workflows.js';
 import researchPlansRouter from './routes/researchPlans.js';
+import contractsRouter from './routes/contracts.js';
+import agentRouter, { agentErrorHandler } from './routes/agent.js';
+import remoteRouter from './routes/remote.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Build the Express app (routes + static + SPA fallback). No side effects. */
 export function createApp() {
   const app = express();
-  app.use(cors());
+  const allowedOrigins = new Set(
+    (process.env.WORKBENCH_ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean),
+  );
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      callback(new Error('Origin is not allowed by Workbench'));
+    },
+  }));
   app.use(express.json({ limit: '10mb' }));
 
   // Routes
@@ -25,7 +39,10 @@ export function createApp() {
   app.use('/api/projects', projectsRouter);
   app.use('/api/tasks', tasksRouter);
   app.use('/api/experiences', experiencesRouter);
+  app.use('/api/research-plans', contractsRouter);
   app.use('/api/research-plans', researchPlansRouter);
+  app.use('/api/agent/v1', agentRouter);
+  app.use('/api/agent/v1/remote', remoteRouter);
 
   // Nested routes need parent params
   app.use('/api/projects/:projectId/tasks', tasksRouter);
@@ -37,6 +54,12 @@ export function createApp() {
     const result = db.prepare('DELETE FROM step_files WHERE id = ?').run(req.params.fileId);
     if (result.changes === 0) return res.status(404).json({ error: 'File not found' });
     res.json({ success: true });
+  });
+
+  app.use(agentErrorHandler);
+  app.use((error: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const corsDenied = error.message === 'Origin is not allowed by Workbench';
+    res.status(corsDenied ? 403 : 500).json({ error: corsDenied ? error.message : 'Internal server error', code: corsDenied ? 'CORS_DENIED' : 'INTERNAL_ERROR' });
   });
 
   // Serve static frontend in production (no-cache for HTML to ensure latest build)
@@ -65,9 +88,12 @@ export function createApp() {
 const PORT = process.env.WORKBENCH_PORT ? Number(process.env.WORKBENCH_PORT) : 3001;
 
 const app = createApp();
-const server = app.listen(PORT, () => {
-  const actualPort = (server.address() as { port: number }).port;
-  console.log(`[DFT+DMFT Workbench] Server running at http://localhost:${actualPort}`);
+const HOST = process.env.WORKBENCH_HOST ?? '127.0.0.1';
+const server = app.listen(PORT, HOST, () => {
+  const address = server.address();
+  if (!address || typeof address === 'string') return;
+  const actualPort = address.port;
+  console.log(`[DFT+DMFT Workbench] Server running at http://${HOST}:${actualPort}`);
   console.log(`[DFT+DMFT Workbench] 按 Ctrl+C 停止服务`);
 });
 

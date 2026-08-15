@@ -2,6 +2,7 @@ import { Router, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
+import { resolveWithinRoot } from '../services/pathSafety.js';
 
 const router = Router();
 
@@ -58,11 +59,8 @@ function resolveProjectDir(res: Response, projectId: unknown): string | null {
 
 /** Resolve file_name relative to a base dir, blocking path escapes. */
 function safeResolve(baseDir: string, fileName: string): string | null {
-  if (path.isAbsolute(fileName)) return null;
-  const full = path.resolve(baseDir, fileName);
-  const root = baseDir + path.sep;
-  if (full === baseDir || full.startsWith(root)) return full;
-  return null;
+  try { return resolveWithinRoot(baseDir, fileName, { allowRoot: false, label: 'research plan path' }); }
+  catch { return null; }
 }
 
 /** Sanitize title → safe .md file name */
@@ -353,6 +351,9 @@ router.put('/:id', (req, res) => {
 // ===== DELETE =====
 router.delete('/:id', (req, res) => {
   const deleteFile = req.query.deleteFile !== 'false';
+  if (db.prepare('SELECT 1 FROM research_runs WHERE research_plan_id = ? LIMIT 1').get(req.params.id)) {
+    return res.status(409).json({ error: 'Research plan has run history and can only be archived', code: 'RUN_HISTORY_PROTECTED' });
+  }
   const row = db.prepare('SELECT file_name, project_id FROM research_plans WHERE id = ?').get(req.params.id) as
     | { file_name: string; project_id: string | null }
     | undefined;

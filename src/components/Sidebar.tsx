@@ -1,12 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import { FolderKanban, BookOpen, GitBranch, Terminal, FileText } from 'lucide-react';
+import { FolderKanban, BookOpen, GitBranch, Terminal, FileText, Bot, ClipboardCheck } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: FolderKanban, label: '项目仓库', end: true },
   { to: '/workflow', icon: GitBranch, label: '工作流' },
-  { to: '/hpc', icon: Terminal, label: '超算提交' },
   { to: '/research-plans', icon: FileText, label: '研究方案' },
-  { to: '/experiences', icon: BookOpen, label: '经验库' },
+  { to: '/agent-runs', icon: Bot, label: 'Agent 运行中心' },
+  { to: '/reviews', icon: ClipboardCheck, label: '评价中心' },
+  { to: '/hpc', icon: Terminal, label: '超算提交（旧）' },
+  { to: '/experiences', icon: BookOpen, label: '证据与经验' },
 ];
 
 export default function Sidebar() {
@@ -39,7 +41,7 @@ export default function Sidebar() {
       </nav>
       <div className="px-5 py-4 border-t border-[#2d2d44]">
         <p className="text-[10px] text-[#4a4a60] leading-relaxed">
-          Full-stack · v0.2
+          Local research environment · V1
         </p>
       </div>
     </aside>

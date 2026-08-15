@@ -6,7 +6,7 @@ import {
   Plus, Search, Trash2, Tag, FileText, X,
   CheckCircle2, Upload, Edit3, Eye, Save, AlertTriangle,
 } from 'lucide-react';
-import { researchPlansApi, projectsApi, tasksApi } from '../api/client';
+import { researchPlansApi, projectsApi, tasksApi, contractsApi } from '../api/client';
 import type { ResearchPlan, ResearchPlanStatus, Project, Task } from '../types';
 
 const STATUS_META: Record<ResearchPlanStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -47,6 +47,7 @@ export default function ResearchPlansPage() {
   const [loadingContent, setLoadingContent] = useState(false);
   const [mode, setMode] = useState<Mode>('view');
   const [dirty, setDirty] = useState(false);
+  const [contractStatus, setContractStatus] = useState<'missing' | 'valid' | 'drift'>('missing');
 
   // Scroll position preservation when switching view/edit
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +119,12 @@ export default function ResearchPlansPage() {
     try {
       const { content: c } = await researchPlansApi.getContent(selectedId);
       setContent(c); setOriginalContent(c);
+      try {
+        const contract = await contractsApi.get(selectedId);
+        setContractStatus(contract.drift ? 'drift' : 'valid');
+      } catch {
+        setContractStatus('missing');
+      }
     } catch (e) {
       setContent(`# 无法读取\n\n错误：${(e as Error).message}`);
     } finally {
@@ -217,6 +224,7 @@ export default function ResearchPlansPage() {
       await researchPlansApi.saveContent(selectedId, content);
       setOriginalContent(content);
       setDirty(false);
+      if (contractStatus === 'valid') setContractStatus('drift');
       setPlans(prev => prev.map(p => p.id === selectedId ? { ...p, updated_at: new Date().toISOString() } : p));
     } catch (e) {
       alert(`保存失败：${(e as Error).message}`);
@@ -247,7 +255,11 @@ export default function ResearchPlansPage() {
       if (selectedId === id) setSelectedId(null);
       setPlans(prev => prev.filter(p => p.id !== id));
     } catch (e) {
-      alert(`删除失败：${(e as Error).message}`);
+      const item = e as Error & { code?: string };
+      if (item.code === 'RUN_HISTORY_PROTECTED' && confirm('该研究方案已有运行记录，不能物理删除。是否改为归档？')) {
+        const updated = await researchPlansApi.update(id, { status: 'archived' });
+        setPlans(prev => prev.map(plan => plan.id === id ? updated : plan));
+      } else alert(`删除失败：${item.message}`);
     }
   };
 
@@ -404,6 +416,9 @@ export default function ResearchPlansPage() {
                         </span>
                       )}
                       <span className="text-[#6b6b80]">更新于 {new Date(selected.updated_at).toLocaleString()}</span>
+                      <span className={`px-1.5 py-0.5 rounded border ${contractStatus === 'valid' ? 'text-[#22c55e] border-[#22c55e]/30 bg-[#22c55e]/5' : contractStatus === 'drift' ? 'text-[#f59e0b] border-[#f59e0b]/30 bg-[#f59e0b]/5' : 'text-[#9898b0] border-[#383850]'}`}>
+                        {contractStatus === 'valid' ? '合同已绑定' : contractStatus === 'drift' ? '合同 drift' : '未创建合同'}
+                      </span>
                     </>
                   )}
                 </div>

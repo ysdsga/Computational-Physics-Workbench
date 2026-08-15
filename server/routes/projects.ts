@@ -35,7 +35,7 @@ router.post('/', (req, res) => {
 
 // Update project
 router.put('/:id', (req, res) => {
-  const { name, description, material, working_dir, hpc_config } = req.body;
+  const { name, description, material, working_dir, hpc_config, status } = req.body;
   const now = new Date().toISOString();
 
   const result = db.prepare(`UPDATE projects SET
@@ -44,8 +44,9 @@ router.put('/:id', (req, res) => {
     material = COALESCE(?, material),
     working_dir = COALESCE(?, working_dir),
     hpc_config = COALESCE(?, hpc_config),
+    status = COALESCE(?, status),
     updated_at = ?
-    WHERE id = ?`).run(name ?? null, description ?? null, material ?? null, working_dir ?? null, hpc_config ?? null, now, req.params.id);
+    WHERE id = ?`).run(name ?? null, description ?? null, material ?? null, working_dir ?? null, hpc_config ?? null, status ?? null, now, req.params.id);
 
   if (result.changes === 0) return res.status(404).json({ error: 'Project not found' });
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
@@ -54,6 +55,8 @@ router.put('/:id', (req, res) => {
 
 // Delete project (cascade deletes tasks, progress, files)
 router.delete('/:id', (req, res) => {
+  const referenced = db.prepare(`SELECT 1 FROM research_runs rr JOIN tasks t ON t.id = rr.task_id WHERE t.project_id = ? LIMIT 1`).get(req.params.id);
+  if (referenced) return res.status(409).json({ error: 'Project has research runs and can only be archived', code: 'RUN_HISTORY_PROTECTED' });
   const result = db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Project not found' });
   res.json({ success: true });

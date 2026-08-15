@@ -1,4 +1,4 @@
-import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus } from '../types';
+import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContextV1, AgentPolicy, AgentPolicyDocument, ResearchRun, ReviewRequest, ReviewDecision, RunEvent, RemoteCapabilityReport, RemoteJob, ResearchContract } from '../types';
 
 const BASE = '/api';
 
@@ -9,7 +9,11 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const error = new Error(err.error || `HTTP ${res.status}`) as Error & { code?: string; status?: number; details?: object };
+    error.code = err.code;
+    error.status = res.status;
+    error.details = err.details;
+    throw error;
   }
   return res.json();
 }
@@ -31,6 +35,8 @@ export const tasksApi = {
   update: (id: string, data: Partial<Task>) => api<Task>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   updateWorkflow: (id: string, workflow: WorkflowTemplate) =>
     api<WorkflowTemplate>(`/tasks/${id}/workflow`, { method: 'PUT', body: JSON.stringify(workflow) }),
+  resolveRoot: (id: string, taskRootRel: string, create = false) =>
+    api<Task>(`/tasks/${id}/root`, { method: 'PUT', body: JSON.stringify({ task_root_rel: taskRootRel, create }) }),
   delete: (id: string) => api<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
 };
 
@@ -135,4 +141,29 @@ export const researchPlansApi = {
       `/research-plans/${id}${opts?.deleteFile === false ? '?deleteFile=false' : ''}`,
       { method: 'DELETE' },
     ),
+};
+
+export const contractsApi = {
+  get: (planId: string) => api<{ content: string; contract: ResearchContract; sha256: string; planSha256: string; drift: boolean }>(`/research-plans/${planId}/contract`),
+  initialize: (planId: string, overwrite = false) => api<{ content: string; contract: ResearchContract; sha256: string }>(`/research-plans/${planId}/contract/initialize`, { method: 'POST', body: JSON.stringify({ overwrite }) }),
+  update: (planId: string, content: string, expectedPlanSha256?: string) => api<{ content: string; contract: ResearchContract; sha256: string }>(`/research-plans/${planId}/contract`, { method: 'PUT', body: JSON.stringify({ content, expectedPlanSha256 }) }),
+};
+
+export const agentApi = {
+  context: (taskId: string) => api<AgentContextV1>(`/agent/v1/context/tasks/${taskId}`),
+  startRun: (taskId: string, researchPlanId: string, idempotencyKey: string) => api<ResearchRun>('/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId, researchPlanId, idempotencyKey }) }),
+  terminateRun: (runId: string, reason: string) => api<ResearchRun>(`/agent/v1/runs/${runId}/terminate`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  adoptPolicy: (runId: string, reason: string) => api(`/agent/v1/runs/${runId}/adopt-policy`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  events: (runId: string, after = 0) => api<RunEvent[]>(`/agent/v1/runs/${runId}/events?after=${after}`),
+  appendEvent: (runId: string, data: { category: RunEvent['category']; eventType: string; actorType: RunEvent['actor_type']; payload?: Record<string, unknown>; idempotencyKey?: string }) => api<RunEvent>(`/agent/v1/runs/${runId}/events`, { method: 'POST', body: JSON.stringify(data) }),
+  policies: (scopeType?: string, scopeId?: string) => {
+    const qs = new URLSearchParams(); if (scopeType) qs.set('scopeType', scopeType); if (scopeId) qs.set('scopeId', scopeId);
+    return api<AgentPolicy[]>(`/agent/v1/policies${qs.size ? `?${qs}` : ''}`);
+  },
+  createPolicy: (scopeType: AgentPolicy['scope_type'], scopeId: string | null, policy: AgentPolicyDocument, activate = true) => api<AgentPolicy>('/agent/v1/policies', { method: 'POST', body: JSON.stringify({ scopeType, scopeId, policy, activate }) }),
+  reviews: (runId?: string) => api<ReviewRequest[]>(`/agent/v1/reviews${runId ? `?runId=${runId}` : ''}`),
+  decideReview: (requestId: string, decision: ReviewDecision['decision'], comment: string) => api<ReviewDecision>(`/agent/v1/reviews/${requestId}/decisions`, { method: 'POST', body: JSON.stringify({ decision, comment }) }),
+  inspectRemote: (taskId: string, host: string, remoteRoot: string) => api<RemoteCapabilityReport>(`/agent/v1/remote/tasks/${taskId}/inspect`, { method: 'POST', body: JSON.stringify({ host, remoteRoot }) }),
+  submitSmoke: (taskId: string, host: string, remoteRoot: string, queue: string, confirmed: boolean, idempotencyKey: string) => api<RemoteJob>(`/agent/v1/remote/tasks/${taskId}/submit-smoke`, { method: 'POST', body: JSON.stringify({ host, remoteRoot, queue: queue || undefined, confirmed, idempotencyKey }) }),
+  reconcileJob: (jobId: string) => api<RemoteJob>(`/agent/v1/remote/jobs/${jobId}/reconcile`, { method: 'POST' }),
 };

@@ -12,10 +12,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Server } from 'node:http';
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
+import { stringify as stringifyYaml } from 'yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -29,6 +31,17 @@ process.env.WORKBENCH_PORT = '0'; // 0 = 系统分配随机端口
 
 let server: Server | undefined;
 let base = '';
+
+function runCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'workbench.js'), ...args], {
+      cwd: ROOT, env: { ...process.env, WORKBENCH_URL: base }, windowsHide: true,
+    });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject); child.on('close', code => resolve({ code, stdout, stderr }));
+  });
+}
 
 before(async () => {
   process.chdir(tmpRoot);
@@ -72,6 +85,13 @@ test('core API endpoints respond', async () => {
     const res = await fetch(`${base}${ep}`);
     assert.equal(res.status, 200, `${ep} should return 200, got ${res.status}`);
   }
+});
+
+test('workbench CLI uses the HTTP API and returns machine-readable output', async () => {
+  const result = await runCli(['doctor']);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout) as { ok: boolean; baseUrl: string; projectCount: number };
+  assert.equal(output.ok, true); assert.equal(output.baseUrl, base); assert.equal(typeof output.projectCount, 'number');
 });
 
 test('new one-shot software-stack templates are seeded and create their stage folders', async () => {
@@ -462,6 +482,115 @@ test('research plan listing survives an unavailable project working directory', 
   assert.equal(listedPlan.missing, true);
 });
 
+test('Agent V1 freezes context, keeps an append-only ledger, and routes expansions through review', async () => {
+  const workingDir = path.join(tmpRoot, 'agent-v1-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'agent-v1', working_dir: workingDir }) });
+  const project = await projectResponse.json() as { id: string };
+  const taskResponse = await fetch(`${base}/api/projects/${project.id}/tasks`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'stable-task', workflow_id: 'dft-dmft-oneshot' }) });
+  assert.equal(taskResponse.status, 201);
+  const task = await taskResponse.json() as { id: string; task_root_rel: string };
+  const planResponse = await fetch(`${base}/api/research-plans`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Agent Plan', project_id: project.id, content: '# Agent Plan\n\nInitial.' }) });
+  const plan = await planResponse.json() as { id: string };
+  const initialize = await fetch(`${base}/api/research-plans/${plan.id}/contract/initialize`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(initialize.status, 201);
+  const runResponse = await fetch(`${base}/api/agent/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'start-once' }) });
+  assert.equal(runResponse.status, 201);
+  const run = await runResponse.json() as { id: string; current_context_version_id: string };
+  const repeated = await fetch(`${base}/api/agent/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'start-once' }) });
+  assert.equal((await repeated.json() as { id: string }).id, run.id);
+
+  const contextResponse = await fetch(`${base}/api/agent/v1/context/tasks/${task.id}`);
+  const context = await contextResponse.json() as { schemaVersion: number; taskRoot: { relative: string; resolved: boolean }; contextVersion: { id: string; version: number }; eventCursor: number };
+  assert.equal(context.schemaVersion, 1); assert.equal(context.taskRoot.relative, task.task_root_rel); assert.equal(context.taskRoot.resolved, true); assert.equal(context.contextVersion.version, 1); assert.equal(context.eventCursor, 1);
+
+  const eventBody = { category: 'fact', eventType: 'test.observed', actorType: 'agent', payload: { value: 1 }, idempotencyKey: 'fact-once' };
+  const firstEvent = await fetch(`${base}/api/agent/v1/runs/${run.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(eventBody) });
+  const secondEvent = await fetch(`${base}/api/agent/v1/runs/${run.id}/events`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(eventBody) });
+  assert.equal((await firstEvent.json() as { id: string }).id, (await secondEvent.json() as { id: string }).id);
+
+  const contractResponse = await fetch(`${base}/api/research-plans/${plan.id}/contract`);
+  const current = await contractResponse.json() as { contract: any };
+  const candidatePlan = '# Agent Plan\n\nExpanded method.';
+  const candidateContract = { ...current.contract, approvedPlan: { ...current.contract.approvedPlan, sha256: crypto.createHash('sha256').update(candidatePlan).digest('hex') }, boundaries: { ...current.contract.boundaries, allowedMethods: ['new-method'] } };
+  const revise = await fetch(`${base}/api/agent/v1/runs/${run.id}/revise`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ planContent: candidatePlan, contractContent: stringifyYaml(candidateContract), expectedContextVersionId: context.contextVersion.id, reason: 'method correction', idempotencyKey: 'revision-one' }) });
+  assert.equal(revise.status, 202);
+  const revisionResult = await revise.json() as { request: { id: string } };
+  const decision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve', comment: 'scientifically justified' }) });
+  assert.equal(decision.status, 201);
+  const doubleDecision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve' }) });
+  assert.equal(doubleDecision.status, 409);
+  const adoptedContext = await fetch(`${base}/api/agent/v1/context/tasks/${task.id}`).then(response => response.json()) as { contextVersion: { id: string; version: number }; research: { drift: boolean } };
+  assert.equal(adoptedContext.contextVersion.version, 2); assert.equal(adoptedContext.research.drift, false);
+
+  const adoptedContract = await fetch(`${base}/api/research-plans/${plan.id}/contract`).then(response => response.json()) as { contract: any };
+  const evidenceReducedPlan = '# Agent Plan\n\nEvidence reduction proposal.';
+  const evidenceReducedContract = {
+    ...adoptedContract.contract,
+    approvedPlan: { ...adoptedContract.contract.approvedPlan, sha256: crypto.createHash('sha256').update(evidenceReducedPlan).digest('hex') },
+    completion: { requiredEvidence: adoptedContract.contract.completion.requiredEvidence.slice(1) },
+  };
+  const repeatedRevisionBody = JSON.stringify({ planContent: evidenceReducedPlan, contractContent: stringifyYaml(evidenceReducedContract), expectedContextVersionId: adoptedContext.contextVersion.id, reason: 'remove evidence obligation', idempotencyKey: 'revision-review-once' });
+  const firstReviewRevision = await fetch(`${base}/api/agent/v1/runs/${run.id}/revise`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: repeatedRevisionBody });
+  const secondReviewRevision = await fetch(`${base}/api/agent/v1/runs/${run.id}/revise`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: repeatedRevisionBody });
+  assert.equal(firstReviewRevision.status, 202); assert.equal(secondReviewRevision.status, 202);
+  const firstReviewResult = await firstReviewRevision.json() as { request: { id: string; idempotency_key: string } };
+  const secondReviewResult = await secondReviewRevision.json() as { request: { id: string; idempotency_key: string } };
+  assert.equal(firstReviewResult.request.id, secondReviewResult.request.id);
+  assert.equal(firstReviewResult.request.idempotency_key, 'revision-review-once');
+
+  const deleteTask = await fetch(`${base}/api/tasks/${task.id}`, { method: 'DELETE' });
+  const deletePlan = await fetch(`${base}/api/research-plans/${plan.id}`, { method: 'DELETE' });
+  const deleteProject = await fetch(`${base}/api/projects/${project.id}`, { method: 'DELETE' });
+  assert.equal(deleteTask.status, 409); assert.equal(deletePlan.status, 409); assert.equal(deleteProject.status, 409);
+});
+
+test('policy activation rejects lower-scope privilege expansion', async () => {
+  const policy = { schemaVersion: 1, remoteEnabled: true, smokeAuthorized: true, allowedOperations: ['context', 'event.append', 'review.request', 'remote.inspect', 'job.submit_smoke'], allowedHosts: ['pilot', 'backup'], allowedMethods: ['baseline'], remoteRoot: '/pilot/root', limits: { maxCoresPerJob: 4, maxWallMinutes: 30, maxConcurrentJobs: 2, maxAutomaticRetries: 2 }, protectedPaths: ['results'], humanGates: ['final_interpretation'] };
+  const system = await fetch(`${base}/api/agent/v1/policies`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scopeType: 'system', policy, activate: true }) });
+  assert.equal(system.status, 201);
+  const project = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'policy-project' }) }).then(response => response.json()) as { id: string };
+  const inherited = await fetch(`${base}/api/agent/v1/policies`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scopeType: 'project', scopeId: project.id, policy: { ...policy, allowedHosts: ['pilot'] }, activate: true }) });
+  assert.equal(inherited.status, 201);
+  const replacement = await fetch(`${base}/api/agent/v1/policies`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scopeType: 'project', scopeId: project.id, policy: { ...policy, allowedHosts: ['backup'] }, activate: true }) });
+  assert.equal(replacement.status, 201);
+  const expanded = await fetch(`${base}/api/agent/v1/policies`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scopeType: 'project', scopeId: project.id, policy: { ...policy, allowedHosts: ['pilot', 'unapproved'] }, activate: true }) });
+  assert.equal(expanded.status, 409);
+});
+
+test('contract strictness rejects removed parameter bounds, stages, evidence and changed objectives', async () => {
+  const { contractIsSameOrStricter } = await import('../server/services/agentCore.js');
+  const current = {
+    schemaVersion: 1 as const, approvedPlan: { path: 'plan.md', sha256: '0'.repeat(64) }, objectives: ['baseline'], requiredStages: ['dft'],
+    boundaries: { allowedSoftwareStacks: ['qe'], allowedMethods: ['baseline'], parameterBounds: { U: { min: 3, max: 5 } } },
+    humanGates: ['final_interpretation'], completion: { requiredEvidence: ['inputs', 'validation'] },
+    resourceBudget: { maxCoresPerJob: 4, maxWallMinutes: 30, maxConcurrentJobs: 1, maxAutomaticRetries: 1 },
+  };
+  const next = { ...current, objectives: ['changed'], requiredStages: [], boundaries: { ...current.boundaries, parameterBounds: {} }, completion: { requiredEvidence: ['inputs'] } };
+  const result = contractIsSameOrStricter(next, current);
+  assert.equal(result.ok, false);
+  assert.ok(result.expansions.includes('objectives_changed'));
+  assert.ok(result.expansions.includes('required_stages_removed'));
+  assert.ok(result.expansions.includes('required_evidence_removed'));
+  assert.ok(result.expansions.includes('parameter:U:removed'));
+});
+
+test('LSF capability parser recognizes the real Spectrum LSF banner', async () => {
+  const { isProtectedRelativePath, parseLsfScheduler, smokeBudgetAllowsOneCoreMinute } = await import('../server/services/remote.js');
+  const banner = 'IBM Spectrum LSF Standard 10.1.0.8, May 10 2019';
+  assert.equal(parseLsfScheduler([banner]), banner);
+  assert.equal(isProtectedRelativePath('results/final.h5', ['results']), true);
+  assert.equal(isProtectedRelativePath('results-old/final.h5', ['results']), false);
+  const contract = {
+    schemaVersion: 1 as const, approvedPlan: { path: 'plan.md', sha256: '0'.repeat(64) }, objectives: [], requiredStages: [],
+    boundaries: { allowedSoftwareStacks: [], allowedMethods: [], parameterBounds: {} }, humanGates: [], completion: { requiredEvidence: [] },
+    resourceBudget: { maxCoresPerJob: 1, maxWallMinutes: 1, maxConcurrentJobs: 1, maxAutomaticRetries: 0 },
+  };
+  const policy = { schemaVersion: 1 as const, remoteEnabled: true, smokeAuthorized: true, allowedOperations: [], allowedHosts: [], allowedMethods: [], limits: { ...contract.resourceBudget }, protectedPaths: ['results'], humanGates: [] };
+  assert.equal(smokeBudgetAllowsOneCoreMinute(policy, contract), true);
+  assert.equal(smokeBudgetAllowsOneCoreMinute({ ...policy, limits: { ...policy.limits, maxWallMinutes: 0.5 } }, contract), false);
+});
+
 test('research plan metadata survives project-scoped schema migration', () => {
   const migrationDbPath = path.join(tmpRoot, 'migration.db');
   const legacyDb = new Database(migrationDbPath);
@@ -495,6 +624,12 @@ test('research plan metadata survives project-scoped schema migration', () => {
     { cwd: ROOT, encoding: 'utf-8' },
   );
   assert.equal(migrated.status, 0, migrated.stderr);
+  const repeatedMigration = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '--eval', script],
+    { cwd: ROOT, encoding: 'utf-8' },
+  );
+  assert.equal(repeatedMigration.status, 0, repeatedMigration.stderr);
 
   const verifyDb = new Database(migrationDbPath, { readonly: true });
   const row = verifyDb.prepare('SELECT id, project_id FROM research_plans WHERE id = ?').get('rp-existing') as
@@ -503,12 +638,20 @@ test('research plan metadata survives project-scoped schema migration', () => {
   const schema = verifyDb.prepare(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'research_plans'",
   ).get() as { sql: string };
+  const reviewColumns = verifyDb.prepare('PRAGMA table_info(review_requests)').all() as { name: string }[];
+  const userVersion = verifyDb.pragma('user_version', { simple: true }) as number;
   verifyDb.close();
 
   assert.equal(row?.project_id, 'proj-existing');
   assert.match(schema.sql.replace(/\s+/g, ''), /UNIQUE\(project_id,file_name\)/i);
+  assert.equal(userVersion, 2);
+  assert.ok(reviewColumns.some(column => column.name === 'idempotency_key'));
   assert.ok(
     fs.existsSync(path.join(tmpRoot, 'migration.before-research-plans-v3.db')),
     'migration should create a database backup',
+  );
+  assert.ok(
+    fs.existsSync(path.join(tmpRoot, 'migration.before-agent-v1.db')),
+    'Agent V1 migration should create a one-time consistency backup',
   );
 });

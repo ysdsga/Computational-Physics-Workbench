@@ -8,6 +8,8 @@ import WorkflowPage from './pages/WorkflowPage';
 import HPCPage from './pages/HPCPage';
 import ExperiencePage from './pages/ExperiencePage';
 import ResearchPlansPage from './pages/ResearchPlansPage';
+import AgentRunsPage from './pages/AgentRunsPage';
+import ReviewCenterPage from './pages/ReviewCenterPage';
 
 export default function App() {
   return (
@@ -21,6 +23,8 @@ export default function App() {
               <Route path="/workflow" element={<WorkflowPage />} />
               <Route path="/hpc" element={<HPCPage />} />
               <Route path="/research-plans" element={<ResearchPlansPage />} />
+              <Route path="/agent-runs" element={<AgentRunsPage />} />
+              <Route path="/reviews" element={<ReviewCenterPage />} />
               <Route path="/project/:projectId" element={<ProjectDetailPage />} />
               <Route path="/task/:taskId" element={<TaskWorkflowPage />} />
               <Route path="/experiences" element={<ExperiencePage />} />

@@ -31,6 +31,9 @@ dist-ssr
 # Test and coverage output
 coverage/
 .vite/
+/test-results/
+/playwright-report/
+/tmp/
 
 # Editor directories and files
 .vscode/*

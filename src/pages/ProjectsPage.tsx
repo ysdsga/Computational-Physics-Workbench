@@ -48,7 +48,14 @@ export default function ProjectsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('确定删除此项目？所有关联的任务和进度将一并删除。')) return;
-    await projectsApi.delete(id); load();
+    try { await projectsApi.delete(id); }
+    catch (error) {
+      const item = error as Error & { code?: string };
+      if (item.code !== 'RUN_HISTORY_PROTECTED') return alert(`删除失败：${item.message}`);
+      if (!confirm('该项目已有研究运行记录，不能物理删除。是否改为归档？')) return;
+      await projectsApi.update(id, { status: 'archived' });
+    }
+    load();
   };
 
   return (

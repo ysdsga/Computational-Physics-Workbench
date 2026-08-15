@@ -3,14 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "workbench": "bin/workbench.js"
+  },
   "scripts": {
     "dev": "vite",
     "dev:server": "tsx server/index.ts",
     "dev:full": "concurrently \"npm:dev:server\" \"npm:dev\"",
-    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b && tsc -p server/tsconfig.json --noEmit",
+    "build": "npm run typecheck && vite build",
     "start": "tsx server/index.ts",
     "lint": "oxlint",
-    "test": "node --test --import tsx tests/smoke.test.ts",
+    "test": "node --test --import tsx \"tests/**/*.test.ts\"",
+    "test:e2e": "playwright test",
+    "test:ssh:inspect": "node tests/live-remote.mjs inspect",
+    "test:ssh:lsf-smoke": "node tests/live-remote.mjs smoke",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,9 +29,11 @@
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",

@@ -67,7 +67,14 @@ export default function ProjectDetailPage() {
 
   const handleDeleteTask = async (id: string) => {
     if (!confirm('确定删除此任务？所有进度数据将一并删除。')) return;
-    await tasksApi.delete(id); load();
+    try { await tasksApi.delete(id); }
+    catch (error) {
+      const item = error as Error & { code?: string };
+      if (item.code !== 'RUN_HISTORY_PROTECTED') return alert(`删除失败：${item.message}`);
+      if (!confirm('该任务已有研究运行记录，不能物理删除。是否改为归档？')) return;
+      await tasksApi.update(id, { status: 'archived' });
+    }
+    load();
   };
 
   if (!project) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">加载中...</div>;

@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { runMigrations } from './migrations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Default: <project root>/data/workbench.db
@@ -159,6 +160,8 @@ try {
 try {
   db.exec(`ALTER TABLE tasks ADD COLUMN workflow_snapshot TEXT DEFAULT NULL`);
 } catch { /* column already exists */ }
+
+runMigrations(db, DB_PATH);
 
 export default db;
 

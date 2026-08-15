@@ -1,0 +1,4 @@
+interface:
+  display_name: "DFT+DMFT Workbench Agent"
+  short_description: "Operate bounded research runs through the Workbench CLI"
+  default_prompt: "Use $workbench-agent to inspect the current task context and take the next permitted action."
