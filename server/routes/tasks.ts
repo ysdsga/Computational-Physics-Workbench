@@ -4,7 +4,7 @@ import db from '../db.js';
 import { getWorkflowFromDB } from './workflows.js';
 import type { WorkflowTemplate } from '../../src/types/index.js';
 import { PathBoundaryError, resolveWithinRoot } from '../services/pathSafety.js';
-import { allocateTaskRoot, ensureTaskStageFolders, normalizeTaskRootRel, sanitizeTaskFolderName } from '../services/taskRoots.js';
+import { allocateTaskRoot, ensureTaskRoot, normalizeTaskRootRel, sanitizeTaskFolderName } from '../services/taskRoots.js';
 import { hashJson } from '../services/agentCore.js';
 
 const router = Router({ mergeParams: true });
@@ -77,11 +77,11 @@ function validateWorkflow(workflow: WorkflowTemplate): string | null {
   return null;
 }
 
-// Create task folder structure under project working_dir.
-// Existing folders are retained; task workflow edits only add missing stage folders.
-function createTaskFolders(workingDir: string, taskRootRel: string, workflow: WorkflowTemplate): void {
+// Workbench owns only the stable Task boundary. Codex arranges any directory
+// tree below it according to the current Working Plan.
+function createTaskRoot(workingDir: string, taskRootRel: string): void {
   if (!workingDir) return;
-  ensureTaskStageFolders(workingDir, taskRootRel, workflow.stages.map(stage => stage.id));
+  ensureTaskRoot(workingDir, taskRootRel);
 }
 
 function backfillTaskRoots(): void {
@@ -163,7 +163,7 @@ router.post('/', (req, res) => {
   // Auto-create folder structure under working_dir
   if (project.working_dir) {
     try {
-      createTaskFolders(project.working_dir, taskRootRel, workflow);
+      createTaskRoot(project.working_dir, taskRootRel);
     } catch (err) {
       // Folder creation failure should not block task creation
       console.error(`[Task] Failed to create folders: ${(err as Error).message}`);
@@ -210,15 +210,6 @@ router.put('/:taskId/workflow', (req, res) => {
   const now = new Date().toISOString();
   db.prepare('UPDATE tasks SET workflow_snapshot = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(workflow), now, taskId);
-
-  if (task.working_dir) {
-    try {
-      if (task.task_root_rel) createTaskFolders(task.working_dir, task.task_root_rel, workflow);
-    } catch (err) {
-      // Keep workflow edits usable even when a project directory is temporarily unavailable.
-      console.error(`[Task] Failed to create workflow stage folders: ${(err as Error).message}`);
-    }
-  }
 
   res.json({ ...workflow, sha256: hashJson(workflow) });
 });

@@ -126,7 +126,7 @@ router.get('/', (req, res) => {
   let query = 'SELECT rp.* FROM research_plans rp JOIN projects p ON p.id = rp.project_id';
   const params: string[] = [];
   const conds: string[] = [];
-  const { projectId, status, search } = req.query;
+  const { projectId, taskId, status, search } = req.query;
 
   // Sync only project working directories. The retired root-level
   // research-plans/ directory is intentionally ignored.
@@ -139,6 +139,10 @@ router.get('/', (req, res) => {
       | { id: string }[]
       | [];
     allProjs.forEach(p => syncFilesWithDb(p.id));
+  }
+  if (taskId) {
+    conds.push('EXISTS (SELECT 1 FROM json_each(rp.linked_task_ids) WHERE json_each.value = ?)');
+    params.push(taskId as string);
   }
 
   if (projectId) {

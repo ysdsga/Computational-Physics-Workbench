@@ -16,8 +16,8 @@ test('Agent and review Web pages are read-only observation surfaces', () => {
     assert.equal(agentPage.includes(forbidden), false, `Agent page must not contain ${forbidden}`);
     assert.equal(reviewPage.includes(forbidden), false, `Review page must not contain ${forbidden}`);
   }
-  assert.match(agentPage, /这里显示已写入 Workbench/);
-  assert.match(reviewPage, /Web 只负责筛选和显示/);
+  assert.match(agentPage, /本页只显示 Task Spec、动作、作业、证据和恢复状态/);
+  assert.match(reviewPage, /页面负责筛选和观察/);
 });
 
 test('Workflow, evidence and supercomputer views preserve Agent boundaries', () => {

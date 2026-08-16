@@ -40,16 +40,8 @@ export function allocateTaskRoot(
   return normalizeTaskRootRel(candidate);
 }
 
-export function ensureTaskStageFolders(
-  workingDir: string,
-  taskRootRel: string,
-  stageIds: Iterable<string>,
-): void {
+export function ensureTaskRoot(workingDir: string, taskRootRel: string): void {
   const normalizedRoot = normalizeTaskRootRel(taskRootRel);
   const taskRoot = resolveWithinRoot(workingDir, normalizedRoot, { allowRoot: false, label: 'task root' });
   fs.mkdirSync(taskRoot, { recursive: true });
-  for (const stageId of stageIds) {
-    const stagePath = resolveWithinRoot(taskRoot, stageId, { label: 'stage ID' });
-    fs.mkdirSync(stagePath, { recursive: true });
-  }
 }

@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 const AGENT_V1_SCHEMA_VERSION = 2;
 const WORKBENCH_V2_SCHEMA_VERSION = 3;
 const EXPERIENCE_PROVENANCE_SCHEMA_VERSION = 4;
+const ESSENTIAL_WORKBENCH_SCHEMA_VERSION = 5;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -35,9 +36,25 @@ function backupBeforeWorkbenchV2(db: Database.Database, dbPath: string): void {
   db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
 }
 
+function backupBeforeEssentialWorkbench(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-essential-v3.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
+function tableCount(db: Database.Database, table: string): number {
+  return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
+}
+
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= EXPERIENCE_PROVENANCE_SCHEMA_VERSION) return;
+  if (currentVersion >= ESSENTIAL_WORKBENCH_SCHEMA_VERSION) return;
 
   backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -343,4 +360,237 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
     `);
     db.pragma(`user_version = ${EXPERIENCE_PROVENANCE_SCHEMA_VERSION}`);
   })();
+
+  if (currentVersion < 5) {
+    backupBeforeEssentialWorkbench(db, dbPath);
+
+    // V4 was migrated into the formal database before any real run was
+    // started. Fail closed if another installation already has V4 runtime
+    // history: it needs an explicit archival conversion instead of a silent
+    // destructive rewrite.
+    const v4RuntimeTables = [
+      'agent_policies',
+      'research_runs',
+      'run_context_versions',
+      'run_events',
+      'review_requests',
+      'review_decisions',
+      'remote_jobs',
+      'run_actions',
+      'run_artifacts',
+      'evidence_checks',
+      'experience_promotions',
+      'experience_promotion_artifacts',
+    ];
+    const populated = v4RuntimeTables
+      .map(table => ({ table, count: tableCount(db, table) }))
+      .filter(item => item.count > 0);
+    if (populated.length > 0) {
+      throw new Error(`Schema v5 migration blocked: V4 runtime history is not empty (${populated.map(item => `${item.table}=${item.count}`).join(', ')})`);
+    }
+
+    db.transaction(() => {
+      db.exec(`
+        DROP TABLE experience_promotion_artifacts;
+        DROP TABLE experience_promotions;
+        DROP TABLE evidence_checks;
+        DROP TABLE run_artifacts;
+        DROP TABLE remote_jobs;
+        DROP TABLE run_actions;
+        DROP TABLE review_decisions;
+        DROP TABLE review_requests;
+        DROP TABLE run_events;
+        DROP TABLE run_context_versions;
+        DROP TABLE research_runs;
+        DROP TABLE agent_policies;
+
+        CREATE TABLE research_runs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+          research_plan_id TEXT NOT NULL REFERENCES research_plans(id) ON DELETE RESTRICT,
+          status TEXT NOT NULL CHECK(status IN ('draft', 'active', 'waiting_researcher', 'completed', 'terminated')),
+          objective TEXT NOT NULL,
+          confirmed_envelope_json TEXT NOT NULL,
+          working_plan_json TEXT NOT NULL DEFAULT '{}',
+          envelope_revision INTEGER NOT NULL DEFAULT 0 CHECK(envelope_revision >= 0),
+          envelope_confirmed_at TEXT,
+          envelope_confirmation_summary TEXT NOT NULL DEFAULT '',
+          current_stage_id TEXT,
+          idempotency_key TEXT NOT NULL,
+          started_at TEXT,
+          ended_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(task_id, idempotency_key)
+        );
+
+        CREATE UNIQUE INDEX idx_research_runs_one_open_per_task
+          ON research_runs(task_id)
+          WHERE status IN ('draft', 'active', 'waiting_researcher');
+
+        CREATE TABLE run_events (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          sequence INTEGER NOT NULL,
+          category TEXT NOT NULL CHECK(category IN ('fact', 'inference', 'decision', 'conclusion')),
+          event_type TEXT NOT NULL,
+          actor_type TEXT NOT NULL CHECK(actor_type IN ('agent', 'researcher', 'system')),
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          idempotency_key TEXT,
+          source TEXT NOT NULL DEFAULT 'workbench',
+          conversation_ref TEXT,
+          occurred_at TEXT NOT NULL,
+          UNIQUE(run_id, sequence)
+        );
+
+        CREATE UNIQUE INDEX idx_run_events_idempotency
+          ON run_events(run_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX idx_run_events_timeline ON run_events(run_id, sequence);
+
+        CREATE TABLE run_actions (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          stage_id TEXT NOT NULL,
+          step_id TEXT,
+          parent_action_id TEXT REFERENCES run_actions(id) ON DELETE RESTRICT,
+          action_type TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN (
+            'ready', 'executing', 'waiting_remote', 'waiting_codex',
+            'waiting_researcher', 'succeeded', 'failed', 'cancelled'
+          )),
+          executor TEXT NOT NULL DEFAULT 'codex' CHECK(executor = 'codex'),
+          spec_json TEXT NOT NULL,
+          spec_sha256 TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          conversation_ref TEXT,
+          started_at TEXT,
+          finished_at TEXT,
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(run_id, idempotency_key)
+        );
+
+        CREATE INDEX idx_run_actions_timeline ON run_actions(run_id, created_at DESC);
+        CREATE INDEX idx_run_actions_stage ON run_actions(run_id, stage_id, created_at DESC);
+
+        CREATE TABLE remote_jobs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          action_id TEXT NOT NULL REFERENCES run_actions(id) ON DELETE RESTRICT,
+          stage_id TEXT NOT NULL,
+          action_token TEXT NOT NULL UNIQUE,
+          idempotency_key TEXT NOT NULL,
+          profile_id TEXT NOT NULL,
+          host TEXT NOT NULL,
+          remote_workdir TEXT NOT NULL,
+          scheduler TEXT NOT NULL DEFAULT 'lsf',
+          job_id TEXT,
+          job_name TEXT NOT NULL,
+          status TEXT NOT NULL,
+          submission_spec_json TEXT NOT NULL DEFAULT '{}',
+          script_sha256 TEXT,
+          resources_json TEXT NOT NULL DEFAULT '{}',
+          last_observation_json TEXT NOT NULL DEFAULT '{}',
+          submit_stdout TEXT NOT NULL DEFAULT '',
+          submit_stderr TEXT NOT NULL DEFAULT '',
+          submitted_at TEXT,
+          reconciled_at TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(run_id, idempotency_key)
+        );
+
+        CREATE UNIQUE INDEX idx_remote_jobs_scheduler_id
+          ON remote_jobs(host, scheduler, job_id) WHERE job_id IS NOT NULL;
+        CREATE INDEX idx_remote_jobs_run ON remote_jobs(run_id, created_at DESC);
+        CREATE INDEX idx_remote_jobs_stage ON remote_jobs(run_id, stage_id, created_at DESC);
+
+        CREATE TABLE run_artifacts (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          action_id TEXT NOT NULL REFERENCES run_actions(id) ON DELETE RESTRICT,
+          remote_job_id TEXT REFERENCES remote_jobs(id) ON DELETE RESTRICT,
+          stage_id TEXT NOT NULL,
+          location TEXT NOT NULL CHECK(location IN ('local', 'remote')),
+          path TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+          sha256 TEXT NOT NULL,
+          category TEXT NOT NULL,
+          validity TEXT NOT NULL DEFAULT 'valid' CHECK(validity IN ('valid', 'suspect', 'invalid', 'superseded')),
+          superseded_by_id TEXT REFERENCES run_artifacts(id) ON DELETE RESTRICT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(action_id, idempotency_key)
+        );
+
+        CREATE INDEX idx_run_artifacts_run ON run_artifacts(run_id, created_at DESC);
+        CREATE INDEX idx_run_artifacts_stage ON run_artifacts(run_id, stage_id, created_at DESC);
+
+        CREATE TABLE evidence_checks (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          action_id TEXT NOT NULL REFERENCES run_actions(id) ON DELETE RESTRICT,
+          artifact_id TEXT REFERENCES run_artifacts(id) ON DELETE RESTRICT,
+          stage_id TEXT NOT NULL,
+          validator_name TEXT NOT NULL,
+          validator_version TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pass', 'warn', 'fail')),
+          result_json TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(action_id, idempotency_key)
+        );
+
+        CREATE INDEX idx_evidence_checks_run ON evidence_checks(run_id, created_at DESC);
+        CREATE INDEX idx_evidence_checks_stage ON evidence_checks(run_id, stage_id, created_at DESC);
+
+        CREATE TABLE pending_items (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE RESTRICT,
+          stage_id TEXT,
+          action_id TEXT REFERENCES run_actions(id) ON DELETE RESTRICT,
+          remote_job_id TEXT REFERENCES remote_jobs(id) ON DELETE RESTRICT,
+          audience TEXT NOT NULL CHECK(audience IN ('codex', 'researcher')),
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'resolved', 'dismissed')),
+          title TEXT NOT NULL,
+          detail_json TEXT NOT NULL DEFAULT '{}',
+          resolution_json TEXT NOT NULL DEFAULT '{}',
+          idempotency_key TEXT,
+          source TEXT NOT NULL DEFAULT 'workbench',
+          conversation_ref TEXT,
+          created_at TEXT NOT NULL,
+          resolved_at TEXT
+        );
+
+        CREATE UNIQUE INDEX idx_pending_items_idempotency
+          ON pending_items(run_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+        CREATE INDEX idx_pending_items_queue ON pending_items(audience, status, created_at DESC);
+      `);
+
+      if (!columnExists(db, 'experiences', 'category')) {
+        db.exec("ALTER TABLE experiences ADD COLUMN category TEXT NOT NULL DEFAULT 'workflow'");
+      }
+      if (!columnExists(db, 'experiences', 'status')) {
+        db.exec("ALTER TABLE experiences ADD COLUMN status TEXT NOT NULL DEFAULT 'manual'");
+      }
+      if (!columnExists(db, 'experiences', 'applicable_scope')) {
+        db.exec("ALTER TABLE experiences ADD COLUMN applicable_scope TEXT NOT NULL DEFAULT ''");
+      }
+      if (!columnExists(db, 'experiences', 'source_run_id')) {
+        db.exec('ALTER TABLE experiences ADD COLUMN source_run_id TEXT REFERENCES research_runs(id) ON DELETE SET NULL');
+      }
+      if (!columnExists(db, 'experiences', 'source_artifact_ids')) {
+        db.exec("ALTER TABLE experiences ADD COLUMN source_artifact_ids TEXT NOT NULL DEFAULT '[]'");
+      }
+      if (!columnExists(db, 'experiences', 'source_kind')) {
+        db.exec("ALTER TABLE experiences ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'researcher'");
+      }
+
+      db.pragma(`user_version = ${ESSENTIAL_WORKBENCH_SCHEMA_VERSION}`);
+    })();
+  }
 }

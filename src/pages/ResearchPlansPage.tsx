@@ -6,7 +6,7 @@ import {
   Plus, Search, Trash2, Tag, FileText, X,
   CheckCircle2, Upload, Edit3, Eye, Save, AlertTriangle,
 } from 'lucide-react';
-import { researchPlansApi, projectsApi, tasksApi, contractsApi } from '../api/client';
+import { researchPlansApi, projectsApi, tasksApi } from '../api/client';
 import type { ResearchPlan, ResearchPlanStatus, Project, Task } from '../types';
 
 const STATUS_META: Record<ResearchPlanStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -47,7 +47,6 @@ export default function ResearchPlansPage() {
   const [loadingContent, setLoadingContent] = useState(false);
   const [mode, setMode] = useState<Mode>('view');
   const [dirty, setDirty] = useState(false);
-  const [contractStatus, setContractStatus] = useState<'missing' | 'valid' | 'drift'>('missing');
 
   // Scroll position preservation when switching view/edit
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,12 +118,6 @@ export default function ResearchPlansPage() {
     try {
       const { content: c } = await researchPlansApi.getContent(selectedId);
       setContent(c); setOriginalContent(c);
-      try {
-        const contract = await contractsApi.get(selectedId);
-        setContractStatus(contract.drift ? 'drift' : 'valid');
-      } catch {
-        setContractStatus('missing');
-      }
     } catch (e) {
       setContent(`# 无法读取\n\n错误：${(e as Error).message}`);
     } finally {
@@ -224,7 +217,6 @@ export default function ResearchPlansPage() {
       await researchPlansApi.saveContent(selectedId, content);
       setOriginalContent(content);
       setDirty(false);
-      if (contractStatus === 'valid') setContractStatus('drift');
       setPlans(prev => prev.map(p => p.id === selectedId ? { ...p, updated_at: new Date().toISOString() } : p));
     } catch (e) {
       alert(`保存失败：${(e as Error).message}`);
@@ -416,9 +408,7 @@ export default function ResearchPlansPage() {
                         </span>
                       )}
                       <span className="text-[#6b6b80]">更新于 {new Date(selected.updated_at).toLocaleString()}</span>
-                      <span className={`px-1.5 py-0.5 rounded border ${contractStatus === 'valid' ? 'text-[#22c55e] border-[#22c55e]/30 bg-[#22c55e]/5' : contractStatus === 'drift' ? 'text-[#f59e0b] border-[#f59e0b]/30 bg-[#f59e0b]/5' : 'text-[#9898b0] border-[#383850]'}`}>
-                        {contractStatus === 'valid' ? '合同已绑定' : contractStatus === 'drift' ? '合同 drift' : '未创建合同'}
-                      </span>
+                      <span className="px-1.5 py-0.5 rounded border border-[#383850] text-[#9898b0]">可持续修订</span>
                     </>
                   )}
                 </div>
@@ -466,7 +456,7 @@ export default function ResearchPlansPage() {
             </div>
 
             <div className="border-b border-[#2d2d44] bg-[#171725] px-6 py-3 text-[10px] leading-5 text-[#9898b0]">
-              <strong className="text-[#c4b5fd]">版本规则：</strong>这里编辑的是可持续修订的工作副本，普通保存直接更新 Markdown，不为每个小改动生成完整版本。只有研究者与 Codex 明确把方案用于某个 Research Run 时，才把方案、合同、工作流和策略作为不可变 context 快照采用；之后继续编辑会显示 drift，需要重新沟通后采用。
+              <strong className="text-[#c4b5fd]">修订规则：</strong>这里编辑的是可持续修订的研究方案，普通保存直接更新 Markdown，不为每个小改动生成完整版本。Research Run 的 Task Spec 单独记录已确认边界和 Codex 可自主调整的工作计划；发现科学缺漏时按影响范围修订并标记受影响证据。
             </div>
 
             {/* Toolbar: preview/edit + save content */}

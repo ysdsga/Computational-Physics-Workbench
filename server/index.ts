@@ -11,7 +11,6 @@ import filesRouter from './routes/files.js';
 import experiencesRouter from './routes/experiences.js';
 import workflowsRouter from './routes/workflows.js';
 import researchPlansRouter from './routes/researchPlans.js';
-import contractsRouter from './routes/contracts.js';
 import agentRouter, { agentErrorHandler } from './routes/agent.js';
 import remoteRouter from './routes/remote.js';
 
@@ -39,7 +38,6 @@ export function createApp() {
   app.use('/api/projects', projectsRouter);
   app.use('/api/tasks', tasksRouter);
   app.use('/api/experiences', experiencesRouter);
-  app.use('/api/research-plans', contractsRouter);
   app.use('/api/research-plans', researchPlansRouter);
   app.use('/api/agent/v1', agentRouter);
   app.use('/api/agent/v1/remote', remoteRouter);

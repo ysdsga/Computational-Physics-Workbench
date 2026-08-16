@@ -104,7 +104,12 @@ export interface Experience {
   related_step_id: string | null;
   related_project_name?: string | null;
   related_task_name?: string | null;
-  promoted?: number;
+  category?: 'submit_template' | 'input_template' | 'workflow' | 'param_choice' | 'troubleshooting' | string;
+  status?: 'manual' | 'candidate' | 'confirmed';
+  applicable_scope?: string;
+  source_run_id?: string | null;
+  source_artifact_ids?: string;
+  source_kind?: 'researcher' | 'codex' | 'imported';
   created_at: string;
   updated_at: string;
 }
@@ -170,89 +175,81 @@ export interface HpcTaskBinding {
   taskRootRel: string;
 }
 
-// === Agent research environment V1 ===
+// === Essential Codex research runtime V3 ===
 
-export interface ResearchContract {
-  schemaVersion: 1;
-  approvedPlan: { path: string; sha256: string };
-  objectives: string[];
-  requiredStages: string[];
-  boundaries: {
-    allowedSoftwareStacks: string[];
-    allowedMethods: string[];
-    parameterBounds: Record<string, { min?: number; max?: number; values?: string[] }>;
-  };
-  humanGates: string[];
-  completion: { requiredEvidence: string[] };
-  resourceBudget: {
-    maxCoresPerJob: number;
-    maxWallMinutes: number;
-    maxConcurrentJobs: number;
-    maxAutomaticRetries: number;
-  };
+export type ExecutableCapability =
+  | 'local.process'
+  | 'remote.inspect'
+  | 'remote.task-root.create'
+  | 'files.upload'
+  | 'files.download'
+  | 'job.submit'
+  | 'job.cancel';
+
+export interface ResourceLimits {
+  maxCoresPerJob: number;
+  maxWallMinutes: number;
+  maxConcurrentJobs: number;
+  maxAutomaticRetries: number;
 }
 
-export interface AgentPolicyDocument {
+export interface ConfirmedEnvelope {
   schemaVersion: 1;
-  remoteEnabled: boolean;
-  smokeAuthorized: boolean;
-  allowedOperations: string[];
-  allowedHosts: string[];
+  coreStageIds: string[];
+  scientificCommitments: string[];
+  allowedCapabilities: ExecutableCapability[];
   allowedMethods: string[];
-  localRoot?: string;
-  /** Read operations may target this root or one of its descendants. */
-  remoteReadRoot?: string;
-  /** Existing project directory under remoteReadRoot. */
-  remoteProjectRoot?: string;
-  /** The only remote Task tree where writes and submitted jobs are allowed. */
-  remoteWriteRoot?: string;
-  /** Legacy single-root boundary. New policies should use the three fields above. */
-  remoteRoot?: string;
-  limits: ResearchContract['resourceBudget'];
-  protectedPaths: string[];
-  humanGates: string[];
+  allowedSoftwareStacks: string[];
+  hpcProfileId: string | null;
+  resourceLimits: ResourceLimits;
+  protectedRelativePaths: string[];
+  completionEvidence: string[];
+  researcherGates: string[];
+  autonomy: {
+    allowWorkingPlanEdits: true;
+    allowRetriesWithinLimits: true;
+    allowOwnJobCancellation: true;
+  };
 }
 
-export interface AgentPolicy {
-  id: string;
-  scope_type: 'system' | 'project' | 'task';
-  scope_id: string | null;
-  scope_key: string;
-  version: number;
-  status: 'draft' | 'active' | 'retired';
-  policy: AgentPolicyDocument;
-  sha256: string;
-  created_at: string;
-  activated_at: string | null;
+export interface WorkingPlan extends Record<string, unknown> {
+  currentStageId?: string | null;
+  summary?: string;
+  nextActions?: Array<Record<string, unknown>>;
+  directoryLayout?: Record<string, unknown>;
+}
+
+export interface TaskSpec {
+  schemaVersion: 1;
+  objective: string;
+  confirmedEnvelope: ConfirmedEnvelope;
+  workingPlan: WorkingPlan;
 }
 
 export interface ResearchRun {
   id: string;
   task_id: string;
   research_plan_id: string;
-  status: 'active' | 'waiting_review' | 'completed' | 'terminated';
-  current_context_version_id: string | null;
-  started_at: string;
+  status: 'draft' | 'active' | 'waiting_researcher' | 'completed' | 'terminated';
+  objective: string;
+  confirmed_envelope: ConfirmedEnvelope;
+  confirmed_envelope_sha256: string;
+  working_plan: WorkingPlan;
+  working_plan_sha256: string;
+  envelope_revision: number;
+  envelope_confirmed_at: string | null;
+  envelope_confirmation_summary: string;
+  current_stage_id: string | null;
+  idempotency_key: string;
+  started_at: string | null;
   ended_at: string | null;
-  updated_at: string;
-}
-
-export interface RunContextVersion {
-  id: string;
-  run_id: string;
-  version: number;
-  plan_sha256: string;
-  contract_sha256: string;
-  workflow_sha256: string;
-  policy_sha256: string;
-  adopted_reason: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface RunEvent {
   id: string;
   run_id: string;
-  context_version_id: string | null;
   sequence: number;
   category: 'fact' | 'inference' | 'decision' | 'conclusion';
   event_type: string;
@@ -265,11 +262,11 @@ export interface RunEvent {
 }
 
 export type RunActionStatus =
-  | 'proposed'
-  | 'authorized'
+  | 'ready'
   | 'executing'
   | 'waiting_remote'
-  | 'waiting_user'
+  | 'waiting_codex'
+  | 'waiting_researcher'
   | 'succeeded'
   | 'failed'
   | 'cancelled';
@@ -277,18 +274,16 @@ export type RunActionStatus =
 export interface RunAction {
   id: string;
   run_id: string;
-  context_version_id: string;
-  step_id: string;
+  stage_id: string;
+  step_id: string | null;
+  parent_action_id: string | null;
   action_type: string;
   status: RunActionStatus;
   executor: 'codex';
-  manifest: Record<string, unknown>;
-  manifest_sha256: string;
+  spec: Record<string, unknown>;
+  spec_sha256: string;
   idempotency_key: string;
   conversation_ref: string | null;
-  authorization_summary: string | null;
-  authorization_sha256: string | null;
-  authorized_at: string | null;
   started_at: string | null;
   finished_at: string | null;
   result: Record<string, unknown>;
@@ -300,27 +295,28 @@ export interface RunAction {
 export interface RunArtifact {
   id: string;
   run_id: string;
-  context_version_id: string;
   action_id: string;
   remote_job_id: string | null;
-  step_id: string;
+  stage_id: string;
   location: 'local' | 'remote';
   path: string;
   size_bytes: number;
   sha256: string;
   category: string;
+  validity: 'valid' | 'suspect' | 'invalid' | 'superseded';
+  superseded_by_id: string | null;
   metadata: Record<string, unknown>;
   idempotency_key: string;
   created_at: string;
+  updated_at: string;
 }
 
 export interface EvidenceCheck {
   id: string;
   run_id: string;
-  context_version_id: string;
   action_id: string;
   artifact_id: string | null;
-  step_id: string;
+  stage_id: string;
   validator_name: string;
   validator_version: string;
   status: 'pass' | 'warn' | 'fail';
@@ -329,23 +325,23 @@ export interface EvidenceCheck {
   created_at: string;
 }
 
-export interface ReviewRequest {
+export interface PendingItem {
   id: string;
   run_id: string;
-  context_version_id: string;
-  status: 'open' | 'decided' | 'superseded';
-  gate_type: string;
-  question: string;
-  options: unknown[];
-  recommendation: Record<string, unknown>;
-  evidence: unknown[];
-  proposal: Record<string, unknown> | null;
+  stage_id: string | null;
+  action_id: string | null;
+  remote_job_id: string | null;
+  audience: 'codex' | 'researcher';
+  kind: string;
+  status: 'open' | 'resolved' | 'dismissed';
+  title: string;
+  detail: Record<string, unknown>;
+  resolution: Record<string, unknown>;
   idempotency_key: string | null;
   source: string;
   conversation_ref: string | null;
   created_at: string;
-  decided_at: string | null;
-  decision?: ReviewDecision;
+  resolved_at: string | null;
   project_id?: string;
   project_name?: string;
   task_id?: string;
@@ -365,37 +361,26 @@ export interface EvidenceLibraryItem extends RunArtifact {
   checks: EvidenceCheck[];
 }
 
-export interface ReviewDecision {
-  id: string;
-  request_id: string;
-  decision: 'approve' | 'reject' | 'supplement' | 'terminate';
-  comment: string;
-  actor: string;
-  source: string;
-  conversation_ref: string | null;
-  decision_sha256: string | null;
-  created_at: string;
-}
-
 export interface RemoteJob {
   id: string;
   run_id: string;
-  context_version_id: string;
-  action_id: string | null;
-  step_id: string | null;
+  action_id: string;
+  stage_id: string;
   action_token: string;
+  idempotency_key: string;
+  profile_id: string;
   host: string;
-  remote_root: string;
   remote_workdir: string;
+  scheduler: string;
   job_id: string | null;
   job_name: string;
   status: string;
-  execution_manifest: Record<string, unknown>;
-  execution_manifest_sha256: string | null;
+  submission_spec: Record<string, unknown>;
   script_sha256: string | null;
   resources: Record<string, unknown>;
-  resources_sha256: string | null;
   last_observation: Record<string, unknown>;
+  submit_stdout: string;
+  submit_stderr: string;
   submitted_at: string | null;
   reconciled_at: string | null;
   created_at: string;
@@ -412,30 +397,25 @@ export interface RemoteCapabilityReport {
   error?: { code: string; message: string };
 }
 
-export interface AgentContextV1 {
-  schemaVersion: 1;
+export interface AgentContext {
+  schemaVersion: 2;
   project: Project;
   task: Task;
   taskRoot: { relative: string | null; absolute: string | null; resolved: boolean };
   run: ResearchRun | null;
-  contextVersion: RunContextVersion | null;
   research: {
     planId: string | null;
-    currentPlanSha256: string | null;
-    adoptedPlanSha256: string | null;
-    currentContractSha256: string | null;
-    adoptedContractSha256: string | null;
-    drift: boolean;
+    planTitle: string | null;
+    planStatus: ResearchPlanStatus | null;
+    planMissing: boolean;
   };
   workflow: WorkflowTemplate | null;
-  effectivePolicy: AgentPolicyDocument | null;
-  policySources: Array<{ id: string; scope_type: string; version: number; sha256: string }>;
   remoteCapability: RemoteCapabilityReport | null;
   recentActions: RunAction[];
   recentJobs: RemoteJob[];
   recentArtifacts: RunArtifact[];
   recentEvidenceChecks: EvidenceCheck[];
-  pendingReviews: ReviewRequest[];
+  pendingItems: PendingItem[];
   eventCursor: number;
   evidenceIndex: Array<{ eventId: string; eventType: string; occurredAt: string }>;
   blockers: Array<{ code: string; message: string; details?: Record<string, unknown> }>;

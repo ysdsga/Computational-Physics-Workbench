@@ -95,13 +95,14 @@ npm run build
 ## Codex Agent 执行边界
 
 - Agent 本体是本项目中的 Codex 对话，不是 Web 页面、Express 后台 worker 或数据库进程。Agent 运行、评价、证据和远程作业的 Web 页面只能展示已记录状态，不得成为启动、授权、提交、取消或对账入口。
-- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill，并把 `workbench` CLI 作为唯一机器入口。禁止为 Agent 执行直接读写 SQLite、直接调用 Agent 写 API，或绕过已授权的 Workbench capability manifest 使用通用 `ssh`/`sftp`/`scp`/`bsub`/`bjobs`/`bpeek`/`bkill`。
-- 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和 `workbench context --task <id> --allow-blocked --pretty`，检查未决 review、active/uncertain job、action 和 context drift；提交响应不确定时只能对账，不能重提。
-- 启动 run、修改采用的研究方案/工作流/合同或执行 action 前，必须先在 Codex 对话中向研究者说明方案、差异、科学边界、资源和完成证据并获得明确确认。不得把沉默、历史上的宽泛目标、Web 状态或 Agent 自己的建议当作授权。
-- 可执行动作必须先创建绑定 context、workflow step、输入/脚本/资源/路径的 immutable execution manifest，向研究者展示摘要与哈希，收到对该精确 manifest 的确认后才能记录授权并进入 `executing`。manifest 内容变化必须重新提案和确认。
+- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill，并把 `workbench` CLI 作为唯一机器入口。禁止为 Agent 执行直接读写 SQLite、直接调用 Agent 写 API，或绕过 Workbench capability 使用通用 `ssh`/`sftp`/`scp`/`bsub`/`bjobs`/`bpeek`/`bkill`。
+- 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和 `workbench context --task <id> --allow-blocked --pretty`，检查 Confirmed Envelope、Working Plan、待沟通事项、active/uncertain Job、Action、Artifact 和 evidence；提交响应不确定时只能按已记录作业身份对账，不能重提。
+- 首次进入执行前，必须在 Codex 对话中向研究者说明 Research Plan、核心 Workflow、Task Spec 的科学承诺、资源、研究者关口和完成证据，展示精确 Confirmed Envelope 及哈希并获得一次明确确认。不得把沉默、历史上的宽泛目标、Web 状态或 Agent 自己的建议当作授权。
+- 确认后，Codex 可以在 Envelope 内自主修改 Working Plan、安排 Task 根下目录树、创建和执行带哈希的 Action、排错、重试、监控、下载分析，以及取消自己在当前 Run 中创建的错误或已替代 Job；不再逐 Action 请求研究者确认。扩展科学承诺、方法/软件栈、资源、权限或保护路径时，必须创建 researcher 待沟通事项并重新确认 Envelope。
+- Research Plan 和核心 Workflow 允许纠错。先评估受影响阶段和产物；边界内最小重算，边界外再沟通；相关 Artifact 必须标记为 `valid`、`suspect`、`invalid` 或 `superseded`，不得静默覆盖来源。
 - 执行层只提供材料无关的 capability 接口与安全边界；材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数不得硬编码进执行器、路由或 CLI。由 Codex 根据采用的研究方案和工作流自主生成每次 action spec；材料专属内容只能作为项目数据或测试 fixture。
 - 用户决定默认只保存摘要、哈希、时间和可选 Codex task reference，不保存完整聊天。事实、推断和决定分开写入；研究者未明确陈述或确认时，Codex 不得记录 researcher conclusion。
-- Codex 恢复任务和规划卡壳步骤前应通过 CLI 检索项目/任务相关经验；验证成功或诊断失败后，可沉淀带条件、症状、处理方式和适用边界的候选经验。候选经验不是证据或研究者结论，只有证据绑定且研究者确认的经验才可提升为不可变记录。
+- Codex 恢复任务和规划卡壳步骤前应通过 CLI 检索项目/任务相关经验；验证成功或诊断失败后，可沉淀带条件、症状、处理方式和适用边界的候选经验。候选经验不是证据或研究者结论；确认经验时保留来源 Run、Artifact 与适用边界，后续修订仍需可追溯。
 - 未单独获准迁移正式库前，不得为了检查界面或 Context 而让新版服务连接 `data/workbench.db`；使用注入的临时数据库完成开发和测试。
 
 ## 当前功能基线

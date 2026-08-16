@@ -26,11 +26,11 @@ test.afterAll(async () => {
 test('Agent run and review centers expose recoverable empty states', async ({ page }) => {
   await page.goto('/#/agent-runs');
   await expect(page.getByRole('heading', { name: 'Agent 运行记录' })).toBeVisible();
-  await expect(page.getByText('Codex 对话是研究 Agent', { exact: false })).toBeVisible();
-  await expect(page.getByText('页面不会启动、批准、提交、取消或对账。', { exact: false })).toBeVisible();
+  await expect(page.getByText('Codex 对话负责规划和执行', { exact: false })).toBeVisible();
+  await expect(page.getByText('不提供启动、授权、提交、取消或对账按钮', { exact: false })).toBeVisible();
   await page.getByRole('link', { name: '待沟通事项' }).click();
   await expect(page.getByRole('heading', { name: '待沟通事项' })).toBeVisible();
-  await expect(page.getByText('当前筛选下没有沟通事项。')).toBeVisible();
+  await expect(page.getByText('当前筛选下没有待沟通事项。')).toBeVisible();
   await page.getByRole('link', { name: '研究方案' }).click();
   await expect(page.getByRole('heading', { name: '研究方案', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '超算管理' }).click();
@@ -45,7 +45,7 @@ test('Agent run and review centers expose recoverable empty states', async ({ pa
   await expect(page.getByText('工作流只保留核心骨架', { exact: false })).toBeVisible();
 });
 
-test('Web observes a Codex run and review without issuing Agent writes', async ({ page, request }) => {
+test('Web observes a confirmed Task Spec and pending item without issuing Agent writes', async ({ page, request }) => {
   const workingDir = path.join(tempRoot, 'ui-agent-project');
   fs.mkdirSync(workingDir, { recursive: true });
   const projectResponse = await request.post('/api/projects', { data: { name: 'UI Agent Project', working_dir: workingDir } });
@@ -53,29 +53,39 @@ test('Web observes a Codex run and review without issuing Agent writes', async (
   const project = await projectResponse.json() as { id: string };
   const taskResponse = await request.post(`/api/projects/${project.id}/tasks`, { data: { name: 'UI Agent Task', workflow_id: 'dft-dmft-oneshot' } });
   expect(taskResponse.ok()).toBeTruthy();
-  const task = await taskResponse.json() as { id: string };
+  const task = await taskResponse.json() as { id: string; workflow: { stages: Array<{ id: string }> } };
   const planResponse = await request.post('/api/research-plans', { data: { title: 'UI Agent Plan', project_id: project.id, content: '# UI Agent Plan\n\nBaseline.' } });
   expect(planResponse.ok()).toBeTruthy();
   const plan = await planResponse.json() as { id: string };
-  const contractResponse = await request.post(`/api/research-plans/${plan.id}/contract/initialize`, { data: {} });
-  expect(contractResponse.status()).toBe(201);
+  const stageIds = task.workflow.stages.map(stage => stage.id);
   const runResponse = await request.post('/api/agent/v1/runs', {
-    data: { taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'ui-readonly-run' },
+    data: {
+      taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'ui-readonly-run',
+      taskSpec: {
+        schemaVersion: 1, objective: 'UI observation fixture',
+        confirmedEnvelope: {
+          schemaVersion: 1, coreStageIds: stageIds, scientificCommitments: ['fixture'],
+          allowedCapabilities: ['local.process'], allowedMethods: [], allowedSoftwareStacks: [], hpcProfileId: null,
+          resourceLimits: { maxCoresPerJob: 1, maxWallMinutes: 10, maxConcurrentJobs: 1, maxAutomaticRetries: 1 },
+          protectedRelativePaths: [], completionEvidence: ['fixture evidence'], researcherGates: [],
+          autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
+        },
+        workingPlan: { currentStageId: stageIds[0], summary: 'fixture plan' },
+      },
+    },
   });
   expect(runResponse.status()).toBe(201);
   const run = await runResponse.json() as { id: string };
-  const reviewResponse = await request.post(`/api/agent/v1/runs/${run.id}/reviews`, {
+  expect((await request.post(`/api/agent/v1/runs/${run.id}/confirm`, { data: { summary: 'fixture confirmed', source: 'codex_conversation' } })).ok()).toBeTruthy();
+  const reviewResponse = await request.post(`/api/agent/v1/runs/${run.id}/pending-items`, {
     data: {
-      gateType: 'ui_acceptance',
-      question: '是否批准 UI 验收继续？',
-      recommendation: { action: 'discuss_in_codex' },
-      evidence: [{ source: 'e2e-fixture' }],
-      idempotencyKey: 'ui-review-once',
-      source: 'codex_conversation',
+      stageId: stageIds[0], audience: 'researcher', kind: 'ui_acceptance',
+      title: '是否确认 UI 验收结论？', detail: { blocksRun: true, source: 'e2e-fixture' },
+      idempotencyKey: 'ui-pending-once', source: 'codex',
     },
   });
   expect(reviewResponse.status()).toBe(201);
-  const filteredReviews = await request.get(`/api/agent/v1/reviews?projectId=${project.id}&taskId=${task.id}&status=open`);
+  const filteredReviews = await request.get(`/api/agent/v1/pending-items?projectId=${project.id}&taskId=${task.id}&status=open`);
   expect(filteredReviews.ok()).toBeTruthy();
   const filteredItems = await filteredReviews.json() as Array<{ project_id: string; task_id: string; project_name: string; task_name: string }>;
   expect(filteredItems).toHaveLength(1);
@@ -93,18 +103,18 @@ test('Web observes a Codex run and review without issuing Agent writes', async (
   await page.getByLabel('项目').selectOption(project.id);
   await expect(page.getByRole('option', { name: 'UI Agent Task' })).toBeAttached();
   await page.getByLabel('任务').selectOption(task.id);
-  await expect(page.getByText('waiting_review', { exact: true })).toBeVisible();
-  await expect(page.getByText('Open reviews').locator('..').getByText('1', { exact: true })).toBeVisible();
+  await expect(page.getByText('waiting_researcher', { exact: true })).toBeVisible();
+  await expect(page.getByText('待沟通').locator('..').getByText('1', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '读取最新记录' })).toBeVisible();
   await expect(page.getByRole('button', { name: /启动|批准|提交|取消|对账/ })).toHaveCount(0);
 
   await page.goto('/#/reviews');
-  await expect(page.getByText('是否批准 UI 验收继续？')).toBeVisible();
-  await expect(page.getByText('等待 Codex 对话处理')).toBeVisible();
+  await expect(page.getByText('是否确认 UI 验收结论？')).toBeVisible();
+  await expect(page.getByText('等待在 Codex 对话中讨论并确认。')).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /批准|驳回|补充|终止/ })).toHaveCount(0);
-  await page.getByRole('button', { name: '读取记录' }).click();
-  await expect(page.getByText('是否批准 UI 验收继续？')).toBeVisible();
+  await page.getByRole('button', { name: '刷新' }).click();
+  await expect(page.getByText('是否确认 UI 验收结论？')).toBeVisible();
   expect(agentWrites).toEqual([]);
 });
 
@@ -133,6 +143,6 @@ test('supercomputer view records user, project and Task roots without remote exe
   await page.getByLabel('任务目录名').fill('tk001_fixture');
   await page.getByRole('button', { name: '保存映射' }).click();
   await expect(page.getByText('/public/home/tester/pj001_fixture/tk001_fixture')).toBeVisible();
-  await expect(page.getByText('该任务尚无可用有效策略', { exact: false })).toBeVisible();
+  await expect(page.getByText('该任务尚无已确认 Task Spec', { exact: false })).toBeVisible();
   expect(agentWrites).toEqual([]);
 });

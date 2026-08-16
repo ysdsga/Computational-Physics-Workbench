@@ -1,4 +1,4 @@
-import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContextV1, AgentPolicy, ReviewRequest, RunEvent, RunAction, RunArtifact, EvidenceCheck, EvidenceLibraryItem, RemoteJob, ResearchContract } from '../types';
+import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContext, PendingItem, RunEvent, RunAction, RunArtifact, EvidenceCheck, EvidenceLibraryItem, RemoteJob, ResearchRun, TaskSpec, WorkingPlan, ConfirmedEnvelope } from '../types';
 
 const BASE = '/api';
 
@@ -67,20 +67,20 @@ export const filesApi = {
 
 // === Experiences ===
 export const experiencesApi = {
-  list: (params?: { projectId?: string; taskId?: string; search?: string }) => {
+  list: (params?: { projectId?: string; taskId?: string; status?: string; search?: string }) => {
     const qs = new URLSearchParams();
     if (params?.projectId) qs.set('projectId', params.projectId);
     if (params?.taskId) qs.set('taskId', params.taskId);
+    if (params?.status) qs.set('status', params.status);
     if (params?.search) qs.set('search', params.search);
     const q = qs.toString();
     return api<Experience[]>(`/experiences${q ? `?${q}` : ''}`);
   },
-  create: (data: { title: string; content: string; tags?: string[]; related_project_id?: string; related_task_id?: string; related_step_id?: string }) =>
+  create: (data: { title: string; content: string; tags?: string[]; related_project_id?: string; related_task_id?: string; related_step_id?: string; category?: string; status?: string; applicable_scope?: string; source_run_id?: string; source_artifact_ids?: string[]; source_kind?: string }) =>
     api<Experience>('/experiences', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<{ title: string; content: string; tags: string[]; related_project_id: string; related_task_id: string; related_step_id: string }>) =>
     api<Experience>(`/experiences/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => api<{ success: boolean }>(`/experiences/${id}`, { method: 'DELETE' }),
-  provenance: (id: string) => api<{ run_id: string; context_version_id: string; conclusion_event_id: string; promotion_summary_sha256: string; conversation_ref: string | null; artifacts: Array<{ artifact_id: string; action_id: string; artifact_sha256: string }> }>(`/experiences/${id}/provenance`),
 };
 
 // === Workflows ===
@@ -115,9 +115,10 @@ export interface ResearchPlanImportInput {
 }
 
 export const researchPlansApi = {
-  list: (params?: { projectId?: string; status?: ResearchPlanStatus; search?: string }) => {
+  list: (params?: { projectId?: string; taskId?: string; status?: ResearchPlanStatus; search?: string }) => {
     const qs = new URLSearchParams();
     if (params?.projectId) qs.set('projectId', params.projectId);
+    if (params?.taskId) qs.set('taskId', params.taskId);
     if (params?.status) qs.set('status', params.status);
     if (params?.search) qs.set('search', params.search);
     const q = qs.toString();
@@ -144,37 +145,38 @@ export const researchPlansApi = {
     ),
 };
 
-export const contractsApi = {
-  get: (planId: string) => api<{ content: string; contract: ResearchContract; sha256: string; planSha256: string; drift: boolean }>(`/research-plans/${planId}/contract`),
-  initialize: (planId: string, overwrite = false) => api<{ content: string; contract: ResearchContract; sha256: string }>(`/research-plans/${planId}/contract/initialize`, { method: 'POST', body: JSON.stringify({ overwrite }) }),
-  update: (planId: string, content: string, expectedPlanSha256?: string) => api<{ content: string; contract: ResearchContract; sha256: string }>(`/research-plans/${planId}/contract`, { method: 'PUT', body: JSON.stringify({ content, expectedPlanSha256 }) }),
-};
-
 export const agentApi = {
-  context: (taskId: string) => api<AgentContextV1>(`/agent/v1/context/tasks/${taskId}`),
+  context: (taskId: string) => api<AgentContext>(`/agent/v1/context/tasks/${taskId}`),
+  run: (runId: string) => api<ResearchRun>(`/agent/v1/runs/${runId}`),
+  createRun: (data: { taskId: string; researchPlanId: string; taskSpec: TaskSpec; idempotencyKey: string }) =>
+    api<ResearchRun>('/agent/v1/runs', { method: 'POST', body: JSON.stringify(data) }),
+  confirmRun: (runId: string, summary: string, conversationRef?: string) =>
+    api<ResearchRun>(`/agent/v1/runs/${runId}/confirm`, { method: 'POST', body: JSON.stringify({ summary, source: 'codex_conversation', conversationRef }) }),
+  updateWorkingPlan: (runId: string, workingPlan: WorkingPlan, reason: string, idempotencyKey: string) =>
+    api<ResearchRun>(`/agent/v1/runs/${runId}/working-plan`, { method: 'PUT', body: JSON.stringify({ workingPlan, reason, idempotencyKey }) }),
+  reviseEnvelope: (runId: string, confirmedEnvelope: ConfirmedEnvelope, pendingItemId: string, summary: string, conversationRef?: string) =>
+    api<ResearchRun>(`/agent/v1/runs/${runId}/envelope-revisions`, { method: 'POST', body: JSON.stringify({ confirmedEnvelope, pendingItemId, summary, source: 'codex_conversation', conversationRef }) }),
   events: (runId: string, after = 0) => api<RunEvent[]>(`/agent/v1/runs/${runId}/events?after=${after}`),
   actions: (runId: string) => api<RunAction[]>(`/agent/v1/runs/${runId}/actions`),
   action: (actionId: string) => api<RunAction & { artifacts: RunArtifact[]; evidenceChecks: EvidenceCheck[]; remoteJob: RemoteJob | null }>(`/agent/v1/actions/${actionId}`),
   artifacts: (runId: string) => api<RunArtifact[]>(`/agent/v1/runs/${runId}/artifacts`),
   evidenceChecks: (runId: string) => api<EvidenceCheck[]>(`/agent/v1/runs/${runId}/evidence-checks`),
-  policies: (scopeType?: string, scopeId?: string) => {
-    const qs = new URLSearchParams(); if (scopeType) qs.set('scopeType', scopeType); if (scopeId) qs.set('scopeId', scopeId);
-    return api<AgentPolicy[]>(`/agent/v1/policies${qs.size ? `?${qs}` : ''}`);
-  },
-  reviews: (filters?: { runId?: string; projectId?: string; taskId?: string; status?: string }) => {
+  pendingItems: (filters?: { runId?: string; projectId?: string; taskId?: string; audience?: string; status?: string }) => {
     const qs = new URLSearchParams();
     if (filters?.runId) qs.set('runId', filters.runId);
     if (filters?.projectId) qs.set('projectId', filters.projectId);
     if (filters?.taskId) qs.set('taskId', filters.taskId);
+    if (filters?.audience) qs.set('audience', filters.audience);
     if (filters?.status) qs.set('status', filters.status);
-    return api<ReviewRequest[]>(`/agent/v1/reviews${qs.size ? `?${qs}` : ''}`);
+    return api<PendingItem[]>(`/agent/v1/pending-items${qs.size ? `?${qs}` : ''}`);
   },
-  evidenceLibrary: (filters?: { projectId?: string; taskId?: string; location?: string; checkStatus?: string; search?: string }) => {
+  evidenceLibrary: (filters?: { projectId?: string; taskId?: string; location?: string; checkStatus?: string; validity?: string; search?: string }) => {
     const qs = new URLSearchParams();
     if (filters?.projectId) qs.set('projectId', filters.projectId);
     if (filters?.taskId) qs.set('taskId', filters.taskId);
     if (filters?.location) qs.set('location', filters.location);
     if (filters?.checkStatus) qs.set('checkStatus', filters.checkStatus);
+    if (filters?.validity) qs.set('validity', filters.validity);
     if (filters?.search) qs.set('search', filters.search);
     return api<EvidenceLibraryItem[]>(`/agent/v1/evidence-library${qs.size ? `?${qs}` : ''}`);
   },

@@ -1,108 +1,66 @@
-# 重要设计决定
+# 关键设计决定
 
-## ADR-001：每个任务保存独立工作流快照
+本文只记录当前有效决定。历史 V1/V2 方案保留在 `docs/plans/`，其中 Contract、分层 Policy、不可变 Context 与逐 Action 授权已被 V3 取代。
 
-- 状态：已采用
-- 日期：2026-08-10
+## 1. Codex 是 Agent，Web 是观察面
 
-### 背景
+研究沟通、规划、执行和纠错发生在项目 Codex 对话。WebUI 负责显示记录、筛选和管理普通元数据，不成为启动、授权、提交、取消或对账入口。真实任务只经 `workbench-agent` skill 和 `workbench` CLI。
 
-原实现只在任务中保存 `workflow_id`。任务页面、流程图和超算向导会实时读取全局模板，因此修改模板会同时改变所有已有任务的流程定义。科研任务需要在执行过程中按具体材料和计算情况补充阶段或步骤，这些修改不应影响模板和其他任务。
+## 2. Task 不是 Job
 
-### 决定
+采用 `Project → complex Task → Research Run → Stage → Action → Job`。一个 Stage 有多个 Action，一个 Action可有零个、一个或多个 Job。Job 必须绑定 originating Action、Run 与 Stage。
 
-创建任务时复制所选模板的完整内容，保存到 `tasks.workflow_snapshot`。此后：
+## 3. Workflow 只保留骨架
 
-- 全局模板负责提供新任务的起始流程。
-- 任务工作流负责该任务实际使用和展示的流程。
-- `workflow_id` 保留为来源记录，不再决定任务运行时的流程内容。
-- 任务内编辑只更新当前任务快照。
+Workflow 保存不可缺少的科学/软件阶段、关键转换、检查点和完成证据。传输、重试、诊断、扫描、临时命令和目录安排属于 Working Plan 与 Action，避免把研究执行变成僵硬状态机。
 
-### 旧任务迁移
+## 4. Task Spec 取代 Contract/Policy/多套控制文件
 
-旧数据没有保存任务创建时的模板版本，无法恢复历史原貌。因此迁移时把任务当前所引用模板的现状复制为初始快照，之后停止跟随模板变化。
+Task Spec 分为：
 
-### 数据保留规则
+- Confirmed Envelope：目标关键科学承诺、允许能力/方法/软件、HPC profile、资源、保护路径、完成证据与 researcher gates。
+- Working Plan：当前阶段、目录布局、下一批 Action、诊断与重试策略。
 
-从任务工作流删除阶段或步骤时，不删除磁盘目录、计算文件、`step_progress` 或 `step_files`。这样可以避免流程调整意外破坏真实科研数据，并允许以后恢复同 ID 节点时重新看到历史记录。
+数据库是 Task Spec 唯一机器来源，CLI/Web 只渲染它。不再维护 `.workbench/contracts`、分层 `agent_policies` 或 `run_context_versions`。
 
-### 结果
+## 5. 只确认 Envelope 一次
 
-- 已有任务不再受模板后续修改影响。
-- 不同任务可以从同一模板开始并逐渐形成不同流程。
-- 任务工作流会占用少量额外数据库空间。
-- 当前不提供自动同步或重置为最新模板的功能，避免重新引入隐式耦合。
+首次执行前，Codex 向研究者展示 Research Plan、Core Workflow、精确 Envelope 与哈希，得到一次明确确认。之后 Codex 在 Envelope 内自主计划和执行，不再逐 Action 确认。
 
-## ADR-002：Agent 环境使用版本快照、追加账本和外部对账
+扩展科学承诺、方法/软件、资源、权限、保护路径或完成证据时，必须创建 researcher Pending Item，展示影响并重新确认 Envelope。Working Plan 普通变化不需要研究者批准。
 
-- 状态：已采用
-- 日期：2026-08-13
+## 6. Plan/Workflow 可纠错，证据不能被静默改写
 
-研究方案不是不可修改的真理。Markdown 方案可以随执行纠错，但每次运行采用的方案、合同、工作流和有效策略全文必须保存为不可变 `run_context_versions`。边界内的等价或收紧修订可自动采用；方法、参数范围、权限或预算扩大时创建绑定旧上下文的评价请求。
+发现缺漏后先计算影响范围。边界内由 Codex 修订并最小重算；边界外再沟通。旧 Artifact 保留并标记 `valid | suspect | invalid | superseded`，用 provenance 表达替代关系，禁止覆盖历史来伪造连续性。
 
-系统不实现通用工作流状态机。Agent 在合同与 policy 内选择行动，`run_events` 只追加事实、推断和决定；最终科学结论必须由研究者记录。LSF 与远程文件是真实状态源，`remote_jobs.action_token` 防止响应丢失后自动重复提交。
+## 7. Codex Pending 与 Researcher Pending 分开
 
-真实 SSH/LSF 采用系统 OpenSSH、严格 host key、参数数组和固定动作，不存凭据、不开放任意远程 shell。真实 pilot 是远程发布验收，隔离单元测试不伪造其通过。
+运行环境、失败诊断、恢复、绘图和边界内纠错面向 `codex`；材料科学选择、Envelope 改变和结论歧义面向 `researcher`。阻塞默认按 Stage 定位，不冻结无关工作。
 
-### 验证结果
+## 8. Codex 自主安排 Task 内目录
 
-2026-08-15 已在 IBM Spectrum LSF 10.1 完成 inspect、SFTP 往返、固定 smoke、幂等重复调用和服务重启后对账。真实适配结果保留在实施记录中，普通 `npm test` 仍不会连接集群。
+Workbench 只固定 Project 工作根与 Task 写根，不自动创建 Stage 目录。Codex 可根据复杂任务设计任意 Task 内树。HPC 用户根只读；上传、创建目录和作业 workdir 限制在绑定的 Task 写根。
 
-## ADR-003：Policy 新版本只与父作用域边界比较
+## 9. 产品不注册材料 adapter
 
-- 状态：已采用
-- 日期：2026-08-15
+执行器只提供材料无关 capability 与边界校验。材料名、Task ID、固定 step、脚本路径、U/J、投影窗口、网格和求解器参数只能出现在项目数据或 Codex 单次 Action spec 中。新增材料/软件路线不修改产品执行代码。
 
-system policy 是全局上限；project policy 与 system 比较，task policy 与 system + project 的有效结果比较。下层允许的主机、操作和方法必须是父级子集，资源数值只能更严格，本地/远程根只能缩小，保护规则和人工门禁不能减少。
+## 10. Action spec 不可变，但不是第二次授权
 
-创建或激活同一作用域的新版本时，旧的同层 active policy 不是父级。新版本可以在上层允许集合内从一个合法值切换到另一个合法值；激活后旧版本变为 `retired`，每个作用域仍只有一个 active policy。已有研究运行不会静默获得新权限，必须显式创建采用新有效 policy 的上下文版本。
+每条 Action 保存规范化 spec、SHA-256、Stage、幂等键与可选 parent。可执行 Action 同时保存输入/脚本快照和命令预览。输入改变时创建新 Action；spec 哈希用于复现和 drift 检测，不再要求研究者逐哈希批准。
 
-这个语义既防止 project/task 扩权，也避免旧 policy 意外成为永久上限。真实 pilot 从 IP 切换到 OpenSSH alias 时验证了该行为。
+## 11. 远程提交必须可恢复
 
-## ADR-004：运行证据优先于物理删除
+Job 行在 `bsub` 前以 `prepared` 写入，作业名由稳定 token 生成。`bsub` 返回后立即核对 scheduler ID/name。超时、丢响应或核对失败一律记 `submission_uncertain`，进入 Codex 待处理事项，只能按唯一作业名对账，不能重提。
 
-- 状态：已采用
-- 日期：2026-08-15
+## 12. 证据与经验分离
 
-Project、Task 或 ResearchPlan 一旦被研究运行引用，物理删除会破坏上下文、账本、评价和远程作业的归属链。因此相关 DELETE 接口返回 `409 RUN_HISTORY_PROTECTED`，界面改为把对象状态更新为 `archived`。
+证据是用户/Codex 需要查看、下载、处理或绘图的项目 Task 产物；保存文件引用、哈希、有效性和 validator。经验是可复用的条件—症状—处理—适用边界。Codex 自动捕获的是 candidate，不是科学结论；确认经验仍保留来源 Run/Artifact。
 
-归档不删除研究方案文件、任务目录、工作流快照或运行记录。没有研究运行引用的旧对象仍保留原有删除行为。该决定只保护已经形成证据链的对象，不把所有数据都改成软删除。
+## 13. schema v5 迁移 fail closed
 
-## ADR-005：安全边界必须在动作执行点再次校验
+v4 正式库的运行控制表为空，因此 v5 可以备份后替换旧 Policy/Context/Review/Promotion 表，保留 Project/Task/Plan/Workflow/Experience。若任何旧运行控制表非空，迁移拒绝启动，要求显式转换方案，避免丢失历史。
 
-- 状态：已采用
-- 日期：2026-08-15
+## 14. 当前安全边界的含义
 
-合同和 policy 不是只用于界面展示的元数据。方案自动修订必须保留已有参数范围、必需阶段、证据义务、人工门禁和科学目标；删除约束或改变目标进入评价。评价请求使用运行内幂等键，重试返回同一请求。
-
-远程动作执行前再次读取当前运行已采用的合同与有效 policy。`protectedPaths` 阻止覆盖相对路径及其子树，`job.submit` 的 queue/核数/墙钟和并发必须同时满足 manifest、合同与 policy。调用 `bsub` 后发生超时或连接错误时视为提交结果不确定，只允许按记录的唯一作业名对账或人工处理，不自动重提。
-
-## ADR-006：执行层提供通用 capability，不注册材料路线
-
-- 状态：已采用
-- 日期：2026-08-15
-
-Codex 项目对话是规划和执行主体。Workbench 不应替 Codex 判断“这个材料该走哪个脚本”，也不应要求每种材料或软件栈注册产品 adapter。执行层只公开 `local.process`、`remote.inspect`、`remote.task-root.create`、`files.upload/download`、`job.submit/cancel` 等材料无关 capability，并校验 context、workflow step、Task 根、policy、输入/脚本哈希、资源、幂等键和状态图。
-
-材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数只能出现在研究方案、任务工作流、项目文件或 Codex 为单次 action 生成的 spec/manifest 中，禁止进入执行器、路由和 CLI。新增材料不需要改产品代码。首个具体材料仍可作为真实 pilot，但没有专用 API，也不代表单独的产品支持路线。
-
-旧的材料专用 action 服务与 CLI 已删除；task 级 inspect/upload/download/smoke/cancel 直通写入口也已移除。状态、日志和不确定提交对账保留为已记录作业的观察/恢复入口。跨材料、跨 workflow 隔离测试和静态字符串门禁防止回归。
-
-## ADR-007：工作流、证据、经验和超算配置分层
-
-- 状态：已采用
-- 日期：2026-08-15
-
-任务工作流只表示长期稳定的核心科学/软件骨架：必要阶段、关键转换、人工或科学检查点与完成证据。试跑命令、失败重试、上传下载、参数扫描批次和临时诊断绑定到最近的骨架步骤，以 action/event/artifact 形式记录，不为每次执行细节创建工作流节点。
-
-研究方案采用“工作副本 + 采用快照”：日常小改直接更新 Markdown；只有研究者与 Codex 明确将方案用于 Research Run 时，才与合同、工作流和策略一起形成不可变 context。后续修改以 drift 提醒重新沟通，不保存每次按键或小改版本。
-
-证据库与经验库分离。证据库索引用于判断任务结果的原始/派生文件、远端产物、下载副本、图和 validator 结论；Experience 保存可跨任务复用的条件、症状、处理方式和边界。Codex 候选经验可自动检索和沉淀，但不是证据或研究者结论；证据确认的提升记录保持不可变。
-
-旧复制粘贴式超算提交页面删除。超算管理保存项目级 OpenSSH 连接、用户只读根、项目根和 Task 目录映射，并显示有效 policy、传输 action 与作业快照；连接配置不是授权，Web 不执行远程创建、上传、下载、提交、取消或对账。Agent 运行记录可显示已授权 manifest 的命令预览和最近观察，但不是实时 SSH 终端。
-
-## ADR-008：远程目录采用用户只读、Task 独占写入的三级边界
-
-研究者在同一超算用户目录下维护多个项目目录，每个项目目录再包含稳定 Task 目录。单一 `remoteRoot` 无法区分只读观察范围与写入范围，也无法阻止写入同项目的其他 Task。
-
-连接 profile 因此分别登记用户只读根和项目根，Task 只保存项目根下的单段相对目录名。active policy 使用 `remoteReadRoot`、`remoteProjectRoot`、`remoteWriteRoot` 表达相同三级边界；远程 action 执行前必须同时匹配配置和 policy。读取可以位于用户根内，所有传输写入和作业工作目录必须使用当前 Task 写根。Codex 可以在精确 manifest 获批后创建该 Task 根，但不能通用地在项目根下创建其他目录。旧 `remoteRoot` 仅用于读取历史 policy，不允许驱动新的远程 action。
+Workbench 对自身入口强制 Task 根、HPC binding、capability、资源、输入哈希、幂等和恢复规则。若 Unix 账号本身拥有更宽权限，操作系统级硬隔离仍由集群 ACL、独立账号或容器提供；Workbench 不声称替代系统权限。

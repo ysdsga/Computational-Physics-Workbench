@@ -6,7 +6,7 @@ import Flowchart from '../components/Flowchart';
 import StepDetail from '../components/StepDetail';
 import ProgressBar from '../components/ProgressBar';
 import TemplateEditor from '../components/TemplateEditor';
-import type { AgentContextV1, Task, StepProgress, WorkflowTemplate, WorkflowStep } from '../types';
+import type { AgentContext, Task, StepProgress, WorkflowTemplate, WorkflowStep } from '../types';
 
 export default function TaskWorkflowPage() {
   const { taskId } = useParams<{ taskId: string }>();
@@ -15,7 +15,7 @@ export default function TaskWorkflowPage() {
   const [progressList, setProgressList] = useState<StepProgress[]>([]);
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
   const [showEditor, setShowEditor] = useState(false);
-  const [agentContext, setAgentContext] = useState<AgentContextV1 | null>(null);
+  const [agentContext, setAgentContext] = useState<AgentContext | null>(null);
 
   const load = useCallback(async () => {
     if (!taskId) return;
@@ -51,9 +51,10 @@ export default function TaskWorkflowPage() {
   const currentStepProgress = selectedStep ? progressMap[selectedStep.id] : undefined;
   const observationMap: Record<string, { actions: number; jobs: number; evidence: number }> = {};
   const observationFor = (stepId: string) => observationMap[stepId] ??= { actions: 0, jobs: 0, evidence: 0 };
-  agentContext?.recentActions.forEach(item => { observationFor(item.step_id).actions += 1; });
-  agentContext?.recentJobs.forEach(item => { if (item.step_id) observationFor(item.step_id).jobs += 1; });
-  agentContext?.recentEvidenceChecks.forEach(item => { observationFor(item.step_id).evidence += 1; });
+  const actionSteps = new Map(agentContext?.recentActions.map(item => [item.id, item.step_id] as const) ?? []);
+  agentContext?.recentActions.forEach(item => { if (item.step_id) observationFor(item.step_id).actions += 1; });
+  agentContext?.recentJobs.forEach(item => { const stepId = actionSteps.get(item.action_id); if (stepId) observationFor(stepId).jobs += 1; });
+  agentContext?.recentEvidenceChecks.forEach(item => { const stepId = actionSteps.get(item.action_id); if (stepId) observationFor(stepId).evidence += 1; });
 
   return (
     <div className="flex flex-col h-full">
@@ -74,7 +75,7 @@ export default function TaskWorkflowPage() {
           </button>
         </div>
         {task.description && <p className="text-xs text-[#6b6b80] mt-1">{task.description}</p>}
-        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>{agentContext.recentActions.length} actions</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">只读记录；执行与授权回到 Codex 对话</span></div>}
+        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>STAGE {agentContext.run.current_stage_id ?? '—'}</span><span>{agentContext.recentActions.length} actions</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">只读记录；研究者决定回到 Codex 对话</span></div>}
         <div className="mt-2 flex items-start gap-2 text-[10px] leading-5 text-[#85859c]"><Info size={12} className="mt-0.5 shrink-0 text-[#67c9b5]"/><p>这里是任务的核心科学骨架。具体命令、重试、传输、参数扫描和临时诊断保留在 Codex action / event 中；只有改变关键阶段、检查点或完成证据时才修改工作流。</p></div>
       </div>
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Save, Server, ShieldCheck, Trash2, X } from 'lucide-react';
 import { agentApi, projectsApi, tasksApi } from '../api/client';
-import type { AgentContextV1, HpcConfig, HpcProfile, HpcTaskBinding, Project, Task } from '../types';
+import type { AgentContext, HpcConfig, HpcProfile, HpcTaskBinding, Project, Task } from '../types';
 
 const EMPTY_PROFILE: HpcProfile = { id: '', name: '', sshAlias: '', userRoot: '', projectRoot: '', scheduler: 'LSF', notes: '' };
 
@@ -25,8 +25,8 @@ function remoteTaskRoot(profile: HpcProfile | undefined, binding: HpcTaskBinding
   return `${profile.projectRoot.replace(/\/+$/, '')}/${binding.taskRootRel}`;
 }
 
-function commandPreview(action: AgentContextV1['recentActions'][number]) {
-  const preview = action.manifest.executionPreview;
+function commandPreview(action: AgentContext['recentActions'][number]) {
+  const preview = action.spec.executionPreview;
   if (!preview || typeof preview !== 'object') return [];
   const commands = (preview as { commands?: unknown }).commands;
   return Array.isArray(commands) ? commands.filter((item): item is string => typeof item === 'string') : [];
@@ -38,7 +38,7 @@ export default function SupercomputersPage() {
   const [projectId, setProjectId] = useState('');
   const [taskId, setTaskId] = useState('');
   const [config, setConfig] = useState<HpcConfig>({ schemaVersion: 2, profiles: [], taskBindings: [] });
-  const [context, setContext] = useState<AgentContextV1 | null>(null);
+  const [context, setContext] = useState<AgentContext | null>(null);
   const [draft, setDraft] = useState<HpcProfile | null>(null);
   const [bindingProfileId, setBindingProfileId] = useState('');
   const [taskRootDraft, setTaskRootDraft] = useState('');
@@ -123,19 +123,16 @@ export default function SupercomputersPage() {
   };
 
   const transfers = useMemo(() => context?.recentActions.filter(action => action.action_type === 'files.upload' || action.action_type === 'files.download') ?? [], [context]);
-  const policy = context?.effectivePolicy;
+  const envelope = context?.run?.confirmed_envelope;
   const bindingProfile = config.profiles?.find(item => item.id === bindingProfileId);
   const selectedBinding = config.taskBindings?.find(item => item.taskId === taskId && item.profileId === bindingProfileId);
   const configuredTaskRoot = remoteTaskRoot(bindingProfile, selectedBinding);
-  const policyReadRoot = policy?.remoteReadRoot ?? policy?.remoteRoot;
-  const policyProjectRoot = policy?.remoteProjectRoot ?? policy?.remoteRoot;
-  const policyWriteRoot = policy?.remoteWriteRoot ?? policy?.remoteRoot;
 
   return <div className="h-full overflow-y-auto bg-[#0d1214] p-8 text-[#e9f0ed]">
     <header className="border-b border-[#2a3433] pb-5">
       <p className="font-mono text-[10px] uppercase tracking-[.28em] text-[#92cfe7]">Remote infrastructure / governed</p>
       <h1 className="mt-1 text-2xl font-semibold">超算管理</h1>
-      <p className="mt-2 max-w-4xl text-sm leading-6 text-[#94a39f]">统一维护 OpenSSH 连接、用户只读根、项目目录和任务写目录，并观察传输、作业与有效策略。这里不保存密码或私钥，也不直接创建目录、上传、下载、提交或取消；实际动作由 Codex 按精确 manifest 执行。</p>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-[#94a39f]">统一维护 OpenSSH 连接、用户只读根、项目目录和任务写目录，并观察传输与作业。这里不保存密码或私钥，也不直接创建目录、上传、下载、提交或取消；实际动作由 Codex 在已确认 Task Spec 边界内执行。</p>
     </header>
 
     <section className="mt-5 grid gap-3 border border-[#293534] bg-[#131a1c] p-4 md:grid-cols-2">
@@ -156,7 +153,7 @@ export default function SupercomputersPage() {
 
       <section className="border border-[#293534] bg-[#131a1c] p-5">
         <h2 className="flex items-center gap-2 font-medium"><ShieldCheck size={17} className="text-[#67c9b5]"/>当前任务的远程边界</h2>
-        {!taskId && <p className="mt-4 text-sm text-[#657570]">选择任务后登记远程任务目录，并显示配置边界与系统、项目、任务三层策略合并后的有效边界。</p>}
+        {!taskId && <p className="mt-4 text-sm text-[#657570]">选择任务后登记远程任务目录，并显示连接配置与该 Run 已确认的执行边界。</p>}
         {taskId && <div className="mt-4 space-y-4">
           <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 border border-[#293534] bg-[#0f1618] p-3 text-xs"><dt className="text-[#657570]">本地项目根</dt><dd className="break-all font-mono">{project?.working_dir || '—'}</dd><dt className="text-[#657570]">本地任务根</dt><dd className="break-all font-mono">{context?.taskRoot.absolute ?? context?.taskRoot.relative ?? '—'}</dd></dl>
           {(config.profiles ?? []).length > 0 ? <div className="border border-[#315b70] bg-[#12212a] p-3">
@@ -168,12 +165,10 @@ export default function SupercomputersPage() {
             <dl className="mt-3 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 border-t border-[#315b70] pt-3 text-xs"><dt className="text-[#657570]">用户根 · 只读</dt><dd className="break-all font-mono">{bindingProfile?.userRoot ?? '—'}</dd><dt className="text-[#657570]">项目根</dt><dd className="break-all font-mono">{bindingProfile?.projectRoot ?? '—'}</dd><dt className="text-[#657570]">任务根 · 读写</dt><dd className="break-all font-mono text-[#9ee0d1]">{configuredTaskRoot || '尚未保存任务目录映射'}</dd></dl>
           </div> : <div className="border border-dashed border-[#354341] p-5 text-center text-sm text-[#657570]">请先在左侧登记超算连接、用户只读根和项目根。</div>}
         </div>}
-        {taskId && !policy && <p className="mt-4 text-sm text-[#dfb26a]">该任务尚无可用有效策略；上面的目录映射只是配置，不会授予执行权限。</p>}
-        {policy && <div className="mt-4 space-y-4">
-          <div className="grid gap-px bg-[#293534] sm:grid-cols-2"><div className="bg-[#0f1618] p-3"><div className="font-mono text-[9px] uppercase text-[#657570]">Remote</div><div className={`mt-1 text-sm ${policy.remoteEnabled ? 'text-[#9ee0d1]' : 'text-[#e9a29c]'}`}>{policy.remoteEnabled ? '允许（仍需逐动作确认）' : '禁用'}</div></div><div className="bg-[#0f1618] p-3"><div className="font-mono text-[9px] uppercase text-[#657570]">Hosts</div><div className="mt-1 break-all font-mono text-xs">{policy.allowedHosts.join(', ') || 'none'}</div></div></div>
-          <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-xs"><dt className="text-[#657570]">策略读取根</dt><dd className="break-all font-mono">{policyReadRoot ?? '—'}</dd><dt className="text-[#657570]">策略项目根</dt><dd className="break-all font-mono">{policyProjectRoot ?? '—'}</dd><dt className="text-[#657570]">策略写入根</dt><dd className="break-all font-mono">{policyWriteRoot ?? '—'}</dd></dl>
-          <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-xs"><dt className="text-[#657570]">允许操作</dt><dd>{policy.allowedOperations.join(', ') || 'none'}</dd><dt className="text-[#657570]">保护路径</dt><dd className="font-mono">{policy.protectedPaths.join(', ') || 'none'}</dd><dt className="text-[#657570]">资源上限</dt><dd>{policy.limits.maxCoresPerJob} 核/作业 · {policy.limits.maxWallMinutes} 分钟 · {policy.limits.maxConcurrentJobs} 并发 · {policy.limits.maxAutomaticRetries} 自动重试</dd><dt className="text-[#657570]">策略来源</dt><dd>{context?.policySources.map(item => `${item.scope_type} v${item.version}`).join(' → ') || '—'}</dd></dl>
-          <div className="border border-[#2d4842] bg-[#13201d] p-3 text-xs leading-5 text-[#a9d5ca]">连接配置只描述“可去哪里”；有效策略定义“允许做什么”；精确 manifest 与研究者确认决定“这一次做什么”。三者缺一不可。</div>
+        {taskId && !envelope && <p className="mt-4 text-sm text-[#dfb26a]">该任务尚无已确认 Task Spec；目录映射只描述可去哪里，不会单独启动执行。</p>}
+        {envelope && <div className="mt-4 space-y-4">
+          <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-xs"><dt className="text-[#657570]">采用连接</dt><dd className="font-mono">{envelope.hpcProfileId ?? 'local only'}</dd><dt className="text-[#657570]">允许能力</dt><dd>{envelope.allowedCapabilities.join(', ')}</dd><dt className="text-[#657570]">保护路径</dt><dd className="font-mono">{envelope.protectedRelativePaths.join(', ') || 'none'}</dd><dt className="text-[#657570]">资源上限</dt><dd>{envelope.resourceLimits.maxCoresPerJob} 核/作业 · {envelope.resourceLimits.maxWallMinutes} 分钟 · {envelope.resourceLimits.maxConcurrentJobs} 并发 · {envelope.resourceLimits.maxAutomaticRetries} 自动重试</dd></dl>
+          <div className="border border-[#2d4842] bg-[#13201d] p-3 text-xs leading-5 text-[#a9d5ca]">连接配置固定远程主机与 Task 写根；Task Spec 固定能力和资源边界；Codex 在边界内自主安排目录、Action 和作业。</div>
         </div>}
       </section>
     </div>

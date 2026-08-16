@@ -42,7 +42,7 @@ export default function Sidebar() {
       </nav>
       <div className="px-5 py-4 border-t border-[#2d2d44]">
         <p className="text-[10px] text-[#4a4a60] leading-relaxed">
-          Codex-driven workbench · V2
+          Codex-driven workbench · V3
         </p>
       </div>
     </aside>

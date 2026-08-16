@@ -123,6 +123,16 @@ Task Spec 是一个逻辑文档，由数据库保存为唯一事实源，CLI 和
 
 Working Plan 原地更新；Action/事件时间线自然保留实际发生过的历史，不为每个小修改保存完整 Spec 版本。只有 Confirmed Envelope 实质改变时才递增 `envelope_revision`，保存差异摘要并重新确认。
 
+### Research Plan / Workflow 纠错闭环
+
+Research Plan 和 Workflow 是当前最可信的科学方案与核心骨架，不是不可纠错的真理。Task Spec 固定的是已确认的科学承诺和执行边界，不冻结文档文字。
+
+- 实现偏离方案、目录/脚本错误或缺少必要技术连接：Codex 在 Envelope 内自主修正 Working Plan。
+- 补充更严格的诊断、收敛或证据检查：资源边界内自主增加，并记录简短修订事件。
+- Research Plan 的关键科学判断、核心 Workflow 阶段、资源/权限或完成标准需要改变：暂停受影响的后续动作，生成 researcher pending item，确认后更新 Envelope。
+- 已生成结果按影响范围标记 `valid | suspect | invalid | superseded`；不删除历史，只重算受影响的最小子树。
+- 小修正只更新当前文档和变更摘要；只有实质科学修订才保留一次前后差异、依据、受影响 Stage 和 Envelope revision。
+
 ## 4. 关键数据流与目标模块
 
 ```text
@@ -166,7 +176,7 @@ V4 的 Policy、Context、Review 和 Promotion 表先从运行路径退役。v5 
 
 ### 步骤 2：实施 schema v5 和精简 Run/Spec 状态机
 
-实施：把 Confirmed Envelope、Working Plan、当前 Stage 和 envelope revision 纳入 Run；重建简化后的 Action/Job 关联；新增 `pending_items`；扩展 Experience 适用范围和来源；退役 Contract/Policy/Context/Review/Promotion 的运行依赖。保留 Research Plan 与 Workflow 作为独立科研对象。
+实施：把 Confirmed Envelope、Working Plan、当前 Stage 和 envelope revision 纳入 Run；重建简化后的 Action/Job 关联；新增 `pending_items`；为 Artifact 增加纠错有效性状态；扩展 Experience 适用范围和来源；退役 Contract/Policy/Context/Review/Promotion 的运行依赖。保留 Research Plan 与 Workflow 作为可纠错的独立科研对象。
 
 完成标准：普通 Working Plan 更新无需授权和版本表；越界更新必须产生 researcher pending item；Action/Job/Artifact 的 Stage 外键关系完整；迁移可重复且不丢旧数据。
 
@@ -174,7 +184,7 @@ V4 的 Policy、Context、Review 和 Promotion 表先从运行路径退役。v5 
 
 ### 步骤 3：重写 Codex Skill/CLI 的自主执行协议
 
-实施：CLI 支持 draft/show/confirm/update-working-plan/escalate/resume；Skill 规定 Codex 先查询经验并生成 Research Plan + Task Spec，研究者确认 Envelope 一次后自主执行。移除逐 Action 提案/授权和 context hash drift 流程。
+实施：升级现有单一 `workbench-agent` Skill，不创建材料/阶段专用 Skill。CLI 支持 draft/show/confirm/update-working-plan/escalate/resume；Skill 规定 Codex 先查询经验并生成 Research Plan + Task Spec，研究者确认 Envelope 一次后自主执行，并执行发现错误 → 影响分析 → 边界内修正或沟通 → 标记证据 → 最小重算 → 恢复的纠错闭环。移除逐 Action 提案/授权和 context hash drift 流程。
 
 只有以下情况暂停：科学路线或关键参数改变、资源/并发上限扩大、Task 写根扩大、破坏性操作、需要研究者接受结论。普通工程错误由 Codex 自主调查修复。
 

@@ -4,15 +4,14 @@ import fs from 'node:fs';
 const EXIT = { ok: 0, usage: 2, api: 3, blocked: 4, transport: 5 };
 
 function parse(argv) {
-  const positionals = [];
-  const flags = {};
+  const positionals = []; const flags = {};
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (!value.startsWith('--')) { positionals.push(value); continue; }
-    const [rawKey, inline] = value.slice(2).split('=', 2);
-    if (inline !== undefined) flags[rawKey] = inline;
-    else if (argv[index + 1] && !argv[index + 1].startsWith('--')) flags[rawKey] = argv[++index];
-    else flags[rawKey] = true;
+    const [key, inline] = value.slice(2).split('=', 2);
+    if (inline !== undefined) flags[key] = inline;
+    else if (argv[index + 1] && !argv[index + 1].startsWith('--')) flags[key] = argv[++index];
+    else flags[key] = true;
   }
   return { positionals, flags };
 }
@@ -20,12 +19,52 @@ function parse(argv) {
 const { positionals, flags } = parse(process.argv.slice(2));
 const baseUrl = String(process.env.WORKBENCH_URL ?? 'http://127.0.0.1:3001').replace(/\/$/, '');
 
-function usage(message, exitCode = EXIT.usage) {
+function usage(message, code = EXIT.usage) {
   if (message) process.stderr.write(`${message}\n`);
-  process.stderr.write(`workbench — Codex-driven DFT+DMFT research environment\n\nCommands:\n  doctor\n  context --task <id>\n  execution contract\n  run start --task <id> --plan <id> [--idempotency-key <key>]\n  run show --run <id>\n  run revise --run <id> --plan-file <path> --contract-file <path> --context-version <id> --reason <text>\n  run terminate --run <id> --reason <text>\n  action prepare --run <id> --context-version <id> --step <id> --capability <name> --spec-file <json> --idempotency-key <key> [--conversation-ref <ref>]\n  action propose --run <id> --context-version <id> --step <id> --type <name> --manifest-file <json> --idempotency-key <key> [--conversation-ref <ref>]\n  action authorize --action <id> --context-version <id> --manifest-sha <sha> --summary <text> [--conversation-ref <ref>]\n  action execute --action <id>\n  action show --action <id>\n  action list --run <id>\n  action status --action <id> --status <status> [--result-file <json>] [--error-file <json>]\n  artifact register --action <id> --location <local|remote> --path <relative> --category <name> --idempotency-key <key> [--job <id>] [--size <bytes>] [--sha256 <sha>] [--metadata-file <json>]\n  artifact list --run <id>\n  evidence check --action <id> --validator <name> --validator-version <version> --status <pass|warn|fail> --result-file <json> --idempotency-key <key> [--artifact <id>]\n  evidence list --run <id>\n  event append --run <id> --category <fact|inference|decision> --type <name> --actor <agent|researcher|system> [--payload-file <json>]\n  conclusion record --run <id> --summary <text> --artifacts <id,id> --idempotency-key <key> [--conversation-ref <ref>]\n  experience promote --run <id> --conclusion <event-id> --artifacts <id,id> --title <text> --content-file <path> --idempotency-key <key> [--tags <tag,tag>] [--conversation-ref <ref>]\n  review request --run <id> --gate <name> --question <text>\n  review list [--run <id>]\n  review decide --request <id> --decision <approve|reject|supplement|terminate> [--comment <text>] [--conversation-ref <ref>]\n  plan show --plan <id>\n  plan update --plan <id> --file <markdown> --expected-sha <sha>\n  workflow show --task <id>\n  workflow update --task <id> --file <json> --expected-sha <sha>\n  policy list [--scope-type <type>] [--scope-id <id>]\n  policy create --scope-type <type> [--scope-id <id>] --file <json> [--activate]\n  policy activate --policy <id>\n  contract show|initialize --plan <id>\n  contract update --plan <id> --file <yaml> [--expected-plan-sha <sha>]\n  remote status|logs|reconcile --job <remote-job-id>\n\nJSON is the default output. Use --pretty for indented JSON.\n`);
-  process.stderr.write(`Additional experience commands:\n  experience search [--query <text>] [--project <id>] [--task <id>]\n  experience capture --run <id> [--step <id>] --title <text> --content-file <path> --idempotency-key <key> [--tags <tag,tag>] [--conversation-ref <ref>]\n`);
-  process.stderr.write('Additional HPC metadata commands:\n  hpc show --project <id>\n  hpc configure --project <id> --file <json>\n');
-  process.exit(exitCode);
+  process.stderr.write(`workbench — Codex-driven DFT+DMFT research environment\n\nCommands:
+  doctor
+  context --task <id> [--allow-blocked] [--pretty]
+  hpc show --project <id>
+  hpc configure --project <id> --file <json>
+  plan list [--project <id>] [--task <id>] [--status <status>] [--query <text>]
+  plan show --plan <id>
+  plan update --plan <id> --file <markdown> --expected-sha <sha>
+  plan metadata --plan <id> --file <json>
+  workflow show --task <id>
+  workflow update --task <id> --file <json> --expected-sha <sha>
+
+  run draft --task <id> --plan <id> --task-spec-file <json> --idempotency-key <key>
+  run show --run <id>
+  run confirm --run <id> --summary <text> [--conversation-ref <ref>]
+  run working-plan --run <id> --file <json> --reason <text> --idempotency-key <key>
+  run revise-envelope --run <id> --file <json> --pending <id> --summary <text> [--conversation-ref <ref>]
+  run complete --run <id> --summary <text> [--conversation-ref <ref>]
+  run terminate --run <id> --reason <text>
+
+  execution contract
+  action prepare --run <id> --stage <id> [--step <id>] --capability <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>] [--conversation-ref <ref>]
+  action record --run <id> --stage <id> [--step <id>] --type <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>]
+  action execute --action <id>
+  action show --action <id>
+  action list --run <id>
+  action status --action <id> --status <status> [--result-file <json>] [--error-file <json>]
+
+  pending list [--run <id>] [--project <id>] [--task <id>] [--audience <codex|researcher>] [--status <status>]
+  pending create --run <id> --audience <codex|researcher> --kind <name> --title <text> --detail-file <json> --idempotency-key <key> [--stage <id>] [--action <id>] [--job <id>]
+  pending resolve --item <id> [--status <resolved|dismissed>] [--resolution-file <json>] [--conversation-ref <ref>]
+  artifact register --action <id> --location <local|remote> --path <relative> --category <name> --idempotency-key <key> [--job <id>] [--size <bytes>] [--sha256 <sha>]
+  artifact validity --artifact <id> --validity <valid|suspect|invalid|superseded> --reason <text> [--superseded-by <id>]
+  artifact list --run <id>
+  evidence check --action <id> --validator <name> --validator-version <version> --status <pass|warn|fail> --result-file <json> --idempotency-key <key> [--artifact <id>]
+  evidence list --run <id>
+  event append --run <id> --category <fact|inference|decision|conclusion> --type <name> --actor <agent|researcher|system> [--payload-file <json>] [--conversation-ref <ref>]
+
+  experience search [--query <text>] [--project <id>] [--task <id>] [--status <manual|candidate|confirmed>]
+  experience capture --run <id> [--stage <id>] --title <text> --content-file <path> --applicable-scope <text> --idempotency-key <key> [--category <name>] [--artifacts <id,id>] [--tags <tag,tag>]
+  remote status|logs|reconcile --job <remote-job-id>
+
+JSON is the default output. Web pages are observation/metadata surfaces and never authorize or launch Agent work.\n`);
+  process.exit(code);
 }
 
 function required(name) {
@@ -33,42 +72,31 @@ function required(name) {
   if (typeof value !== 'string' || !value.trim()) usage(`Missing --${name}`);
   return value;
 }
-
 function readText(name) { return fs.readFileSync(required(name), 'utf8'); }
 function readJson(name) { return JSON.parse(readText(name)); }
-function csv(name) { return required(name).split(',').map(value => value.trim()).filter(Boolean); }
+function csvOptional(name) { return typeof flags[name] === 'string' ? flags[name].split(',').map(item => item.trim()).filter(Boolean) : []; }
+
+const BLOCKED_CODES = new Set([
+  'RUN_NOT_STARTED', 'RUN_NOT_ACTIVE', 'RUN_NOT_CONFIRMED', 'RUN_WAITING_RESEARCHER',
+  'TASK_ROOT_UNRESOLVED', 'STAGE_WAITING_RESEARCHER', 'ACTION_NOT_EXECUTABLE',
+  'EXECUTION_INPUT_DRIFT', 'EXECUTION_RECEIPT_CONFLICT', 'EXECUTION_RECOVERY_UNCERTAIN',
+  'REMOTE_SUBMISSION_UNCERTAIN', 'REMOTE_CONCURRENCY_LIMIT',
+]);
 
 async function request(method, pathname, body) {
   let response;
-  try {
-    response = await fetch(`${baseUrl}${pathname}`, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch (error) {
-    const wrapped = new Error(`Cannot reach Workbench at ${baseUrl}: ${error.message}`);
-    wrapped.exitCode = EXIT.transport;
-    throw wrapped;
-  }
+  try { response = await fetch(`${baseUrl}${pathname}`, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); }
+  catch (error) { const item = new Error(`Cannot reach Workbench at ${baseUrl}: ${error.message}`); item.exitCode = EXIT.transport; throw item; }
   const text = await response.text();
-  let payload;
-  try { payload = text ? JSON.parse(text) : {}; }
-  catch { payload = { error: text || `HTTP ${response.status}` }; }
-  if (!response.ok) {
-    const error = new Error(payload.error ?? `HTTP ${response.status}`);
-    error.payload = payload;
-    error.exitCode = [
-      'RUN_NOT_STARTED', 'RUN_NOT_ACTIVE', 'RUN_WAITING_REVIEW', 'TASK_ROOT_UNRESOLVED',
-      'CONTRACT_MISSING', 'PLAN_CONTRACT_DRIFT', 'STALE_CONTEXT', 'ACTION_CONTEXT_MISMATCH',
-      'CONTEXT_DRIFT', 'WORKFLOW_CONTEXT_DRIFT', 'ACTION_MANIFEST_MISMATCH',
-      'ACTION_TRANSITION_INVALID', 'ACTION_NOT_AUTHORIZED', 'REMOTE_SUBMISSION_UNCERTAIN',
-      'EXECUTION_INPUT_DRIFT', 'EXECUTION_RECEIPT_CONFLICT', 'POLICY_CONTEXT_DRIFT',
-      'EXECUTION_IN_PROGRESS', 'EXECUTION_RECOVERY_UNCERTAIN',
-    ].includes(payload.code) ? EXIT.blocked : EXIT.api;
-    throw error;
-  }
-  return { payload, status: response.status };
+  let payload; try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text || `HTTP ${response.status}` }; }
+  if (!response.ok) { const item = new Error(payload.error ?? `HTTP ${response.status}`); item.payload = payload; item.exitCode = BLOCKED_CODES.has(payload.code) ? EXIT.blocked : EXIT.api; throw item; }
+  return payload;
+}
+
+function queryPath(base, values) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) if (typeof value === 'string' && value) query.set(key, value);
+  return `${base}${query.size ? `?${query}` : ''}`;
 }
 
 async function main() {
@@ -76,125 +104,70 @@ async function main() {
   if (!group && (flags.help || flags.h)) usage(undefined, EXIT.ok);
   if (!group) usage();
   if (group === 'doctor') {
-    const started = Date.now();
-    const result = await request('GET', '/api/projects');
-    return { ok: true, baseUrl, latencyMs: Date.now() - started, projectCount: Array.isArray(result.payload) ? result.payload.length : null };
+    const started = Date.now(); const projects = await request('GET', '/api/projects'); const execution = await request('GET', '/api/agent/v1/execution-contract');
+    return { ok: true, baseUrl, latencyMs: Date.now() - started, projectCount: projects.length, runtimeSchemaVersion: execution.schemaVersion };
   }
   if (group === 'context') {
-    const result = (await request('GET', `/api/agent/v1/context/tasks/${encodeURIComponent(required('task'))}`)).payload;
-    if (Array.isArray(result.blockers) && result.blockers.length && flags['allow-blocked'] !== true) {
-      const error = new Error('Context contains blockers'); error.payload = result; error.exitCode = EXIT.blocked; throw error;
-    }
+    const result = await request('GET', `/api/agent/v1/context/tasks/${encodeURIComponent(required('task'))}`);
+    if (Array.isArray(result.blockers) && result.blockers.length && flags['allow-blocked'] !== true) { const item = new Error('Context contains blockers'); item.payload = result; item.exitCode = EXIT.blocked; throw item; }
     return result;
   }
   if (group === 'hpc') {
     const project = encodeURIComponent(required('project'));
-    if (action === 'show') {
-      const result = (await request('GET', '/api/projects/' + project)).payload;
-      return {
-        projectId: result.id,
-        projectName: result.name,
-        config: result.hpc_config ? JSON.parse(result.hpc_config) : null,
-      };
-    }
-    if (action === 'configure') {
-      const result = (await request('PUT', '/api/projects/' + project, {
-        hpc_config: JSON.stringify(readJson('file')),
-      })).payload;
-      return {
-        projectId: result.id,
-        projectName: result.name,
-        config: result.hpc_config ? JSON.parse(result.hpc_config) : null,
-      };
-    }
-  }
-  if (group === 'execution' && action === 'contract') return (await request('GET', '/api/agent/v1/execution-contract')).payload;
-  if (group === 'run') {
-    if (action === 'start') return (await request('POST', '/api/agent/v1/runs', { taskId: required('task'), researchPlanId: required('plan'), idempotencyKey: flags['idempotency-key'] })).payload;
-    if (action === 'show') return (await request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}`)).payload;
-    if (action === 'revise') {
-      const result = await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/revise`, { planContent: readText('plan-file'), contractContent: readText('contract-file'), expectedContextVersionId: required('context-version'), reason: required('reason'), idempotencyKey: flags['idempotency-key'] });
-      if (result.status === 202) { const error = new Error('Revision requires review'); error.payload = result.payload; error.exitCode = EXIT.blocked; throw error; }
-      return result.payload;
-    }
-    if (action === 'terminate') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/terminate`, { reason: required('reason') })).payload;
-  }
-  if (group === 'action') {
-    if (action === 'prepare') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/executable-actions`, { contextVersionId: required('context-version'), stepId: required('step'), capability: required('capability'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] })).payload;
-    if (action === 'propose') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`, { contextVersionId: required('context-version'), stepId: required('step'), actionType: required('type'), manifest: readJson('manifest-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] })).payload;
-    if (action === 'authorize') return (await request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/authorize`, { expectedContextVersionId: required('context-version'), expectedManifestSha256: required('manifest-sha'), authorizationSummary: required('summary'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
-    if (action === 'show') return (await request('GET', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}`)).payload;
-    if (action === 'list') return (await request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`)).payload;
-    if (action === 'execute') return (await request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/execute`, {})).payload;
-    if (action === 'status') return (await request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/status`, { status: required('status'), result: flags['result-file'] ? readJson('result-file') : undefined, error: flags['error-file'] ? readJson('error-file') : undefined })).payload;
-  }
-  if (group === 'artifact') {
-    if (action === 'register') return (await request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/artifacts`, { location: required('location'), path: required('path'), category: required('category'), idempotencyKey: required('idempotency-key'), remoteJobId: flags.job, sizeBytes: flags.size === undefined ? undefined : Number(flags.size), sha256: flags.sha256, metadata: flags['metadata-file'] ? readJson('metadata-file') : undefined })).payload;
-    if (action === 'list') return (await request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/artifacts`)).payload;
-  }
-  if (group === 'evidence') {
-    if (action === 'check') return (await request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/evidence-checks`, { artifactId: flags.artifact, validatorName: required('validator'), validatorVersion: required('validator-version'), status: required('status'), result: readJson('result-file'), idempotencyKey: required('idempotency-key') })).payload;
-    if (action === 'list') return (await request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/evidence-checks`)).payload;
-  }
-  if (group === 'event' && action === 'append') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/events`, { category: required('category'), eventType: required('type'), actorType: required('actor'), payload: flags['payload-file'] ? readJson('payload-file') : {}, idempotencyKey: flags['idempotency-key'], source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
-  if (group === 'conclusion' && action === 'record') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/conclusions`, { summary: required('summary'), artifactIds: csv('artifacts'), idempotencyKey: required('idempotency-key'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
-  if (group === 'experience' && action === 'search') {
-    const query = new URLSearchParams();
-    if (typeof flags.query === 'string') query.set('search', flags.query);
-    if (typeof flags.project === 'string') query.set('projectId', flags.project);
-    if (typeof flags.task === 'string') query.set('taskId', flags.task);
-    return (await request('GET', `/api/experiences${query.size ? `?${query}` : ''}`)).payload;
-  }
-  if (group === 'experience' && action === 'capture') return (await request('POST', '/api/experiences/codex-capture', { runId: required('run'), stepId: flags.step, title: required('title'), content: readText('content-file'), tags: typeof flags.tags === 'string' ? flags.tags.split(',').map(value => value.trim()).filter(Boolean) : [], idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] })).payload;
-  if (group === 'experience' && action === 'promote') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/experience-promotions`, { conclusionEventId: required('conclusion'), artifactIds: csv('artifacts'), title: required('title'), content: readText('content-file'), tags: typeof flags.tags === 'string' ? flags.tags.split(',').map(value => value.trim()).filter(Boolean) : [], idempotencyKey: required('idempotency-key'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
-  if (group === 'review') {
-    if (action === 'list') return (await request('GET', `/api/agent/v1/reviews${flags.run ? `?runId=${encodeURIComponent(flags.run)}` : ''}`)).payload;
-    if (action === 'request') return (await request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/reviews`, { gateType: required('gate'), question: required('question'), idempotencyKey: flags['idempotency-key'], source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
-    if (action === 'decide') return (await request('POST', `/api/agent/v1/reviews/${encodeURIComponent(required('request'))}/decisions`, { decision: required('decision'), comment: flags.comment ?? '', source: 'codex_conversation', conversationRef: flags['conversation-ref'] })).payload;
+    if (action === 'show') { const result = await request('GET', `/api/projects/${project}`); return { projectId: result.id, projectName: result.name, config: result.hpc_config ? JSON.parse(result.hpc_config) : null }; }
+    if (action === 'configure') { const result = await request('PUT', `/api/projects/${project}`, { hpc_config: JSON.stringify(readJson('file')) }); return { projectId: result.id, projectName: result.name, config: result.hpc_config ? JSON.parse(result.hpc_config) : null }; }
   }
   if (group === 'plan') {
+    if (action === 'list') return request('GET', queryPath('/api/research-plans', { projectId: flags.project, taskId: flags.task, status: flags.status, search: flags.query }));
     const plan = encodeURIComponent(required('plan'));
-    if (action === 'show') {
-      const [metadata, content] = await Promise.all([request('GET', `/api/research-plans/${plan}`), request('GET', `/api/research-plans/${plan}/content`)]);
-      return { ...metadata.payload, ...content.payload };
-    }
-    if (action === 'update') return (await request('PUT', `/api/research-plans/${plan}/content`, { content: readText('file'), expectedSha256: required('expected-sha') })).payload;
+    if (action === 'show') return { ...await request('GET', `/api/research-plans/${plan}`), ...await request('GET', `/api/research-plans/${plan}/content`) };
+    if (action === 'update') return request('PUT', `/api/research-plans/${plan}/content`, { content: readText('file'), expectedSha256: required('expected-sha') });
+    if (action === 'metadata') return request('PUT', `/api/research-plans/${plan}`, readJson('file'));
   }
   if (group === 'workflow') {
     const task = encodeURIComponent(required('task'));
-    if (action === 'show') {
-      const taskResult = (await request('GET', `/api/tasks/${task}`)).payload;
-      return { ...taskResult.workflow, sha256: taskResult.workflow_sha256 };
-    }
-    if (action === 'update') return (await request('PUT', `/api/tasks/${task}/workflow`, { ...readJson('file'), expectedWorkflowSha256: required('expected-sha') })).payload;
+    if (action === 'show') { const result = await request('GET', `/api/tasks/${task}`); return { ...result.workflow, sha256: result.workflow_sha256 }; }
+    if (action === 'update') return request('PUT', `/api/tasks/${task}/workflow`, { ...readJson('file'), expectedWorkflowSha256: required('expected-sha') });
   }
-  if (group === 'policy') {
-    if (action === 'list') {
-      const query = new URLSearchParams();
-      if (flags['scope-type']) query.set('scopeType', flags['scope-type']);
-      if (flags['scope-id']) query.set('scopeId', flags['scope-id']);
-      return (await request('GET', `/api/agent/v1/policies${query.size ? `?${query}` : ''}`)).payload;
-    }
-    if (action === 'create') return (await request('POST', '/api/agent/v1/policies', { scopeType: required('scope-type'), scopeId: flags['scope-id'] ?? null, policy: readJson('file'), activate: flags.activate === true })).payload;
-    if (action === 'activate') return (await request('POST', `/api/agent/v1/policies/${encodeURIComponent(required('policy'))}/activate`, {})).payload;
+  if (group === 'execution' && action === 'contract') return request('GET', '/api/agent/v1/execution-contract');
+  if (group === 'run') {
+    const run = action === 'draft' ? null : encodeURIComponent(required('run'));
+    if (action === 'draft') return request('POST', '/api/agent/v1/runs', { taskId: required('task'), researchPlanId: required('plan'), taskSpec: readJson('task-spec-file'), idempotencyKey: required('idempotency-key') });
+    if (action === 'show') return request('GET', `/api/agent/v1/runs/${run}`);
+    if (action === 'confirm') return request('POST', `/api/agent/v1/runs/${run}/confirm`, { summary: required('summary'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
+    if (action === 'working-plan') return request('PUT', `/api/agent/v1/runs/${run}/working-plan`, { workingPlan: readJson('file'), reason: required('reason'), idempotencyKey: required('idempotency-key') });
+    if (action === 'revise-envelope') return request('POST', `/api/agent/v1/runs/${run}/envelope-revisions`, { confirmedEnvelope: readJson('file'), pendingItemId: required('pending'), summary: required('summary'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
+    if (action === 'complete') return request('POST', `/api/agent/v1/runs/${run}/complete`, { summary: required('summary'), source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
+    if (action === 'terminate') return request('POST', `/api/agent/v1/runs/${run}/terminate`, { reason: required('reason') });
   }
-  if (group === 'contract') {
-    const plan = encodeURIComponent(required('plan'));
-    if (action === 'show') return (await request('GET', `/api/research-plans/${plan}/contract`)).payload;
-    if (action === 'initialize') return (await request('POST', `/api/research-plans/${plan}/contract/initialize`, { overwrite: flags.overwrite === true })).payload;
-    if (action === 'update') return (await request('PUT', `/api/research-plans/${plan}/contract`, { content: readText('file'), expectedPlanSha256: flags['expected-plan-sha'] })).payload;
+  if (group === 'action') {
+    if (action === 'prepare') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/executable-actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, capability: required('capability'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
+    if (action === 'record') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, actionType: required('type'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
+    if (action === 'execute') return request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/execute`, {});
+    if (action === 'show') return request('GET', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}`);
+    if (action === 'list') return request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`);
+    if (action === 'status') return request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/status`, { status: required('status'), result: flags['result-file'] ? readJson('result-file') : undefined, error: flags['error-file'] ? readJson('error-file') : undefined });
   }
-  if (group === 'remote' && ['status', 'logs', 'reconcile'].includes(action)) {
-    return (await request('POST', `/api/agent/v1/remote/jobs/${encodeURIComponent(required('job'))}/${action}`, {})).payload;
+  if (group === 'pending') {
+    if (action === 'list') return request('GET', queryPath('/api/agent/v1/pending-items', { runId: flags.run, projectId: flags.project, taskId: flags.task, audience: flags.audience, status: flags.status }));
+    if (action === 'create') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/pending-items`, { stageId: flags.stage, actionId: flags.action, remoteJobId: flags.job, audience: required('audience'), kind: required('kind'), title: required('title'), detail: readJson('detail-file'), idempotencyKey: required('idempotency-key'), source: 'codex', conversationRef: flags['conversation-ref'] });
+    if (action === 'resolve') return request('POST', `/api/agent/v1/pending-items/${encodeURIComponent(required('item'))}/resolve`, { status: flags.status ?? 'resolved', resolution: flags['resolution-file'] ? readJson('resolution-file') : {}, source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
   }
+  if (group === 'artifact') {
+    if (action === 'register') return request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/artifacts`, { location: required('location'), path: required('path'), category: required('category'), idempotencyKey: required('idempotency-key'), remoteJobId: flags.job, sizeBytes: flags.size === undefined ? undefined : Number(flags.size), sha256: flags.sha256, metadata: flags['metadata-file'] ? readJson('metadata-file') : undefined });
+    if (action === 'validity') return request('POST', `/api/agent/v1/artifacts/${encodeURIComponent(required('artifact'))}/validity`, { validity: required('validity'), reason: required('reason'), supersededById: flags['superseded-by'] });
+    if (action === 'list') return request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/artifacts`);
+  }
+  if (group === 'evidence') {
+    if (action === 'check') return request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/evidence-checks`, { artifactId: flags.artifact, validatorName: required('validator'), validatorVersion: required('validator-version'), status: required('status'), result: readJson('result-file'), idempotencyKey: required('idempotency-key') });
+    if (action === 'list') return request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/evidence-checks`);
+  }
+  if (group === 'event' && action === 'append') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/events`, { category: required('category'), eventType: required('type'), actorType: required('actor'), payload: flags['payload-file'] ? readJson('payload-file') : {}, idempotencyKey: flags['idempotency-key'], source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
+  if (group === 'experience' && action === 'search') return request('GET', queryPath('/api/experiences', { search: flags.query, projectId: flags.project, taskId: flags.task, status: flags.status }));
+  if (group === 'experience' && action === 'capture') return request('POST', '/api/experiences/codex-capture', { runId: required('run'), stageId: flags.stage, title: required('title'), content: readText('content-file'), tags: csvOptional('tags'), category: flags.category, applicableScope: required('applicable-scope'), sourceArtifactIds: csvOptional('artifacts'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
+  if (group === 'remote' && ['status', 'logs', 'reconcile'].includes(action)) return request('POST', `/api/agent/v1/remote/jobs/${encodeURIComponent(required('job'))}/${action}`, {});
   usage(`Unknown command: ${positionals.join(' ')}`);
 }
 
-try {
-  const output = await main();
-  process.stdout.write(`${JSON.stringify(output, null, flags.pretty ? 2 : 0)}\n`);
-} catch (error) {
-  const payload = error.payload ?? { error: error.message };
-  process.stderr.write(`${JSON.stringify(payload, null, flags.pretty ? 2 : 0)}\n`);
-  process.exit(error.exitCode ?? EXIT.api);
-}
+try { const output = await main(); process.stdout.write(`${JSON.stringify(output, null, flags.pretty ? 2 : 0)}\n`); }
+catch (error) { process.stderr.write(`${JSON.stringify(error.payload ?? { error: error.message }, null, flags.pretty ? 2 : 0)}\n`); process.exit(error.exitCode ?? EXIT.api); }

@@ -23,6 +23,7 @@ export default function EvidencePage() {
   const [taskId, setTaskId] = useState('');
   const [location, setLocation] = useState('');
   const [checkStatus, setCheckStatus] = useState('');
+  const [validity, setValidity] = useState('');
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,6 +45,7 @@ export default function EvidencePage() {
         taskId: taskId || undefined,
         location: location || undefined,
         checkStatus: checkStatus || undefined,
+        validity: validity || undefined,
         search: search.trim() || undefined,
       }));
       setMessage('');
@@ -52,7 +54,7 @@ export default function EvidencePage() {
     } finally {
       setBusy(false);
     }
-  }, [projectId, taskId, location, checkStatus, search]);
+  }, [projectId, taskId, location, checkStatus, validity, search]);
 
   useEffect(() => { const timer = window.setTimeout(() => { void load(); }, 180); return () => window.clearTimeout(timer); }, [load]);
   const summary = useMemo(() => ({
@@ -74,11 +76,12 @@ export default function EvidencePage() {
 
     <section className="mt-5 border border-[#293534] bg-[#131a1c] p-4">
       <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-[#81908c]"><Filter size={13}/>证据定位</div>
-      <div className="grid gap-3 lg:grid-cols-5">
+      <div className="grid gap-3 lg:grid-cols-6">
         <select aria-label="项目筛选" value={projectId} onChange={event => setProjectId(event.target.value)} className="border border-[#354341] bg-[#0d1214] p-2.5 text-sm"><option value="">全部项目</option>{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <select aria-label="任务筛选" value={taskId} onChange={event => setTaskId(event.target.value)} disabled={!projectId} className="border border-[#354341] bg-[#0d1214] p-2.5 text-sm disabled:opacity-45"><option value="">全部任务</option>{tasks.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <select aria-label="位置筛选" value={location} onChange={event => setLocation(event.target.value)} className="border border-[#354341] bg-[#0d1214] p-2.5 text-sm"><option value="">本地与远端</option><option value="local">已登记本地证据</option><option value="remote">远端证据</option></select>
         <select aria-label="校验筛选" value={checkStatus} onChange={event => setCheckStatus(event.target.value)} className="border border-[#354341] bg-[#0d1214] p-2.5 text-sm"><option value="">全部校验</option><option value="pass">通过</option><option value="warn">警告</option><option value="fail">失败</option><option value="unchecked">未校验</option></select>
+        <select aria-label="有效性筛选" value={validity} onChange={event => setValidity(event.target.value)} className="border border-[#354341] bg-[#0d1214] p-2.5 text-sm"><option value="">全部有效性</option><option value="valid">有效</option><option value="suspect">存疑</option><option value="invalid">无效</option><option value="superseded">已被替代</option></select>
         <label className="relative"><Search size={14} className="absolute left-3 top-3 text-[#657570]"/><input aria-label="搜索证据" value={search} onChange={event => setSearch(event.target.value)} placeholder="路径、类型、项目、任务" className="w-full border border-[#354341] bg-[#0d1214] py-2.5 pl-9 pr-3 text-sm placeholder:text-[#657570]"/></label>
       </div>
     </section>
@@ -96,7 +99,7 @@ export default function EvidencePage() {
             <h2 className="mt-3 break-all font-mono text-sm text-[#e5eeeb]">{item.path}</h2>
             <div className="mt-2 text-xs text-[#91a19d]"><Link className="hover:text-[#67c9b5]" to={`/project/${item.project_id}`}>{item.project_name}</Link> / <Link className="hover:text-[#67c9b5]" to={`/task/${item.task_id}`}>{item.task_name}</Link></div>
           </div>
-          <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-xs"><dt className="text-[#657570]">大小</dt><dd>{humanSize(item.size_bytes)}</dd><dt className="text-[#657570]">SHA-256</dt><dd className="font-mono" title={item.sha256}>{short(item.sha256)}</dd><dt className="text-[#657570]">工作流步骤</dt><dd>{item.step_id}</dd><dt className="text-[#657570]">动作</dt><dd>{item.action_type}</dd><dt className="text-[#657570]">Run / Job</dt><dd>{item.run_status} / {item.job_status ?? '—'}</dd></dl>
+          <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1 text-xs"><dt className="text-[#657570]">大小</dt><dd>{humanSize(item.size_bytes)}</dd><dt className="text-[#657570]">SHA-256</dt><dd className="font-mono" title={item.sha256}>{short(item.sha256)}</dd><dt className="text-[#657570]">工作流阶段</dt><dd>{item.stage_id}</dd><dt className="text-[#657570]">有效性</dt><dd>{item.validity}</dd><dt className="text-[#657570]">动作</dt><dd>{item.action_type}</dd><dt className="text-[#657570]">Run / Job</dt><dd>{item.run_status} / {item.job_status ?? '—'}</dd></dl>
           <div className="min-w-36"><div className="font-mono text-[9px] uppercase text-[#657570]">校验结论</div><div className="mt-2 flex flex-wrap gap-1">{item.checks.map(check => <span key={check.id} title={`${check.validator_name} ${check.validator_version}`} className={`inline-flex items-center gap-1 border px-2 py-1 text-[10px] uppercase ${check.status === 'pass' ? 'border-[#2d5d50] text-[#9ee0d1]' : check.status === 'warn' ? 'border-[#70532d] text-[#edc57e]' : 'border-[#70423f] text-[#e9a29c]'}`}><CheckCircle2 size={11}/>{check.status}</span>)}{item.checks.length === 0 && <span className="text-xs text-[#657570]">尚未校验</span>}</div></div>
         </div>
         <details className="border-t border-[#26302f] px-5 py-3"><summary className="cursor-pointer text-xs text-[#81908c]">查看登记信息与处理结果</summary><pre className="mt-3 max-h-72 overflow-auto bg-[#0b1113] p-3 text-[10px] leading-5 text-[#aab8b4]">{JSON.stringify({ artifactId: item.id, runId: item.run_id, actionId: item.action_id, createdAt: item.created_at, metadata: item.metadata, checks: item.checks }, null, 2)}</pre></details>
