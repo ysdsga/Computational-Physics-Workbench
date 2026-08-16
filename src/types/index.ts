@@ -277,6 +277,8 @@ export interface RunAction {
   stage_id: string;
   step_id: string | null;
   parent_action_id: string | null;
+  retry_of_action_id: string | null;
+  retry_attempt: number;
   action_type: string;
   status: RunActionStatus;
   executor: 'codex';
@@ -383,7 +385,24 @@ export interface RemoteJob {
   submit_stderr: string;
   submitted_at: string | null;
   reconciled_at: string | null;
+  next_check_at: string | null;
+  last_progress_at: string | null;
+  queue_reason: string;
+  poll_count: number;
+  terminal_at: string | null;
   created_at: string;
+}
+
+export interface RunMonitor {
+  run_id: string;
+  status: 'required' | 'scheduled' | 'paused' | 'complete';
+  automation_ref: string | null;
+  cadence_minutes: number | null;
+  next_check_at: string | null;
+  created_at: string;
+  updated_at: string;
+  active_job_count?: number;
+  due_job_count?: number;
 }
 
 export interface RemoteCapabilityReport {
@@ -398,7 +417,7 @@ export interface RemoteCapabilityReport {
 }
 
 export interface AgentContext {
-  schemaVersion: 2;
+  schemaVersion: 3;
   project: Project;
   task: Task;
   taskRoot: { relative: string | null; absolute: string | null; resolved: boolean };
@@ -413,6 +432,7 @@ export interface AgentContext {
   remoteCapability: RemoteCapabilityReport | null;
   recentActions: RunAction[];
   recentJobs: RemoteJob[];
+  monitor: RunMonitor | null;
   recentArtifacts: RunArtifact[];
   recentEvidenceChecks: EvidenceCheck[];
   pendingItems: PendingItem[];

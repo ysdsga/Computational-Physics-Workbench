@@ -64,3 +64,11 @@ v4 正式库的运行控制表为空，因此 v5 可以备份后替换旧 Policy
 ## 14. 当前安全边界的含义
 
 Workbench 对自身入口强制 Task 根、HPC binding、capability、资源、输入哈希、幂等和恢复规则。若 Unix 账号本身拥有更宽权限，操作系统级硬隔离仍由集群 ACL、独立账号或容器提供；Workbench 不声称替代系统权限。
+
+## 15. Scheduled Task 唤醒，Stop Hook 守门
+
+长作业不能依赖一次 Codex 回合持续运行。每个有非终态 Job 的 Run 绑定一个当前任务 heartbeat Scheduled Task，由它按时唤醒同一 Codex 任务。Workbench 只持久化 monitor 与 `next_check_at`；Stop Hook 只在明确发现活跃 Job 未绑定 monitor 时阻止结束一次，不轮询、不执行、不创建第二个 Agent。服务不可用时 Hook fail open 并提示下次先运行 doctor。
+
+## 16. 自动重试必须有谱系和预算
+
+重试是新的不可变 Action，不覆盖失败 Action。它必须带 `retry_of_action_id`，每个 Action 最多一个 retry successor；服务计算 `retry_attempt` 并拒绝超过 Envelope `maxAutomaticRetries` 的尝试。`submission_uncertain` 不是失败重试条件，只允许对账。

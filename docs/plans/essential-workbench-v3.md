@@ -1,6 +1,6 @@
 # DFT+DMFT Workbench V3：Codex 自主执行闭环精要化计划
 
-> 状态：待研究者确认，尚未开始实施  
+> 状态：已实施；2026-08-16 补齐长作业跨回合监控与重试预算
 > 日期：2026-08-16  
 > 关系：本计划取代 `complete-workbench-v2.md` 中尚未进入真实 HPC pilot 的执行方向；保留已经完成且仍有价值的通用远程能力、作业对账、证据与 Web 观察面。
 
@@ -96,7 +96,7 @@ WebUI 展示真实状态，不代替 Codex 决策或执行
 5. 提交流水线至少包含：本地预检 → 上传 → 上传验证 → 只提交一次 → 幂等登记 → 提交后真实性检查 → 持续对账；响应不确定时不重复提交。
 6. Codex 会话中断后通过 `workbench doctor/context` 可恢复当前阶段、Working Plan、活动/不确定 Job、待办和最近证据。
 7. Web 访问不产生远程 Action/Job/Decision；作业状态明确显示最后对账时间，不伪装实时状态。
-8. 临时数据库、模拟集群和浏览器 E2E 全部通过；正式库 v5 迁移有一致性备份和可验证回退路径。
+8. 临时数据库、模拟集群和浏览器 E2E 全部通过；正式库 v6 迁移有一致性备份和可验证回退路径。
 9. 最终演练使用同一通用执行接口跑两个不同结构的 fixture；随后 CaCrO3 pilot 只需确认 Task Spec、连接和资源，不再修改产品代码。
 
 ## 3. Task Spec 与自主修改规则
@@ -256,3 +256,11 @@ V4 的 Policy、Context、Review 和 Promotion 表先从运行路径退役。v5 
 | F：正式启用与 pilot 就绪 | 7 | 最终集成门 | 依赖全部前序及最终 Task Spec 确认 |
 
 确认后按 `A → B →（C ∥ D）→ E → F` 实施。计划完成的定义不是“页面和表已经存在”，而是 Codex 能在一次边界确认后自主完成复杂工作流，并且可直接进入真实 HPC 科研任务。
+
+## 9. 已补齐：长作业跨回合续跑
+
+- 一个有非终态 Job 的 Research Run 只对应一个当前 Codex 任务 heartbeat Scheduled Task；Scheduled Task 负责唤醒，不在 Web/Express 中复制 Agent。
+- Workbench schema v6 持久化 Run monitor，以及 Job 的排队原因、最后进展、轮询次数和下次检查时间。PEND 使用 10/30/60 分钟退避，RUN 约 15 分钟；`submission_uncertain` 立即且只对账。
+- 项目 Stop Hook 只在明确发现“活跃 Job + 未绑定 monitor”时阻止结束一次；服务不可用时 fail open，避免把日常开发锁死。
+- DONE/EXIT 后由被唤醒的 Codex 依据 skill 下载、验证、继续或诊断。重试必须带 `--retry-of`，且数据库拒绝分叉和超出 `maxAutomaticRetries`。
+- Web 只读显示 monitor 状态、排队原因、最后进展和下次检查，不增加启动、提交、取消或对账控件。

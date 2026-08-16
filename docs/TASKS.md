@@ -1,6 +1,6 @@
 # 任务、工作流与研究运行
 
-本文记录 schema v5 的当前行为。Task 是 Project 内一次复杂研究任务，不等于单个调度器 Job。
+本文记录 schema v6 的当前行为。Task 是 Project 内一次复杂研究任务，不等于单个调度器 Job。
 
 ## Task 与目录边界
 
@@ -58,7 +58,7 @@ Working Plan 保存当前阶段、目录布局、下一批 Action 和诊断策�
 
 ## Action、Job 与纠错
 
-Action 必须绑定 Run、核心 Stage、动作类型、不可变 JSON spec、SHA-256 和幂等键；可选绑定核心 step 与 parent Action。可执行 capability 由通用执行器提供：
+Action 必须绑定 Run、核心 Stage、动作类型、不可变 JSON spec、SHA-256 和幂等键；可选绑定核心 step、parent Action 与 retry source。重试用单链 `retry_of_action_id + retry_attempt` 表达，服务拒绝分叉和超过 Envelope 自动重试上限的 Action。可执行 capability 由通用执行器提供：
 
 `local.process`、`remote.inspect`、`remote.task-root.create`、`files.upload`、`files.download`、`job.submit`、`job.cancel`。
 
@@ -75,6 +75,8 @@ ready → executing
 ```
 
 一个 Action 可关联零个、一个或多个 Job。每个 Job 同时绑定 Run、Stage 和 originating Action。LSF 提交先写 `prepared` 记录，再校验远端文件哈希并调用 `bsub`；返回后立即核对 scheduler ID/name。响应不确定时保存 `submission_uncertain` 和 Codex 待处理事项，只能对账，不能重提。
+
+首次记录非终态 Job 时创建一个 Run monitor。`required` 表示 Codex 尚未绑定当前任务 Scheduled Task，`scheduled` 表示已绑定，`complete` 表示所有 Job 已终止。每个 Job 保存最近进展、排队原因、轮询次数和 `next_check_at`。Scheduled Task 唤醒 Codex 后执行 monitor tick；tick 只检查已到期 Job，不自动提交新 Job。Web 只展示这些持久化字段。
 
 Artifact 有 `valid | suspect | invalid | superseded` 四种有效性。纠错时保留旧文件和来源链，通过有效性与 `superseded_by_id` 表达替代关系，然后只重算受影响范围。
 

@@ -42,8 +42,8 @@ function usage(message, code = EXIT.usage) {
   run terminate --run <id> --reason <text>
 
   execution contract
-  action prepare --run <id> --stage <id> [--step <id>] --capability <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>] [--conversation-ref <ref>]
-  action record --run <id> --stage <id> [--step <id>] --type <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>]
+  action prepare --run <id> --stage <id> [--step <id>] --capability <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>] [--retry-of <action-id>] [--conversation-ref <ref>]
+  action record --run <id> --stage <id> [--step <id>] --type <name> --spec-file <json> --idempotency-key <key> [--parent <action-id>] [--retry-of <action-id>]
   action execute --action <id>
   action show --action <id>
   action list --run <id>
@@ -62,6 +62,9 @@ function usage(message, code = EXIT.usage) {
   experience search [--query <text>] [--project <id>] [--task <id>] [--status <manual|candidate|confirmed>]
   experience capture --run <id> [--stage <id>] --title <text> --content-file <path> --applicable-scope <text> --idempotency-key <key> [--category <name>] [--artifacts <id,id>] [--tags <tag,tag>]
   remote status|logs|reconcile --job <remote-job-id>
+  monitor guard
+  monitor show|tick|pause --run <id>
+  monitor attach --run <id> --automation-ref <id> --cadence-minutes <minutes>
 
 JSON is the default output. Web pages are observation/metadata surfaces and never authorize or launch Agent work.\n`);
   process.exit(code);
@@ -80,7 +83,7 @@ const BLOCKED_CODES = new Set([
   'RUN_NOT_STARTED', 'RUN_NOT_ACTIVE', 'RUN_NOT_CONFIRMED', 'RUN_WAITING_RESEARCHER',
   'TASK_ROOT_UNRESOLVED', 'STAGE_WAITING_RESEARCHER', 'ACTION_NOT_EXECUTABLE',
   'EXECUTION_INPUT_DRIFT', 'EXECUTION_RECEIPT_CONFLICT', 'EXECUTION_RECOVERY_UNCERTAIN',
-  'REMOTE_SUBMISSION_UNCERTAIN', 'REMOTE_CONCURRENCY_LIMIT',
+  'REMOTE_SUBMISSION_UNCERTAIN', 'REMOTE_CONCURRENCY_LIMIT', 'ACTION_RETRY_LIMIT_REACHED', 'ACTIVE_REMOTE_JOBS',
 ]);
 
 async function request(method, pathname, body) {
@@ -141,8 +144,8 @@ async function main() {
     if (action === 'terminate') return request('POST', `/api/agent/v1/runs/${run}/terminate`, { reason: required('reason') });
   }
   if (group === 'action') {
-    if (action === 'prepare') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/executable-actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, capability: required('capability'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
-    if (action === 'record') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, actionType: required('type'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
+    if (action === 'prepare') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/executable-actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, retryOfActionId: flags['retry-of'], capability: required('capability'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
+    if (action === 'record') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`, { stageId: required('stage'), stepId: flags.step, parentActionId: flags.parent, retryOfActionId: flags['retry-of'], actionType: required('type'), spec: readJson('spec-file'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
     if (action === 'execute') return request('POST', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}/execute`, {});
     if (action === 'show') return request('GET', `/api/agent/v1/actions/${encodeURIComponent(required('action'))}`);
     if (action === 'list') return request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/actions`);
@@ -166,6 +169,14 @@ async function main() {
   if (group === 'experience' && action === 'search') return request('GET', queryPath('/api/experiences', { search: flags.query, projectId: flags.project, taskId: flags.task, status: flags.status }));
   if (group === 'experience' && action === 'capture') return request('POST', '/api/experiences/codex-capture', { runId: required('run'), stageId: flags.stage, title: required('title'), content: readText('content-file'), tags: csvOptional('tags'), category: flags.category, applicableScope: required('applicable-scope'), sourceArtifactIds: csvOptional('artifacts'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
   if (group === 'remote' && ['status', 'logs', 'reconcile'].includes(action)) return request('POST', `/api/agent/v1/remote/jobs/${encodeURIComponent(required('job'))}/${action}`, {});
+  if (group === 'monitor') {
+    if (action === 'guard') return request('GET', '/api/agent/v1/monitor/guard');
+    const run = encodeURIComponent(required('run'));
+    if (action === 'show') return request('GET', `/api/agent/v1/runs/${run}/monitor`);
+    if (action === 'tick') return request('POST', `/api/agent/v1/runs/${run}/monitor/tick`, {});
+    if (action === 'pause') return request('POST', `/api/agent/v1/runs/${run}/monitor/pause`, {});
+    if (action === 'attach') return request('POST', `/api/agent/v1/runs/${run}/monitor/attach`, { automationRef: required('automation-ref'), cadenceMinutes: Number(required('cadence-minutes')) });
+  }
   usage(`Unknown command: ${positionals.join(' ')}`);
 }
 

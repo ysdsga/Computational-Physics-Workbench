@@ -462,6 +462,7 @@ export function completeRun(runId: string, summary: string, source: string, conv
   if (source !== 'codex_conversation') throw new AgentCoreError(400, 'COMPLETION_SOURCE_INVALID', 'Run completion requires researcher confirmation in Codex');
   const run = activeRun(runId);
   if (db.prepare("SELECT 1 FROM pending_items WHERE run_id = ? AND audience = 'researcher' AND status = 'open' LIMIT 1").get(runId)) throw new AgentCoreError(409, 'PENDING_RESEARCHER_ITEMS', 'Resolve researcher pending items before completing the Run');
+  if (db.prepare("SELECT 1 FROM remote_jobs WHERE run_id = ? AND lower(status) NOT IN ('done','exit','zombi','unkwn','preparation_failed','cancelled') LIMIT 1").get(runId)) throw new AgentCoreError(409, 'ACTIVE_REMOTE_JOBS', 'All recorded remote Jobs must reach a terminal state before completing the Run');
   const ts = now();
   db.transaction(() => {
     db.prepare("UPDATE research_runs SET status = 'completed', ended_at = ?, updated_at = ? WHERE id = ?").run(ts, ts, runId);
@@ -513,6 +514,11 @@ export function buildAgentContext(taskId: string): AgentContext {
   const jobs = run ? (db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
     .map(({ submission_spec_json, resources_json, last_observation_json, ...job }) => ({ ...job, submission_spec: JSON.parse(submission_spec_json), resources: JSON.parse(resources_json), last_observation: JSON.parse(last_observation_json) })) : [];
   if (jobs.some(job => job.status === 'submission_uncertain')) blockers.push({ code: 'SUBMISSION_UNCERTAIN', message: 'A recorded submission has an uncertain response and must be reconciled before another submission' });
+  const monitorRow = run ? db.prepare('SELECT * FROM run_monitors WHERE run_id = ?').get(run.id) as any : null;
+  const activeJobCount = jobs.filter(job => !['done', 'exit', 'zombi', 'unkwn', 'preparation_failed', 'cancelled'].includes(String(job.status).toLowerCase())).length;
+  const dueJobCount = jobs.filter(job => job.next_check_at && job.next_check_at <= now() && !['done', 'exit', 'zombi', 'unkwn', 'preparation_failed', 'cancelled'].includes(String(job.status).toLowerCase())).length;
+  const monitor = monitorRow ? { ...monitorRow, active_job_count: activeJobCount, due_job_count: dueJobCount } : null;
+  if (activeJobCount > 0 && (!monitor || monitor.status !== 'scheduled' || !monitor.automation_ref)) blockers.push({ code: 'ACTIVE_JOBS_UNMONITORED', message: 'Active remote Jobs require one current-chat Scheduled Task monitor before Codex stops' });
   const artifacts = run ? (db.prepare('SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
     .map(({ metadata_json, ...artifact }) => ({ ...artifact, metadata: JSON.parse(metadata_json) })) : [];
   const evidenceChecks = run ? (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
@@ -530,9 +536,9 @@ export function buildAgentContext(taskId: string): AgentContext {
   const project = { id: row.project_id, name: row.project_name, description: row.project_description, material: row.material, working_dir: row.working_dir, hpc_config: row.hpc_config ?? undefined, status: row.project_status as 'active' | 'archived', created_at: row.project_created_at, updated_at: row.project_updated_at };
   const task = { id: row.id, project_id: row.project_id, name: row.name, description: row.description, workflow_id: row.workflow_id, workflow: row.workflow, task_root_rel: row.task_root_rel, task_root_unresolved: !row.task_root_rel, status: row.status, created_at: row.created_at, updated_at: row.updated_at } as Task;
   return {
-    schemaVersion: 2, project, task, taskRoot: { relative: row.task_root_rel, absolute: taskRootAbsolute, resolved: Boolean(taskRootAbsolute) }, run,
+    schemaVersion: 3, project, task, taskRoot: { relative: row.task_root_rel, absolute: taskRootAbsolute, resolved: Boolean(taskRootAbsolute) }, run,
     research: { planId: plan?.id ?? null, planTitle: plan?.title ?? null, planStatus: plan?.status ?? null, planMissing }, workflow: row.workflow,
-    remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null, recentActions: actions, recentJobs: jobs,
+    remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null, recentActions: actions, recentJobs: jobs, monitor,
     recentArtifacts: artifacts, recentEvidenceChecks: evidenceChecks, pendingItems: pending, eventCursor, evidenceIndex, blockers,
   };
 }

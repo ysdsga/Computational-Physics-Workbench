@@ -12,12 +12,13 @@
 - 项目工作目录浏览与文本文件查看
 - 证据库：按项目/任务索引本地与远端产物、下载副本、处理图和 validator 结论
 - 经验库：人工记录、Codex 候选经验与证据确认经验分层管理
-- 超算管理：项目级 OpenSSH 连接、用户只读根、项目根、Task 写目录映射、有效策略、传输记录和作业快照；不在 Web 执行
-- Codex 驱动的统一任务上下文、研究运行、不可变 execution manifest 与追加式证据链
-- YAML 研究合同、system/project/task 分层授权策略、action/artifact/evidence/review 账本
-- Agent 运行记录与待沟通事项：Web 只读展示 Codex 已记录的上下文、命令预览、作业、证据和决定，并支持项目/任务/状态筛选
-- 材料无关的 capability 执行接口：Codex 自主选择脚本、输入和资源；Workbench 校验 manifest、策略、路径、哈希并留证
-- 研究者结论和 Experience 提升保留 run、context、artifact 哈希与 Codex 对话来源
+- 超算管理：项目级 OpenSSH 连接、用户只读根、项目根、Task 写目录映射、传输记录和作业快照；不在 Web 执行
+- Task Spec = 一次确认的 Confirmed Envelope + Codex 可自主修改的 Working Plan
+- Stage → Action → Job → Artifact/Evidence 追加式账本；Action spec 不可变但不逐动作授权
+- Agent 运行记录与待沟通事项：Web 只读展示命令预览、作业监控、证据和决定，并支持项目/任务/状态筛选
+- 材料无关 capability：Codex 自主选择脚本、输入和资源；Workbench 校验边界、快照、路径、哈希和资源
+- 长作业由当前 Codex 任务的 heartbeat Scheduled Task 唤醒；Workbench 保存下次检查，Stop Hook 只负责防止失联
+- 自动重试保留 retry lineage，并硬性受 Task Spec 重试预算约束
 
 ## 技术栈
 
@@ -51,22 +52,25 @@ Agent 本体是本项目中的 Codex 对话。研究者先在对话中确认研�
 npm link                 # 可选：注册本地 workbench 命令
 workbench doctor
 workbench context --task <task-id> --allow-blocked --pretty
-workbench run start --task <task-id> --plan <research-plan-id> --idempotency-key <key>
-workbench review list --run <run-id> --pretty
+workbench plan show --plan <research-plan-id>
+workbench workflow show --task <task-id>
+workbench run draft --task <task-id> --plan <research-plan-id> --task-spec-file <json> --idempotency-key <key>
+workbench run confirm --run <run-id> --summary <confirmed-summary> --conversation-ref <ref>
 workbench execution contract --pretty
-workbench action prepare --run <run-id> --context-version <context-id> --step <step-id> --capability local.process --spec-file <spec.json> --idempotency-key <key>
-workbench action authorize --action <action-id> --context-version <context-id> --manifest-sha <sha256> --summary <confirmed-summary>
+workbench action prepare --run <run-id> --stage <stage-id> --capability local.process --spec-file <spec.json> --idempotency-key <key>
 workbench action execute --action <action-id>
+workbench monitor guard
+workbench monitor attach --run <run-id> --automation-ref <ref> --cadence-minutes 10
+workbench monitor tick --run <run-id>
 workbench experience search --task <task-id> --query <关键词>
-workbench experience capture --run <run-id> --step <step-id> --title <标题> --content-file <经验.md> --idempotency-key <key>
-workbench conclusion record --run <run-id> --summary <researcher-summary> --artifacts <ids> --idempotency-key <key>
+workbench experience capture --run <run-id> --stage <stage-id> --title <标题> --content-file <经验.md> --applicable-scope <范围> --idempotency-key <key>
 ```
 
-CLI 默认连接 `http://127.0.0.1:3001`，可通过 `WORKBENCH_URL` 指向另一个本地端口。输出默认为 JSON；`--pretty` 仅改变排版。退出码 `2/3/4/5` 分别表示命令用法错误、API 拒绝、上下文阻塞或等待评价、服务不可达，因此脚本不需要解析自然语言错误。
+CLI 默认连接 `http://127.0.0.1:3001`，可通过 `WORKBENCH_URL` 指向另一个本地端口。输出默认为 JSON；`--pretty` 仅改变排版。退出码 `2/3/4/5` 分别表示命令用法错误、API 拒绝、记录边界/待处理状态阻塞、服务不可达。
 
-研究合同保存在项目目录 `.workbench/contracts/<research-plan-id>.yaml`。研究方案仍可编辑；当前文件与运行采用版本不一致时，Context 会报告 drift。每个 Task 同时最多有一个 `active` 或 `waiting_review` 运行。
+Task Spec 保存在 Workbench 账本中。研究方案与核心 Workflow 仍可纠错；改变 Confirmed Envelope 时才需要新的研究者确认。每个 Task 同时最多有一个开放 Run。
 
-真实远程能力默认关闭。只有项目连接元数据、Task 远程目录映射、active task policy、当前采用 context、批准的主机/三级目录边界/操作和研究者对精确 manifest 的明确确认全部一致时，Workbench 才会调用系统 OpenSSH/LSF。用户根是只读范围，项目根组织 Task，只有当前 Task 写根允许上传和作业操作；Codex 可通过独立的 `remote.task-root.create` manifest 创建这个直接子目录。执行器不按材料名、Task ID、workflow step 或软件栈选择路线：Codex 根据采用的研究方案和工作流生成通用 capability spec，Workbench 只负责建立不可变快照并执行治理边界。Workbench 不提供任意远程 shell，不保存密码或私钥，也不自动接受 host key。CaCrO₃ 可作为首个真实科研 pilot，但只是一条项目数据/验收任务，不是产品代码中的专用 route。真实科学作业仍需单独授权，复现边界见 [TESTING.md](TESTING.md)。
+真实远程能力默认关闭。项目连接、Task 目录映射和一次确认的 Task Spec 必须一致，Workbench 才会调用系统 OpenSSH/LSF。用户根只读，只有当前 Task 写根允许上传和作业操作；执行器不按材料名、Task ID、Workflow step 或软件栈选择路线。Codex 根据研究方案生成通用 Action spec，Workbench 只负责建立不可变快照并强制边界。响应不确定时只按已记录身份对账；长作业通过当前 Codex 任务的 Scheduled Task 恢复，不在 Web 或 Express 内另建 Agent。Workbench 不提供任意远程 shell，不保存密码或私钥，也不自动接受 host key。真实科学作业仍需先确认 Task Spec，复现边界见 [TESTING.md](TESTING.md)。
 
 ## 模板与任务工作流
 

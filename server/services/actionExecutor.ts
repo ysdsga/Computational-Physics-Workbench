@@ -213,7 +213,7 @@ function buildRemoteSpec(runId: string, stageId: string, capability: Exclude<Exe
   return base;
 }
 
-export function proposeExecutableAction(runId: string, input: { stageId?: unknown; stepId?: unknown; parentActionId?: unknown; capability?: unknown; spec?: unknown; idempotencyKey?: unknown; conversationRef?: unknown }) {
+export function proposeExecutableAction(runId: string, input: { stageId?: unknown; stepId?: unknown; parentActionId?: unknown; retryOfActionId?: unknown; capability?: unknown; spec?: unknown; idempotencyKey?: unknown; conversationRef?: unknown }) {
   const run = activeRun(runId);
   const stageId = requiredText(input.stageId ?? run.current_stage_id, 'stageId');
   const capability = requiredText(input.capability, 'capability') as ExecutableCapability;
@@ -221,7 +221,7 @@ export function proposeExecutableAction(runId: string, input: { stageId?: unknow
   if (!run.confirmed_envelope.allowedCapabilities.includes(capability)) throw new AgentCoreError(403, 'EXECUTION_CAPABILITY_DENIED', 'Capability is outside the confirmed Envelope');
   const key = safeKey(input.idempotencyKey); const raw = objectValue(input.spec, 'spec');
   const executionSpec = capability === 'local.process' ? buildLocalSpec(runId, stageId, raw, key) : buildRemoteSpec(runId, stageId, capability, raw, key);
-  return createAction(runId, { stageId, stepId: input.stepId, parentActionId: input.parentActionId, actionType: capability, spec: executionSpec, idempotencyKey: key, conversationRef: input.conversationRef });
+  return createAction(runId, { stageId, stepId: input.stepId, parentActionId: input.parentActionId, retryOfActionId: input.retryOfActionId, actionType: capability, spec: executionSpec, idempotencyKey: key, conversationRef: input.conversationRef });
 }
 
 function parseExecutionSpec(action: RunAction): ExecutionSpec {
@@ -341,11 +341,11 @@ export async function executeAction(actionId: string) {
 
 export function describeExecutionContract() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     model: 'One researcher confirmation freezes the Task Spec Envelope. Codex may create and execute immutable, hashed Actions inside it without per-Action approval.',
     capabilities: [...EXECUTABLE_CAPABILITIES],
     binding: ['runId', 'stageId', 'capability', 'specSha256', 'inputHashes', 'paths', 'resources'],
-    recovery: 'Receipts make repeat reads idempotent. Submission rows exist before bsub; uncertain responses are reconciled by unique job name and never resubmitted.',
+    recovery: 'Receipts make repeat reads idempotent. Submission rows exist before bsub; uncertain responses are reconciled by unique job name and never resubmitted. Active Jobs require one persisted current-chat monitor; retries have explicit lineage and an enforced Envelope budget.',
     local: { environmentSwitch: 'WORKBENCH_LOCAL_EXEC_ENABLED=1', executableAllowlist: [...allowedLocalExecutables()].sort(), shell: false, maxTimeoutMs: MAX_LOCAL_TIMEOUT_MS, maxOutputBytes: MAX_LOCAL_OUTPUT_BYTES },
     remote: { environmentSwitch: 'WORKBENCH_REMOTE_ENABLED=1', lsfEnvironmentSwitch: 'WORKBENCH_ALLOW_REMOTE_LSF=1', boundarySource: 'confirmed Envelope + registered Task binding' },
   };

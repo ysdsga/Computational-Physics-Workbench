@@ -80,6 +80,7 @@ export function createAction(runId: string, input: {
   stageId: unknown;
   stepId?: unknown;
   parentActionId?: unknown;
+  retryOfActionId?: unknown;
   actionType: unknown;
   spec: unknown;
   idempotencyKey: unknown;
@@ -95,7 +96,7 @@ export function createAction(runId: string, input: {
   const existing = db.prepare('SELECT * FROM run_actions WHERE run_id = ? AND idempotency_key = ?').get(runId, idempotencyKey) as any;
   if (existing) {
     const serialized = serializeAction(existing);
-    if (serialized.stage_id !== stageId || serialized.action_type !== actionType || serialized.spec_sha256 !== hashJson(spec)) {
+    if (serialized.stage_id !== stageId || serialized.action_type !== actionType || serialized.spec_sha256 !== hashJson(spec) || serialized.retry_of_action_id !== optionalText(input.retryOfActionId)) {
       throw new AgentCoreError(409, 'ACTION_IDEMPOTENCY_CONFLICT', 'Idempotency key is already bound to a different Action');
     }
     return serialized;
@@ -104,6 +105,27 @@ export function createAction(runId: string, input: {
   if (parentActionId) {
     const parent = actionRow(parentActionId);
     if (parent.run_id !== runId) throw new AgentCoreError(409, 'ACTION_PARENT_RUN_MISMATCH', 'Parent Action belongs to a different Run');
+  }
+  const retryOfActionId = optionalText(input.retryOfActionId);
+  let retryAttempt = 0;
+  if (retryOfActionId) {
+    const previous = actionRow(retryOfActionId);
+    if (previous.run_id !== runId || previous.stage_id !== stageId || previous.action_type !== actionType) {
+      throw new AgentCoreError(409, 'ACTION_RETRY_MISMATCH', 'Retry source must belong to the same Run, stage and Action type');
+    }
+    if (!['waiting_codex', 'failed'].includes(previous.status)) {
+      throw new AgentCoreError(409, 'ACTION_RETRY_SOURCE_NOT_FAILED', 'Retry source must be waiting for Codex diagnosis or failed');
+    }
+    if (db.prepare('SELECT 1 FROM run_actions WHERE retry_of_action_id = ?').get(retryOfActionId)) {
+      throw new AgentCoreError(409, 'ACTION_RETRY_ALREADY_CREATED', 'This Action already has a retry successor');
+    }
+    retryAttempt = Number(previous.retry_attempt ?? 0) + 1;
+    if (retryAttempt > run.confirmed_envelope.resourceLimits.maxAutomaticRetries) {
+      throw new AgentCoreError(409, 'ACTION_RETRY_LIMIT_REACHED', 'Confirmed automatic retry limit reached', {
+        retryAttempt,
+        maxAutomaticRetries: run.confirmed_envelope.resourceLimits.maxAutomaticRetries,
+      });
+    }
   }
   const stepId = optionalText(input.stepId);
   if (stepId) {
@@ -115,13 +137,13 @@ export function createAction(runId: string, input: {
   const ts = now();
   db.transaction(() => {
     db.prepare(`INSERT INTO run_actions (
-      id, run_id, stage_id, step_id, parent_action_id, action_type, status, executor,
+      id, run_id, stage_id, step_id, parent_action_id, retry_of_action_id, retry_attempt, action_type, status, executor,
       spec_json, spec_sha256, idempotency_key, conversation_ref, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'ready', 'codex', ?, ?, ?, ?, ?, ?)`)
-      .run(id, runId, stageId, stepId, parentActionId, actionType, stableJson(spec), hashJson(spec), idempotencyKey, optionalText(input.conversationRef), ts, ts);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'codex', ?, ?, ?, ?, ?, ?)`)
+      .run(id, runId, stageId, stepId, parentActionId, retryOfActionId, retryAttempt, actionType, stableJson(spec), hashJson(spec), idempotencyKey, optionalText(input.conversationRef), ts, ts);
     appendEvent(runId, {
       category: 'fact', eventType: 'action.created', actorType: 'agent',
-      payload: { actionId: id, stageId, stepId, actionType, specSha256: hashJson(spec) },
+      payload: { actionId: id, stageId, stepId, actionType, retryOfActionId, retryAttempt, specSha256: hashJson(spec) },
       idempotencyKey: `action-created:${idempotencyKey}`,
       conversationRef: optionalText(input.conversationRef),
     });

@@ -17,6 +17,7 @@ test('workbench-agent uses one Envelope confirmation and preserves Codex autonom
     'Do not request per-Action researcher approval',
     'one Action may own zero, one, or many Jobs',
     'submission_uncertain', 'valid`, `suspect`, `invalid`, and `superseded',
+    'current-chat Scheduled Task monitor', 'workbench monitor guard', '--retry-of',
     'Never access `data/workbench.db`', 'Never use generic remote commands',
   ]) assert.ok(skill.includes(required), `skill should include ${required}`);
   assert.doesNotMatch(skill, /action authorize|contract show|policy create|review decide/);
@@ -34,7 +35,7 @@ test('documented workbench-agent commands are exposed by the CLI', () => {
     'run revise-envelope', 'execution contract', 'action prepare', 'action record',
     'action execute', 'pending list', 'pending create', 'pending resolve',
     'artifact register', 'artifact validity', 'evidence check',
-    'experience search', 'experience capture', 'remote status|logs|reconcile',
+    'experience search', 'experience capture', 'remote status|logs|reconcile', 'monitor guard', 'monitor show|tick|pause', 'monitor attach',
   ]) assert.ok(help.stderr.includes(command), `CLI help should expose ${command}`);
   for (const removed of ['action authorize', 'policy create', 'contract show', 'review decide']) assert.equal(help.stderr.includes(removed), false);
 });

@@ -28,12 +28,19 @@ import {
   updateArtifactValidity,
 } from '../services/agentActions.js';
 import { describeExecutionContract, executeAction, proposeExecutableAction } from '../services/actionExecutor.js';
+import { tickRunMonitor } from '../services/jobMonitor.js';
+import { attachRunMonitor, getRunMonitor, monitorGuard, pauseRunMonitor } from '../services/monitorStore.js';
 
 const router = Router();
 
 router.get('/context/tasks/:taskId', (req, res) => res.json(buildAgentContext(req.params.taskId)));
 router.get('/execution-contract', (_req, res) => res.json(describeExecutionContract()));
+router.get('/monitor/guard', (_req, res) => res.json(monitorGuard()));
 router.get('/runs/:runId', (req, res) => res.json(getRun(req.params.runId)));
+router.get('/runs/:runId/monitor', (req, res) => res.json(getRunMonitor(req.params.runId)));
+router.post('/runs/:runId/monitor/attach', (req, res) => res.json(attachRunMonitor(req.params.runId, req.body?.automationRef, req.body?.cadenceMinutes)));
+router.post('/runs/:runId/monitor/pause', (req, res) => res.json(pauseRunMonitor(req.params.runId)));
+router.post('/runs/:runId/monitor/tick', async (req, res) => res.json(await tickRunMonitor(req.params.runId)));
 
 router.post('/runs', (req, res) => {
   const { taskId, researchPlanId, taskSpec, idempotencyKey } = req.body ?? {};

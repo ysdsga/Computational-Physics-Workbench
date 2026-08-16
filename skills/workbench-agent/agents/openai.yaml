@@ -1,4 +1,4 @@
 interface:
   display_name: "DFT+DMFT Workbench Agent"
-  short_description: "Run bounded research autonomously from Codex"
-  default_prompt: "Use $workbench-agent to recover this Task, agree the Research Plan, core Workflow, and Task Spec with me once, then execute and diagnose autonomously inside the confirmed boundary."
+  short_description: "Run and monitor bounded research from Codex"
+  default_prompt: "Use $workbench-agent to recover this Task, agree the Research Plan, core Workflow, and Task Spec with me once, then execute, monitor long HPC jobs, and diagnose autonomously inside the confirmed boundary."

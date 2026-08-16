@@ -6,6 +6,7 @@ const AGENT_V1_SCHEMA_VERSION = 2;
 const WORKBENCH_V2_SCHEMA_VERSION = 3;
 const EXPERIENCE_PROVENANCE_SCHEMA_VERSION = 4;
 const ESSENTIAL_WORKBENCH_SCHEMA_VERSION = 5;
+const JOB_MONITOR_SCHEMA_VERSION = 6;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -48,13 +49,25 @@ function backupBeforeEssentialWorkbench(db: Database.Database, dbPath: string): 
   db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
 }
 
+function backupBeforeJobMonitor(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-job-monitor-v6.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
 function tableCount(db: Database.Database, table: string): number {
   return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
 }
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= ESSENTIAL_WORKBENCH_SCHEMA_VERSION) return;
+  if (currentVersion >= JOB_MONITOR_SCHEMA_VERSION) return;
 
   backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -591,6 +604,53 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
       }
 
       db.pragma(`user_version = ${ESSENTIAL_WORKBENCH_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < 6) {
+    backupBeforeJobMonitor(db, dbPath);
+    db.transaction(() => {
+      if (!columnExists(db, 'run_actions', 'retry_of_action_id')) {
+        db.exec('ALTER TABLE run_actions ADD COLUMN retry_of_action_id TEXT REFERENCES run_actions(id) ON DELETE RESTRICT');
+      }
+      if (!columnExists(db, 'run_actions', 'retry_attempt')) {
+        db.exec('ALTER TABLE run_actions ADD COLUMN retry_attempt INTEGER NOT NULL DEFAULT 0 CHECK(retry_attempt >= 0)');
+      }
+      if (!columnExists(db, 'remote_jobs', 'next_check_at')) {
+        db.exec('ALTER TABLE remote_jobs ADD COLUMN next_check_at TEXT DEFAULT NULL');
+      }
+      if (!columnExists(db, 'remote_jobs', 'last_progress_at')) {
+        db.exec('ALTER TABLE remote_jobs ADD COLUMN last_progress_at TEXT DEFAULT NULL');
+      }
+      if (!columnExists(db, 'remote_jobs', 'queue_reason')) {
+        db.exec("ALTER TABLE remote_jobs ADD COLUMN queue_reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!columnExists(db, 'remote_jobs', 'poll_count')) {
+        db.exec('ALTER TABLE remote_jobs ADD COLUMN poll_count INTEGER NOT NULL DEFAULT 0 CHECK(poll_count >= 0)');
+      }
+      if (!columnExists(db, 'remote_jobs', 'terminal_at')) {
+        db.exec('ALTER TABLE remote_jobs ADD COLUMN terminal_at TEXT DEFAULT NULL');
+      }
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_run_actions_retry
+          ON run_actions(retry_of_action_id) WHERE retry_of_action_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_remote_jobs_due
+          ON remote_jobs(run_id, next_check_at) WHERE next_check_at IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS run_monitors (
+          run_id TEXT PRIMARY KEY REFERENCES research_runs(id) ON DELETE RESTRICT,
+          status TEXT NOT NULL CHECK(status IN ('required', 'scheduled', 'paused', 'complete')),
+          automation_ref TEXT,
+          cadence_minutes INTEGER CHECK(cadence_minutes IS NULL OR cadence_minutes > 0),
+          next_check_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_run_monitors_status
+          ON run_monitors(status, next_check_at);
+      `);
+      db.pragma(`user_version = ${JOB_MONITOR_SCHEMA_VERSION}`);
     })();
   }
 }

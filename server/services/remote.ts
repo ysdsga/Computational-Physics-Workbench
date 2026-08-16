@@ -9,6 +9,7 @@ import { transitionAction } from './agentActions.js';
 import { isRemotePathWithin, resolveRemoteTaskBinding, type ResolvedRemoteTaskBinding } from './hpcConfig.js';
 import { resolveWithinRoot } from './pathSafety.js';
 import { normalizeTaskRootRel } from './taskRoots.js';
+import { recordJobObservation, scheduleNewJob } from './monitorStore.js';
 
 const MAX_OUTPUT = 1024 * 1024;
 const SSH_TIMEOUT_MS = 20_000;
@@ -240,7 +241,9 @@ function loadJob(id: string): any {
 }
 
 function markSubmissionUncertain(action: RunAction, jobId: string, detail: Record<string, unknown>) {
-  db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ ...detail, observedAt: now() }), now(), jobId);
+  const observedAt = now();
+  db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ ...detail, observedAt }), observedAt, jobId);
+  scheduleNewJob(action.run_id, jobId, 'submission_uncertain', observedAt);
   createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: 'submission_uncertain', title: '远程提交响应不确定，必须先按唯一作业名对账', detail: { ...detail, blocksRun: false, recovery: 'reconcile_by_job_name_never_resubmit' }, idempotencyKey: `submission-uncertain:${jobId}`, source: 'workbench' });
 }
 
@@ -276,6 +279,7 @@ export async function submitAuthorizedLsfAction(action: RunAction, input: LsfAct
   } catch (error) {
     const item = error as AgentCoreError;
     db.prepare("UPDATE remote_jobs SET status = 'preparation_failed', submit_stderr = ?, reconciled_at = ? WHERE id = ?").run(`${item.code ?? 'FAILED'}: ${item.message}`, now(), id);
+    scheduleNewJob(action.run_id, id, 'preparation_failed');
     throw error;
   }
   let submitted: ProcessResult;
@@ -298,8 +302,10 @@ export async function submitAuthorizedLsfAction(action: RunAction, input: LsfAct
     return serializeJob(loadJob(id));
   }
   const observedAt = now();
-  db.prepare("UPDATE remote_jobs SET job_id = ?, status = 'submitted', submitted_at = ?, reconciled_at = ?, last_observation_json = ? WHERE id = ?")
-    .run(schedulerJobId, observedAt, observedAt, stableJson({ source: 'post-submit-sanity', jobId: schedulerJobId, status: fields[1], jobName, observedAt }), id);
+  const schedulerStatus = fields[1].toLowerCase();
+  db.prepare('UPDATE remote_jobs SET job_id = ?, status = ?, submitted_at = ?, reconciled_at = ?, last_observation_json = ? WHERE id = ?')
+    .run(schedulerJobId, schedulerStatus, observedAt, observedAt, stableJson({ source: 'post-submit-sanity', jobId: schedulerJobId, status: fields[1], jobName, observedAt }), id);
+  scheduleNewJob(action.run_id, id, schedulerStatus, observedAt);
   appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_submitted', actorType: 'system', payload: { remoteJobId: id, actionId: action.id, jobId: schedulerJobId, jobName, remoteWorkdir, resources: input.resources } });
   return serializeJob(loadJob(id));
 }
@@ -316,6 +322,14 @@ function schedulerObservation(output: string) {
   return { jobId: fields[0] || null, status: (fields[1] || 'UNKWN').toUpperCase(), jobName: fields[2] || null };
 }
 
+function queueReasonFromLongOutput(output: string): string {
+  const normalized = output.replace(/\r/g, '').trim();
+  if (!normalized) return '';
+  const marker = normalized.match(/PENDING REASONS?:\s*([\s\S]*?)(?:\n\s*\n|$)/i)?.[1];
+  const candidate = (marker ?? normalized).split('\n').map(line => line.trim()).filter(Boolean).join(' ');
+  return candidate.slice(0, 1000);
+}
+
 async function observeJob(row: any) {
   if (!row.job_id) throw new AgentCoreError(409, 'REMOTE_JOB_ID_MISSING', 'Remote job has no scheduler job ID');
   let source = 'bjobs'; let result = await runProcess('ssh', sshArgs(row.host, `bjobs -a ${shellQuote(row.job_id)} -noheader -o 'jobid stat job_name'`));
@@ -323,8 +337,14 @@ async function observeJob(row: any) {
   if (result.code !== 0 || !result.stdout.trim()) explainFailure(result);
   const parsed = schedulerObservation(result.stdout);
   const observedAt = now();
-  const observation = { source, ...parsed, raw: result.stdout, observedAt };
+  let queueReason = '';
+  if (parsed.status === 'PEND') {
+    const detail = await runProcess('ssh', sshArgs(row.host, `bjobs -l ${shellQuote(row.job_id)}`));
+    if (detail.code === 0) queueReason = queueReasonFromLongOutput(detail.stdout);
+  }
+  const observation = { source, ...parsed, raw: result.stdout, queueReason, observedAt };
   db.prepare('UPDATE remote_jobs SET status = ?, last_observation_json = ?, reconciled_at = ? WHERE id = ?').run(parsed.status.toLowerCase(), stableJson(observation), observedAt, row.id);
+  recordJobObservation(row.id, row.status, parsed.status, queueReason, observedAt);
   const action = db.prepare('SELECT status, stage_id FROM run_actions WHERE id = ?').get(row.action_id) as { status: string; stage_id: string } | undefined;
   if (action && !['succeeded', 'failed', 'cancelled'].includes(action.status)) {
     if (parsed.status === 'DONE') transitionAction(row.action_id, { status: 'succeeded', result: { remoteJobId: row.id, schedulerStatus: parsed.status } });
@@ -371,6 +391,7 @@ export async function cancelJob(id: string) {
   const result = await runProcess('ssh', sshArgs(row.host, `bkill ${shellQuote(row.job_id)}`));
   if (result.code !== 0) explainFailure(result);
   db.prepare("UPDATE remote_jobs SET status = 'cancel_requested', reconciled_at = ? WHERE id = ?").run(now(), id);
+  scheduleNewJob(row.run_id, id, 'cancel_requested');
   const action = db.prepare('SELECT status FROM run_actions WHERE id = ?').get(row.action_id) as { status: string } | undefined;
   if (action && ['executing', 'waiting_remote', 'waiting_codex'].includes(action.status)) transitionAction(row.action_id, { status: 'cancelled', result: { remoteJobId: id, jobId: row.job_id, cancelRequested: true } });
   appendEvent(row.run_id, { category: 'decision', eventType: 'remote.job_cancel_requested', actorType: 'agent', payload: { remoteJobId: id, jobId: row.job_id, reason: 'Codex determined the current-Run job was wrong or replaced within confirmed autonomy' } });

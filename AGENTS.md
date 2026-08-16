@@ -54,7 +54,7 @@ npm run build
 - StepFile：步骤所关联的文件路径引用，不存储文件内容。
 - Experience：可关联项目、任务或步骤的经验记录。
 
-创建 Task 时，后端会在项目 `working_dir` 下创建 `{task_name}/{stageId}/`。只创建阶段目录，不增加步骤子目录。
+创建 Task 时，后端只在项目 `working_dir` 下创建稳定 Task 根。Task 内目录树由 Codex 根据 Working Plan 自主设计，不按 Stage 自动建目录。
 
 ## 必须保持的约定
 
@@ -97,8 +97,10 @@ npm run build
 - Agent 本体是本项目中的 Codex 对话，不是 Web 页面、Express 后台 worker 或数据库进程。Agent 运行、评价、证据和远程作业的 Web 页面只能展示已记录状态，不得成为启动、授权、提交、取消或对账入口。
 - 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill，并把 `workbench` CLI 作为唯一机器入口。禁止为 Agent 执行直接读写 SQLite、直接调用 Agent 写 API，或绕过 Workbench capability 使用通用 `ssh`/`sftp`/`scp`/`bsub`/`bjobs`/`bpeek`/`bkill`。
 - 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和 `workbench context --task <id> --allow-blocked --pretty`，检查 Confirmed Envelope、Working Plan、待沟通事项、active/uncertain Job、Action、Artifact 和 evidence；提交响应不确定时只能按已记录作业身份对账，不能重提。
+- 首次出现非终态远程 Job 后，必须为该 Run 创建或复用一个绑定当前 Codex 任务的 heartbeat Scheduled Task，并用 `workbench monitor attach` 记录真实 reference。Scheduled Task 负责唤醒，Workbench 保存 `next_check_at` 和 Job 状态，Stop Hook 只检查绑定是否存在；三者都不得成为第二个 Agent 或 Web 执行入口。所有 Job 终态后停止 Scheduled Task。
 - 首次进入执行前，必须在 Codex 对话中向研究者说明 Research Plan、核心 Workflow、Task Spec 的科学承诺、资源、研究者关口和完成证据，展示精确 Confirmed Envelope 及哈希并获得一次明确确认。不得把沉默、历史上的宽泛目标、Web 状态或 Agent 自己的建议当作授权。
 - 确认后，Codex 可以在 Envelope 内自主修改 Working Plan、安排 Task 根下目录树、创建和执行带哈希的 Action、排错、重试、监控、下载分析，以及取消自己在当前 Run 中创建的错误或已替代 Job；不再逐 Action 请求研究者确认。扩展科学承诺、方法/软件栈、资源、权限或保护路径时，必须创建 researcher 待沟通事项并重新确认 Envelope。
+- 自动重试必须创建新 Action 并显式绑定 `retry_of_action_id`；禁止重试分叉或超过 Confirmed Envelope 的 `maxAutomaticRetries`。`submission_uncertain` 只能对账，不能作为重试提交依据。
 - Research Plan 和核心 Workflow 允许纠错。先评估受影响阶段和产物；边界内最小重算，边界外再沟通；相关 Artifact 必须标记为 `valid`、`suspect`、`invalid` 或 `superseded`，不得静默覆盖来源。
 - 执行层只提供材料无关的 capability 接口与安全边界；材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数不得硬编码进执行器、路由或 CLI。由 Codex 根据采用的研究方案和工作流自主生成每次 action spec；材料专属内容只能作为项目数据或测试 fixture。
 - 用户决定默认只保存摘要、哈希、时间和可选 Codex task reference，不保存完整聊天。事实、推断和决定分开写入；研究者未明确陈述或确认时，Codex 不得记录 researcher conclusion。

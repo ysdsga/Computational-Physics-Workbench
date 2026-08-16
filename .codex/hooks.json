@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/workbench-monitor-stop.mjs\"",
+            "commandWindows": "powershell -NoProfile -Command \"$root = git rev-parse --show-toplevel; node (Join-Path $root '.codex/hooks/workbench-monitor-stop.mjs')\"",
+            "timeout": 10,
+            "statusMessage": "Checking Workbench HPC monitors"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -55,15 +55,16 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v5 and CLI doctor start on disposable state', async () => {
+test('server, schema v6 and CLI doctor start on disposable state', async () => {
   const root = await fetch(`${base}/`);
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
-  assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 2);
+  assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 3);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 5);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 6);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
+  assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });
 
 interface Fixture {
@@ -171,6 +172,22 @@ test('researcher pending items block only their stage and enable explicit Envelo
   assert.equal(revised.response.status, 200); assert.equal((revised.payload as any).envelope_revision, 2); assert.equal((revised.payload as any).status, 'active');
 });
 
+test('retry lineage is single-chain and the confirmed retry budget is enforced', async () => {
+  const fixture = await createFixture('fixture-retry');
+  const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-retry-run' }) })).payload as any;
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+  const create = async (key: string, retryOfActionId?: string) => api(`/api/agent/v1/runs/${draft.id}/actions`, { method: 'POST', body: JSON.stringify({ stageId: fixture.stages[0], actionType: 'diagnostic', spec: { attempt: key }, idempotencyKey: key, retryOfActionId }) });
+  const failForRetry = async (actionId: string) => {
+    await api(`/api/agent/v1/actions/${actionId}/status`, { method: 'POST', body: JSON.stringify({ status: 'executing' }) });
+    await api(`/api/agent/v1/actions/${actionId}/status`, { method: 'POST', body: JSON.stringify({ status: 'waiting_codex', error: { diagnosed: true } }) });
+  };
+  const original = (await create('retry-0')).payload as any; await failForRetry(original.id);
+  const retry1 = await create('retry-1', original.id); assert.equal(retry1.response.status, 201); assert.equal((retry1.payload as any).retry_attempt, 1); await failForRetry((retry1.payload as any).id);
+  const branch = await create('retry-branch', original.id); assert.equal(branch.response.status, 409); assert.equal((branch.payload as any).code, 'ACTION_RETRY_ALREADY_CREATED');
+  const retry2 = await create('retry-2', (retry1.payload as any).id); assert.equal(retry2.response.status, 201); assert.equal((retry2.payload as any).retry_attempt, 2); await failForRetry((retry2.payload as any).id);
+  const retry3 = await create('retry-3', (retry2.payload as any).id); assert.equal(retry3.response.status, 409); assert.equal((retry3.payload as any).code, 'ACTION_RETRY_LIMIT_REACHED');
+});
+
 test('LSF submission is recorded before bsub, sanity checked, and uncertain responses reconcile without resubmission', async () => {
   const fixture = await createFixture('fixture-remote');
   const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-remote-run' }) })).payload as any;
@@ -199,6 +216,12 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
   const first = await createSubmission('submit-a');
   const firstExecute = await api(`/api/agent/v1/actions/${first.id}/execute`, { method: 'POST', body: '{}' });
   assert.equal(firstExecute.response.status, 200); assert.equal((firstExecute.payload as any).status, 'waiting_remote'); assert.equal(bsubCount, 1);
+  const guardBefore = await api('/api/agent/v1/monitor/guard');
+  assert.equal((guardBefore.payload as any).ok, false);
+  const attached = await api(`/api/agent/v1/runs/${draft.id}/monitor/attach`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', cadenceMinutes: 10 }) });
+  assert.equal(attached.response.status, 200); assert.equal((attached.payload as any).status, 'scheduled');
+  const guardAfter = await api('/api/agent/v1/monitor/guard');
+  assert.equal((guardAfter.payload as any).ok, true);
 
   failNextSubmit = true;
   const uncertainAction = await createSubmission('submit-b');
@@ -208,8 +231,11 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
   const uncertainJob = context.recentJobs.find((item: any) => item.action_id === uncertainAction.id);
   assert.equal(uncertainJob.status, 'submission_uncertain');
   assert.ok(context.pendingItems.some((item: any) => item.audience === 'codex' && item.kind === 'submission_uncertain'));
-  const reconciled = await api(`/api/agent/v1/remote/jobs/${uncertainJob.id}/reconcile`, { method: 'POST', body: '{}' });
-  assert.equal(reconciled.response.status, 200); assert.equal(bsubCount, 2, 'reconciliation must never call bsub again');
+  const ticked = await api(`/api/agent/v1/runs/${draft.id}/monitor/tick`, { method: 'POST', body: '{}' });
+  assert.equal(ticked.response.status, 200); assert.equal((ticked.payload as any).checkedJobs, 1); assert.equal(bsubCount, 2, 'monitor tick must never call bsub again');
+  const contextAfter = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+  assert.equal(contextAfter.monitor.status, 'scheduled');
+  assert.equal(contextAfter.recentJobs.find((item: any) => item.id === uncertainJob.id).status, 'run');
   remoteModule.setRemoteProcessRunnerForTests(null);
 });
 

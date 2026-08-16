@@ -52,7 +52,7 @@ After confirmation:
 1. Update the Working Plan when tactics or directory layout change.
 2. Use `action prepare` for a bounded executable capability. The service derives the adopted HPC host/Task root, snapshots inputs, parses resources, and records an immutable Action spec hash.
 3. Execute with `action execute`. Do not request per-Action researcher approval when the Action stays inside the Envelope.
-4. Monitor and reconcile recorded Jobs with `remote status|logs|reconcile`.
+4. Monitor and reconcile recorded Jobs through the Run monitor protocol below. Use `remote status|logs|reconcile` only for an immediate, recorded inspection.
 5. Register outputs and validator results as Artifacts and evidence.
 
 One Workflow stage may contain any number of Actions; one Action may own zero, one, or many Jobs. Bind every Job to its originating Action and stage.
@@ -66,6 +66,20 @@ Codex may inside the Envelope:
 - mark derived Artifacts suspect, invalid, or superseded and perform the smallest required recomputation.
 
 Do not widen scientific commitments, methods, software stacks, permissions, protected paths, or resources without researcher confirmation.
+
+## Keep long Jobs alive across Codex turns
+
+When the first nonterminal remote Job is recorded, Workbench marks the Run monitor `required`. This is a current-chat Scheduled Task monitor, not a Workbench worker. Before ending the Codex turn:
+
+1. Read [references/monitoring.md](references/monitoring.md).
+2. Inspect existing automations and reuse the matching Run monitor when present. Never create more than one monitor per Run.
+3. Create or update a heartbeat Scheduled Task attached to the current Codex task. Its prompt must explicitly invoke `$workbench-agent`, identify the Run and Task, run recovery plus `monitor tick`, and report only changes or required decisions.
+4. Record the returned automation reference with `workbench monitor attach --run <id> --automation-ref <ref> --cadence-minutes <n>`.
+5. Run `workbench monitor guard` before stopping. The project Stop Hook enforces only this attachment; it is not a background Agent and does not poll HPC.
+
+On every scheduled wake-up, run `doctor`, recover Context, then `monitor tick --run <id>`. A tick checks only Jobs whose persisted `next_check_at` is due and never submits a replacement. Use the returned state changes to download/analyze/continue after `DONE`, diagnose and create a `--retry-of` Action after `EXIT`, or reconcile-only after `submission_uncertain`. When all Jobs are terminal, Workbench marks the monitor complete; pause or remove the Scheduled Task instead of leaving an empty poller.
+
+If the app/computer cannot run Scheduled Tasks, disclose that limitation and keep the durable Job/next-check state intact for manual resume. Do not invent a server-side worker as a fallback.
 
 ## Correct plans and workflows
 
@@ -105,12 +119,16 @@ workbench workflow show --task <id>
 workbench run draft --task <id> --plan <id> --task-spec-file <json> --idempotency-key <key>
 workbench run confirm --run <id> --summary <text> --conversation-ref <ref>
 workbench run working-plan --run <id> --file <json> --reason <text> --idempotency-key <key>
-workbench action prepare --run <id> --stage <id> --capability <name> --spec-file <json> --idempotency-key <key>
+workbench action prepare --run <id> --stage <id> --capability <name> --spec-file <json> --idempotency-key <key> [--retry-of <action-id>]
 workbench action execute --action <id>
 workbench pending list --task <id> --status open
 workbench artifact validity --artifact <id> --validity <status> --reason <text>
 workbench evidence check --action <id> --validator <name> --validator-version <version> --status <pass|warn|fail> --result-file <json> --idempotency-key <key>
 workbench remote status|logs|reconcile --job <id>
+workbench monitor guard
+workbench monitor show|tick --run <id>
+workbench monitor attach --run <id> --automation-ref <ref> --cadence-minutes <n>
+workbench monitor pause --run <id>
 workbench experience search --task <id>
 workbench experience capture --run <id> --title <text> --content-file <path> --applicable-scope <text> --idempotency-key <key>
 ```
@@ -125,3 +143,4 @@ Run `workbench --help` for the full surface. Exit code `4` means a recorded boun
 - Never write outside the local Task root or the remote Task write root.
 - Never overwrite scientific inputs/outputs protected by the Envelope.
 - Never claim a smoke, mocked, prepared-file, or bookkeeping check is a completed scientific calculation.
+- Never create an unlinked retry Action. Bind it with `--retry-of`; Workbench enforces the confirmed automatic retry budget.
