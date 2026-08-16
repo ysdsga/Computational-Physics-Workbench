@@ -21,11 +21,12 @@ const statusColors: Record<StepStatus, { fill: string; stroke: string; text: str
 interface Props {
   workflow: WorkflowTemplate;
   progressMap: Record<string, StepProgress>;
+  observationMap?: Record<string, { actions: number; jobs: number; evidence: number }>;
   onSelectStep: (step: WorkflowStep) => void;
   selectedStepId: string | null;
 }
 
-export default function Flowchart({ workflow, progressMap, onSelectStep, selectedStepId }: Props) {
+export default function Flowchart({ workflow, progressMap, observationMap = {}, onSelectStep, selectedStepId }: Props) {
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
 
   const stages = getStagesOf(workflow);
@@ -111,6 +112,7 @@ export default function Flowchart({ workflow, progressMap, onSelectStep, selecte
                     x={stepX}
                     y={stepY}
                     status={progress?.status ?? 'pending'}
+                    observation={observationMap[step.id]}
                     isSelected={isSelected}
                     isHovered={isHovered}
                     onSelect={() => onSelectStep(step)}
@@ -135,11 +137,12 @@ export default function Flowchart({ workflow, progressMap, onSelectStep, selecte
 }
 
 function StepNode({
-  step, x, y, status, isSelected, isHovered, onSelect, onHover,
+  step, x, y, status, observation, isSelected, isHovered, onSelect, onHover,
 }: {
   step: WorkflowStep;
   x: number; y: number;
   status: StepStatus;
+  observation?: { actions: number; jobs: number; evidence: number };
   isSelected: boolean;
   isHovered: boolean;
   onSelect: () => void;
@@ -179,6 +182,11 @@ function StepNode({
       {(step.inputFiles && step.inputFiles.length > 0) && (
         <text x={x + STEP_WIDTH - 14} y={y + 42} fill="#4a4a60" fontSize={9} textAnchor="end" style={{ userSelect: 'none' }}>
           {step.inputFiles.length} 文件
+        </text>
+      )}
+      {observation && (observation.actions > 0 || observation.jobs > 0 || observation.evidence > 0) && (
+        <text x={x + 14} y={y + 61} fill="#8bcaba" fontSize={8.5} style={{ userSelect: 'none' }}>
+          CODEX  A{observation.actions} · J{observation.jobs} · E{observation.evidence}
         </text>
       )}
     </g>

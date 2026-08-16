@@ -161,6 +161,11 @@ export default function WorkflowPage() {
         )}
       </div>
 
+      <div className="flex items-start gap-2 border-b border-[#33413f] bg-[#14201e] px-5 py-2 text-[10px] leading-5 text-[#9bc8bd]">
+        <Info size={13} className="mt-0.5 shrink-0" />
+        <p><strong className="text-[#c8e7df]">工作流只保留核心骨架：</strong>科学阶段、关键软件步骤、必须通过的检查点和完成证据。试跑命令、重试、参数扫描批次、传输和临时诊断由 Codex 记录为 action / event，不应为每次执行细节新增流程节点。</p>
+      </div>
+
       {/* Progress bar (only when a task is selected) */}
       {selectedTaskId && !loadingProgress && (
         <ProgressBar workflow={workflow} progressMap={progressMap} />

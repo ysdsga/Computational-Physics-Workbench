@@ -5,8 +5,9 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import TaskWorkflowPage from './pages/TaskWorkflowPage';
 import WorkflowPage from './pages/WorkflowPage';
-import HPCPage from './pages/HPCPage';
 import ExperiencePage from './pages/ExperiencePage';
+import EvidencePage from './pages/EvidencePage';
+import SupercomputersPage from './pages/SupercomputersPage';
 import ResearchPlansPage from './pages/ResearchPlansPage';
 import AgentRunsPage from './pages/AgentRunsPage';
 import ReviewCenterPage from './pages/ReviewCenterPage';
@@ -21,7 +22,8 @@ export default function App() {
             <Routes>
               <Route path="/" element={<ProjectsPage />} />
               <Route path="/workflow" element={<WorkflowPage />} />
-              <Route path="/hpc" element={<HPCPage />} />
+              <Route path="/supercomputers" element={<SupercomputersPage />} />
+              <Route path="/evidence" element={<EvidencePage />} />
               <Route path="/research-plans" element={<ResearchPlansPage />} />
               <Route path="/agent-runs" element={<AgentRunsPage />} />
               <Route path="/reviews" element={<ReviewCenterPage />} />

@@ -18,8 +18,8 @@
 
 - 任务详情页显示任务自己的工作流，并提供“编辑任务流程”入口。
 - 工作流页面选择某个任务后，显示并编辑该任务自己的工作流；模板预览模式仍编辑全局模板。
-- 超算提交向导按任务工作流生成阶段和步骤列表。
-- 任务工作流支持修改名称、描述、阶段、步骤、子步骤、命令、输入输出文件和 LSF 脚本模板。
+- 任务工作流只保留核心科学/软件骨架：必要阶段、关键转换、检查点和完成证据。运行中的命令、重试、传输、参数扫描批次和临时诊断保存在 action/event 下。
+- 任务工作流支持修改名称、描述、阶段、步骤、子步骤、命令、输入输出文件和 LSF 脚本模板；只有骨架变化时才应修改节点。
 - 保存通过 `PUT /api/tasks/:taskId/workflow` 完成，只更新当前任务。
 
 任务新增阶段后，后端会补建缺少的阶段目录。删除阶段或步骤不会删除已有目录、计算文件、步骤进度或文件关联；不再存在于工作流中的历史进度暂时不会显示。
@@ -40,7 +40,11 @@ Task 可以启动研究运行。启动前必须满足：稳定任务根已解析
 
 启动运行时，系统在一个事务中创建 `research_runs`、首个不可变 `run_context_versions` 和 `run.started` 事件。上下文版本保存当时采用的研究方案、合同、任务工作流和有效 policy 全文及哈希；之后编辑源方案不会改写历史版本，统一 Context 会报告 current/adopted 哈希和 drift。
 
-方案修订如果保持在当前科学、权限和资源边界内，会创建新上下文版本并记录 decision event；删除已有参数边界、必需阶段、证据义务或改变科学目标同样视为扩大边界。越界时运行进入 `waiting_review`，评价请求以运行内幂等键绑定旧上下文，重试不会生成重复卡片。只有研究者可以写入 `conclusion` 类事件。
+方案修订如果保持在当前科学、权限和资源边界内，会创建新上下文版本并记录 decision event；删除已有参数边界、必需阶段、证据义务或改变科学目标同样视为扩大边界。越界时运行进入 `waiting_review`，评价请求以运行内幂等键绑定旧上下文，重试不会生成重复卡片。只有研究者在 Codex 对话中明确陈述后，CLI 才能通过专用 conclusion 接口写入结论；通用事件接口不能绕过该门禁。
+
+每个可执行动作绑定当前 context、最近的核心 workflow step 和 immutable manifest。授权摘要同时绑定 manifest SHA-256；任何输入、脚本、资源、路径或采用上下文变化都要求重新提案和确认。成功动作可登记 artifact 和 validator evidence。Codex 可把验证过的成功/失败模式先沉淀为候选 Experience；研究者确认结论后才能提升为不可变、证据绑定的 Experience。
+
+可执行动作使用统一 capability contract。具体材料、脚本、输入与参数由 Codex 从当前研究方案和这个 Task 的独立 workflow snapshot 生成，不由后端按材料/Task/step 硬编码匹配。新增材料或改变研究路线不需要注册专用执行器。
 
 ## 运行后的保护和远程边界
 
@@ -53,7 +57,9 @@ Task 可以启动研究运行。启动前必须满足：稳定任务根已解析
 
 - `tasks.workflow_id`：来源模板 ID。
 - `tasks.workflow_snapshot`：完整任务工作流 JSON。
-- `tasks.task_root_rel`：项目工作目录内稳定任务根，也是 Agent 文件传输的本地端边界；远程端边界来自有效 policy 的 `remoteRoot`。
+- `tasks.task_root_rel`：项目工作目录内稳定任务根，也是 Agent 文件传输的本地端边界。
+- `projects.hpc_config.taskBindings[]`：按 HPC profile 保存 Task 的单段远程目录名；绝对 Task 写根由 profile 的 `projectRoot` 与该相对名组合，两个 Task 不能共用同一写根。
+- 远程端同时受连接元数据和有效 policy 约束：`remoteReadRoot` 是用户只读范围，`remoteProjectRoot` 是既有项目目录，`remoteWriteRoot` 是当前 Task 唯一写入/作业根。三者不一致时拒绝远程 action。
 - `research_runs` / `run_context_versions`：Task 的研究执行身份和不可变采用上下文。
 - `step_progress`：按 `task_id + step_id` 保存状态、笔记、自定义命令和 LSF 脚本。
 - `step_files`：保存步骤关联的文件路径引用，不存储文件内容。

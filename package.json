@@ -16,8 +16,8 @@
     "lint": "oxlint",
     "test": "node --test --import tsx \"tests/**/*.test.ts\"",
     "test:e2e": "playwright test",
-    "test:ssh:inspect": "node tests/live-remote.mjs inspect",
-    "test:ssh:lsf-smoke": "node tests/live-remote.mjs smoke",
+    "test:remote:prepare": "node tests/live-remote.mjs prepare",
+    "test:remote:execute": "node tests/live-remote.mjs execute",
     "preview": "vite preview"
   },
   "dependencies": {

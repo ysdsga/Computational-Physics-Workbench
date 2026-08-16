@@ -1,4 +1,4 @@
-import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContextV1, AgentPolicy, AgentPolicyDocument, ResearchRun, ReviewRequest, ReviewDecision, RunEvent, RemoteCapabilityReport, RemoteJob, ResearchContract } from '../types';
+import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContextV1, AgentPolicy, ReviewRequest, RunEvent, RunAction, RunArtifact, EvidenceCheck, EvidenceLibraryItem, RemoteJob, ResearchContract } from '../types';
 
 const BASE = '/api';
 
@@ -80,6 +80,7 @@ export const experiencesApi = {
   update: (id: string, data: Partial<{ title: string; content: string; tags: string[]; related_project_id: string; related_task_id: string; related_step_id: string }>) =>
     api<Experience>(`/experiences/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => api<{ success: boolean }>(`/experiences/${id}`, { method: 'DELETE' }),
+  provenance: (id: string) => api<{ run_id: string; context_version_id: string; conclusion_event_id: string; promotion_summary_sha256: string; conversation_ref: string | null; artifacts: Array<{ artifact_id: string; action_id: string; artifact_sha256: string }> }>(`/experiences/${id}/provenance`),
 };
 
 // === Workflows ===
@@ -124,11 +125,11 @@ export const researchPlansApi = {
   },
   get: (id: string) => api<ResearchPlan>(`/research-plans/${id}`),
   getContent: (id: string) =>
-    api<{ content: string; size: number; modified: string }>(`/research-plans/${id}/content`),
-  saveContent: (id: string, content: string) =>
-    api<{ success: boolean; updated_at: string }>(`/research-plans/${id}/content`, {
+    api<{ content: string; size: number; modified: string; sha256: string }>(`/research-plans/${id}/content`),
+  saveContent: (id: string, content: string, expectedSha256?: string) =>
+    api<{ success: boolean; updated_at: string; sha256: string }>(`/research-plans/${id}/content`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, expectedSha256 }),
     }),
   create: (data: ResearchPlanCreateInput) =>
     api<ResearchPlan>('/research-plans', { method: 'POST', body: JSON.stringify(data) }),
@@ -151,19 +152,30 @@ export const contractsApi = {
 
 export const agentApi = {
   context: (taskId: string) => api<AgentContextV1>(`/agent/v1/context/tasks/${taskId}`),
-  startRun: (taskId: string, researchPlanId: string, idempotencyKey: string) => api<ResearchRun>('/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId, researchPlanId, idempotencyKey }) }),
-  terminateRun: (runId: string, reason: string) => api<ResearchRun>(`/agent/v1/runs/${runId}/terminate`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  adoptPolicy: (runId: string, reason: string) => api(`/agent/v1/runs/${runId}/adopt-policy`, { method: 'POST', body: JSON.stringify({ reason }) }),
   events: (runId: string, after = 0) => api<RunEvent[]>(`/agent/v1/runs/${runId}/events?after=${after}`),
-  appendEvent: (runId: string, data: { category: RunEvent['category']; eventType: string; actorType: RunEvent['actor_type']; payload?: Record<string, unknown>; idempotencyKey?: string }) => api<RunEvent>(`/agent/v1/runs/${runId}/events`, { method: 'POST', body: JSON.stringify(data) }),
+  actions: (runId: string) => api<RunAction[]>(`/agent/v1/runs/${runId}/actions`),
+  action: (actionId: string) => api<RunAction & { artifacts: RunArtifact[]; evidenceChecks: EvidenceCheck[]; remoteJob: RemoteJob | null }>(`/agent/v1/actions/${actionId}`),
+  artifacts: (runId: string) => api<RunArtifact[]>(`/agent/v1/runs/${runId}/artifacts`),
+  evidenceChecks: (runId: string) => api<EvidenceCheck[]>(`/agent/v1/runs/${runId}/evidence-checks`),
   policies: (scopeType?: string, scopeId?: string) => {
     const qs = new URLSearchParams(); if (scopeType) qs.set('scopeType', scopeType); if (scopeId) qs.set('scopeId', scopeId);
     return api<AgentPolicy[]>(`/agent/v1/policies${qs.size ? `?${qs}` : ''}`);
   },
-  createPolicy: (scopeType: AgentPolicy['scope_type'], scopeId: string | null, policy: AgentPolicyDocument, activate = true) => api<AgentPolicy>('/agent/v1/policies', { method: 'POST', body: JSON.stringify({ scopeType, scopeId, policy, activate }) }),
-  reviews: (runId?: string) => api<ReviewRequest[]>(`/agent/v1/reviews${runId ? `?runId=${runId}` : ''}`),
-  decideReview: (requestId: string, decision: ReviewDecision['decision'], comment: string) => api<ReviewDecision>(`/agent/v1/reviews/${requestId}/decisions`, { method: 'POST', body: JSON.stringify({ decision, comment }) }),
-  inspectRemote: (taskId: string, host: string, remoteRoot: string) => api<RemoteCapabilityReport>(`/agent/v1/remote/tasks/${taskId}/inspect`, { method: 'POST', body: JSON.stringify({ host, remoteRoot }) }),
-  submitSmoke: (taskId: string, host: string, remoteRoot: string, queue: string, confirmed: boolean, idempotencyKey: string) => api<RemoteJob>(`/agent/v1/remote/tasks/${taskId}/submit-smoke`, { method: 'POST', body: JSON.stringify({ host, remoteRoot, queue: queue || undefined, confirmed, idempotencyKey }) }),
-  reconcileJob: (jobId: string) => api<RemoteJob>(`/agent/v1/remote/jobs/${jobId}/reconcile`, { method: 'POST' }),
+  reviews: (filters?: { runId?: string; projectId?: string; taskId?: string; status?: string }) => {
+    const qs = new URLSearchParams();
+    if (filters?.runId) qs.set('runId', filters.runId);
+    if (filters?.projectId) qs.set('projectId', filters.projectId);
+    if (filters?.taskId) qs.set('taskId', filters.taskId);
+    if (filters?.status) qs.set('status', filters.status);
+    return api<ReviewRequest[]>(`/agent/v1/reviews${qs.size ? `?${qs}` : ''}`);
+  },
+  evidenceLibrary: (filters?: { projectId?: string; taskId?: string; location?: string; checkStatus?: string; search?: string }) => {
+    const qs = new URLSearchParams();
+    if (filters?.projectId) qs.set('projectId', filters.projectId);
+    if (filters?.taskId) qs.set('taskId', filters.taskId);
+    if (filters?.location) qs.set('location', filters.location);
+    if (filters?.checkStatus) qs.set('checkStatus', filters.checkStatus);
+    if (filters?.search) qs.set('search', filters.search);
+    return api<EvidenceLibraryItem[]>(`/agent/v1/evidence-library${qs.size ? `?${qs}` : ''}`);
+  },
 };

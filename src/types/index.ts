@@ -63,6 +63,7 @@ export interface Task {
   description: string;
   workflow_id: string;
   workflow: WorkflowTemplate;
+  workflow_sha256?: string | null;
   task_root_rel: string | null;
   task_root_unresolved?: boolean;
   status: TaskStatus;
@@ -101,6 +102,9 @@ export interface Experience {
   related_project_id: string | null;
   related_task_id: string | null;
   related_step_id: string | null;
+  related_project_name?: string | null;
+  related_task_name?: string | null;
+  promoted?: number;
   created_at: string;
   updated_at: string;
 }
@@ -131,13 +135,39 @@ export interface FileEntry {
 }
 
 export interface HpcConfig {
-  host: string;       // e.g. 'login.shanghai-super.com'
-  user: string;       // username
-  remotePath: string; // remote working directory prefix
-  moduleQE: string;   // module load command for Quantum ESPRESSO
-  moduleWannier: string;   // module load command for Wannier90
-  moduleTRIQS: string;     // module load command for TRIQS
-  nprocs: string;     // default number of processors
+  schemaVersion?: 2;
+  profiles?: HpcProfile[];
+  defaultProfileId?: string;
+  taskBindings?: HpcTaskBinding[];
+  // Legacy single-profile fields are retained only for reading existing data.
+  host?: string;
+  user?: string;
+  remotePath?: string;
+  moduleQE?: string;
+  moduleWannier?: string;
+  moduleTRIQS?: string;
+  nprocs?: string;
+}
+
+export interface HpcProfile {
+  id: string;
+  name: string;
+  sshAlias: string;
+  /** Read-only boundary for this account, normally the remote user home. */
+  userRoot?: string;
+  /** Project directory below userRoot. Task directories are direct children. */
+  projectRoot?: string;
+  /** Legacy V1 root. Kept only so existing metadata remains readable. */
+  remoteRoot?: string;
+  scheduler: string;
+  notes: string;
+}
+
+export interface HpcTaskBinding {
+  taskId: string;
+  profileId: string;
+  /** Stable, single-segment directory name directly below the remote project root. */
+  taskRootRel: string;
 }
 
 // === Agent research environment V1 ===
@@ -170,6 +200,13 @@ export interface AgentPolicyDocument {
   allowedHosts: string[];
   allowedMethods: string[];
   localRoot?: string;
+  /** Read operations may target this root or one of its descendants. */
+  remoteReadRoot?: string;
+  /** Existing project directory under remoteReadRoot. */
+  remoteProjectRoot?: string;
+  /** The only remote Task tree where writes and submitted jobs are allowed. */
+  remoteWriteRoot?: string;
+  /** Legacy single-root boundary. New policies should use the three fields above. */
   remoteRoot?: string;
   limits: ResearchContract['resourceBudget'];
   protectedPaths: string[];
@@ -222,7 +259,74 @@ export interface RunEvent {
   actor_type: 'agent' | 'researcher' | 'system';
   payload: Record<string, unknown>;
   idempotency_key: string | null;
+  source: string;
+  conversation_ref: string | null;
   occurred_at: string;
+}
+
+export type RunActionStatus =
+  | 'proposed'
+  | 'authorized'
+  | 'executing'
+  | 'waiting_remote'
+  | 'waiting_user'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface RunAction {
+  id: string;
+  run_id: string;
+  context_version_id: string;
+  step_id: string;
+  action_type: string;
+  status: RunActionStatus;
+  executor: 'codex';
+  manifest: Record<string, unknown>;
+  manifest_sha256: string;
+  idempotency_key: string;
+  conversation_ref: string | null;
+  authorization_summary: string | null;
+  authorization_sha256: string | null;
+  authorized_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  result: Record<string, unknown>;
+  error: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunArtifact {
+  id: string;
+  run_id: string;
+  context_version_id: string;
+  action_id: string;
+  remote_job_id: string | null;
+  step_id: string;
+  location: 'local' | 'remote';
+  path: string;
+  size_bytes: number;
+  sha256: string;
+  category: string;
+  metadata: Record<string, unknown>;
+  idempotency_key: string;
+  created_at: string;
+}
+
+export interface EvidenceCheck {
+  id: string;
+  run_id: string;
+  context_version_id: string;
+  action_id: string;
+  artifact_id: string | null;
+  step_id: string;
+  validator_name: string;
+  validator_version: string;
+  status: 'pass' | 'warn' | 'fail';
+  result: Record<string, unknown>;
+  idempotency_key: string;
+  created_at: string;
 }
 
 export interface ReviewRequest {
@@ -237,9 +341,28 @@ export interface ReviewRequest {
   evidence: unknown[];
   proposal: Record<string, unknown> | null;
   idempotency_key: string | null;
+  source: string;
+  conversation_ref: string | null;
   created_at: string;
   decided_at: string | null;
   decision?: ReviewDecision;
+  project_id?: string;
+  project_name?: string;
+  task_id?: string;
+  task_name?: string;
+  run_status?: string;
+}
+
+export interface EvidenceLibraryItem extends RunArtifact {
+  project_id: string;
+  project_name: string;
+  task_id: string;
+  task_name: string;
+  run_status: string;
+  action_type: string;
+  job_status: string | null;
+  local_available: boolean | null;
+  checks: EvidenceCheck[];
 }
 
 export interface ReviewDecision {
@@ -248,6 +371,9 @@ export interface ReviewDecision {
   decision: 'approve' | 'reject' | 'supplement' | 'terminate';
   comment: string;
   actor: string;
+  source: string;
+  conversation_ref: string | null;
+  decision_sha256: string | null;
   created_at: string;
 }
 
@@ -255,6 +381,8 @@ export interface RemoteJob {
   id: string;
   run_id: string;
   context_version_id: string;
+  action_id: string | null;
+  step_id: string | null;
   action_token: string;
   host: string;
   remote_root: string;
@@ -262,6 +390,11 @@ export interface RemoteJob {
   job_id: string | null;
   job_name: string;
   status: string;
+  execution_manifest: Record<string, unknown>;
+  execution_manifest_sha256: string | null;
+  script_sha256: string | null;
+  resources: Record<string, unknown>;
+  resources_sha256: string | null;
   last_observation: Record<string, unknown>;
   submitted_at: string | null;
   reconciled_at: string | null;
@@ -298,7 +431,10 @@ export interface AgentContextV1 {
   effectivePolicy: AgentPolicyDocument | null;
   policySources: Array<{ id: string; scope_type: string; version: number; sha256: string }>;
   remoteCapability: RemoteCapabilityReport | null;
+  recentActions: RunAction[];
   recentJobs: RemoteJob[];
+  recentArtifacts: RunArtifact[];
+  recentEvidenceChecks: EvidenceCheck[];
   pendingReviews: ReviewRequest[];
   eventCursor: number;
   evidenceIndex: Array<{ eventId: string; eventType: string; occurredAt: string }>;

@@ -10,12 +10,14 @@
 - 步骤进度、笔记、自定义命令与文件关联
 - 工作流模板持久化、可视化编辑和重置；模板修改只影响之后创建的任务
 - 项目工作目录浏览与文本文件查看
-- 经验库
-- HPC 配置和 LSF 提交向导（只生成并复制命令，不自动连接或执行）
-- Agent 统一任务上下文、研究运行和不可变上下文版本
-- YAML 研究合同、system/project/task 分层授权策略与追加式事件账本
-- 评价中心：越界方案修订、异常提交和关键科学决定由研究者处理
-- 受控 OpenSSH/LSF pilot：只读探测、任务根内传输、固定 1 核 smoke、状态/日志/取消/对账
+- 证据库：按项目/任务索引本地与远端产物、下载副本、处理图和 validator 结论
+- 经验库：人工记录、Codex 候选经验与证据确认经验分层管理
+- 超算管理：项目级 OpenSSH 连接、用户只读根、项目根、Task 写目录映射、有效策略、传输记录和作业快照；不在 Web 执行
+- Codex 驱动的统一任务上下文、研究运行、不可变 execution manifest 与追加式证据链
+- YAML 研究合同、system/project/task 分层授权策略、action/artifact/evidence/review 账本
+- Agent 运行记录与待沟通事项：Web 只读展示 Codex 已记录的上下文、命令预览、作业、证据和决定，并支持项目/任务/状态筛选
+- 材料无关的 capability 执行接口：Codex 自主选择脚本、输入和资源；Workbench 校验 manifest、策略、路径、哈希并留证
+- 研究者结论和 Experience 提升保留 run、context、artifact 哈希与 Codex 对话来源
 
 ## 技术栈
 
@@ -43,26 +45,32 @@ npm start
 
 ## Agent CLI
 
-启动服务后，研究者可以先在侧边栏进入“Agent 运行中心”启动运行、查看采用的上下文版本、策略、作业和事件；需要人工决定的越界修订或异常会进入“评价中心”。Agent 通过 HTTP CLI 操作同一套 API，不直接读取 SQLite：
+Agent 本体是本项目中的 Codex 对话。研究者先在对话中确认研究方案、工作流、科学边界、资源和完成证据；Codex 再通过 `workbench` CLI 操作同一套 HTTP API，不直接读取 SQLite。Web 的“Agent 运行记录”和“待沟通事项”只显示已经记录的状态，不能启动、批准、提交、取消或对账：
 
 ```powershell
 npm link                 # 可选：注册本地 workbench 命令
 workbench doctor
-workbench context --task <task-id> --pretty
+workbench context --task <task-id> --allow-blocked --pretty
 workbench run start --task <task-id> --plan <research-plan-id> --idempotency-key <key>
 workbench review list --run <run-id> --pretty
-workbench remote inspect --task <task-id> --host <ssh-alias> --remote-root <approved-root>
+workbench execution contract --pretty
+workbench action prepare --run <run-id> --context-version <context-id> --step <step-id> --capability local.process --spec-file <spec.json> --idempotency-key <key>
+workbench action authorize --action <action-id> --context-version <context-id> --manifest-sha <sha256> --summary <confirmed-summary>
+workbench action execute --action <action-id>
+workbench experience search --task <task-id> --query <关键词>
+workbench experience capture --run <run-id> --step <step-id> --title <标题> --content-file <经验.md> --idempotency-key <key>
+workbench conclusion record --run <run-id> --summary <researcher-summary> --artifacts <ids> --idempotency-key <key>
 ```
 
 CLI 默认连接 `http://127.0.0.1:3001`，可通过 `WORKBENCH_URL` 指向另一个本地端口。输出默认为 JSON；`--pretty` 仅改变排版。退出码 `2/3/4/5` 分别表示命令用法错误、API 拒绝、上下文阻塞或等待评价、服务不可达，因此脚本不需要解析自然语言错误。
 
 研究合同保存在项目目录 `.workbench/contracts/<research-plan-id>.yaml`。研究方案仍可编辑；当前文件与运行采用版本不一致时，Context 会报告 drift。每个 Task 同时最多有一个 `active` 或 `waiting_review` 运行。
 
-真实远程能力默认关闭。只有同时满足服务环境开关、active task policy、当前运行已采用该策略、批准主机/远程根/操作和首次 smoke 明确确认时，Workbench 才会调用系统 OpenSSH。V1 只提供 inspect、任务根内小文件传输、固定 1 核/1 分钟 smoke，以及已记录作业的状态、日志、取消和对账；不提供任意远程 shell。显式覆盖还受 `protectedPaths` 保护，smoke 同时受合同与 policy 的预算和并发上限约束。Workbench 不保存密码或私钥，也不自动接受 host key。该闭环已在 IBM Spectrum LSF 10.1 完成真实 pilot 验收，复现步骤见 [TESTING.md](TESTING.md)。
+真实远程能力默认关闭。只有项目连接元数据、Task 远程目录映射、active task policy、当前采用 context、批准的主机/三级目录边界/操作和研究者对精确 manifest 的明确确认全部一致时，Workbench 才会调用系统 OpenSSH/LSF。用户根是只读范围，项目根组织 Task，只有当前 Task 写根允许上传和作业操作；Codex 可通过独立的 `remote.task-root.create` manifest 创建这个直接子目录。执行器不按材料名、Task ID、workflow step 或软件栈选择路线：Codex 根据采用的研究方案和工作流生成通用 capability spec，Workbench 只负责建立不可变快照并执行治理边界。Workbench 不提供任意远程 shell，不保存密码或私钥，也不自动接受 host key。CaCrO₃ 可作为首个真实科研 pilot，但只是一条项目数据/验收任务，不是产品代码中的专用 route。真实科学作业仍需单独授权，复现边界见 [TESTING.md](TESTING.md)。
 
 ## 模板与任务工作流
 
-工作流模板用于定义新任务的起始流程。创建任务后，系统会把模板复制到任务中：
+工作流模板用于定义新任务的核心科学/软件骨架：关键阶段、不可缺少的软件转换、检查点和完成证据。试跑、重试、传输、参数扫描批次与临时诊断由 Codex 记录为 action/event，不为每个执行细节增加工作流节点。创建任务后，系统会把模板复制到任务中：
 
 - 在“工作流”的模板预览模式中编辑模板，只影响以后创建的任务。
 - 进入任务详情，点击“编辑任务流程”，可以为当前任务增加、删除或修改阶段和步骤。

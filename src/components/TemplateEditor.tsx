@@ -233,8 +233,8 @@ export default function TemplateEditor({ workflowId, workflow, mode = 'template'
         <AlertTriangle size={13} className="text-[#f59e0b] flex-shrink-0" />
         <p className="text-[10px] text-[#f59e0b]/80">
           {isTaskWorkflow
-            ? '这是当前任务的独立工作流。修改不会影响原始模板或其他任务；删除流程节点也不会删除已有计算文件和历史进度。'
-            : '修改模板只影响之后新创建的任务，已有任务的独立工作流不会变化。删除操作需确认。'}
+            ? '这里只编辑当前任务的核心科学骨架：关键阶段、软件步骤、检查点和完成证据。试跑、重试、传输、参数扫描和临时诊断属于 action / event。修改不会影响其他任务。'
+            : '模板只定义新任务必须具备的核心骨架；不要把每次运行的命令、重试和传输展开成节点。修改只影响之后新建的任务。'}
         </p>
       </div>
 

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../db.js';
+import { normalizeHpcConfig } from '../services/hpcConfig.js';
 
 const router = Router();
 
@@ -37,6 +38,14 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const { name, description, material, working_dir, hpc_config, status } = req.body;
   const now = new Date().toISOString();
+  const existing = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Project not found' });
+  const normalizedHpcConfig = hpc_config === undefined
+    ? null
+    : JSON.stringify(normalizeHpcConfig(
+      hpc_config,
+      new Set((db.prepare('SELECT id FROM tasks WHERE project_id = ?').all(req.params.id) as { id: string }[]).map(item => item.id)),
+    ));
 
   const result = db.prepare(`UPDATE projects SET
     name = COALESCE(?, name),
@@ -46,7 +55,7 @@ router.put('/:id', (req, res) => {
     hpc_config = COALESCE(?, hpc_config),
     status = COALESCE(?, status),
     updated_at = ?
-    WHERE id = ?`).run(name ?? null, description ?? null, material ?? null, working_dir ?? null, hpc_config ?? null, status ?? null, now, req.params.id);
+    WHERE id = ?`).run(name ?? null, description ?? null, material ?? null, working_dir ?? null, normalizedHpcConfig, status ?? null, now, req.params.id);
 
   if (result.changes === 0) return res.status(404).json({ error: 'Project not found' });
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);

@@ -62,7 +62,7 @@ npm run build
 - SPA fallback 使用普通中间件，不使用 Express 5 不兼容的 `app.get('*', ...)`。
 - 前端路由保持 `HashRouter`，Vite 保持 `base: './'` 与 `vite-plugin-singlefile`，以兼容本地部署。
 - 工作流运行时数据以数据库为准；`src/data/workflows.ts` 只负责内置默认、首次播种和重置回退。相关修改要同时检查数据库 API、Context、模板编辑器和任务目录创建逻辑。
-- 工作流模板只定义跑通计算所必需的完整物理流程和软件步骤，要求完整、清晰、可执行，但不展开材料专属参数、收敛阈值、对照矩阵和不确定度设计；这些细节放在所属项目的研究方案中。
+- 工作流模板和任务工作流只保留稳定的核心骨架：跑通计算所必需的物理阶段、软件转换、关键检查点与完成证据。试跑命令、重试、上传下载、参数扫描批次和临时诊断记录为 action/event，不新增工作流节点；材料参数、收敛阈值、对照矩阵和不确定度设计放在研究方案中。
 - SQLite schema 变更必须对现有数据库向后兼容。新增字段使用可重复启动的安全迁移；不要假设数据库是空的。
 - Windows 的 `.bat` 启动脚本保持 ASCII/英文，避免系统代码页导致中文命令乱码。
 - 文件 API 必须把访问限制在 Project 的 `working_dir` 内。处理路径时使用解析后的规范路径，并覆盖同名路径前缀、`..`、绝对路径等逃逸场景。
@@ -92,6 +92,18 @@ npm run build
 
 涉及 API 时，再启动服务并验证相应端点；涉及 UI 时，验证主要交互流程。不要为了测试清空或重置现有数据库。
 
+## Codex Agent 执行边界
+
+- Agent 本体是本项目中的 Codex 对话，不是 Web 页面、Express 后台 worker 或数据库进程。Agent 运行、评价、证据和远程作业的 Web 页面只能展示已记录状态，不得成为启动、授权、提交、取消或对账入口。
+- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill，并把 `workbench` CLI 作为唯一机器入口。禁止为 Agent 执行直接读写 SQLite、直接调用 Agent 写 API，或绕过已授权的 Workbench capability manifest 使用通用 `ssh`/`sftp`/`scp`/`bsub`/`bjobs`/`bpeek`/`bkill`。
+- 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和 `workbench context --task <id> --allow-blocked --pretty`，检查未决 review、active/uncertain job、action 和 context drift；提交响应不确定时只能对账，不能重提。
+- 启动 run、修改采用的研究方案/工作流/合同或执行 action 前，必须先在 Codex 对话中向研究者说明方案、差异、科学边界、资源和完成证据并获得明确确认。不得把沉默、历史上的宽泛目标、Web 状态或 Agent 自己的建议当作授权。
+- 可执行动作必须先创建绑定 context、workflow step、输入/脚本/资源/路径的 immutable execution manifest，向研究者展示摘要与哈希，收到对该精确 manifest 的确认后才能记录授权并进入 `executing`。manifest 内容变化必须重新提案和确认。
+- 执行层只提供材料无关的 capability 接口与安全边界；材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数不得硬编码进执行器、路由或 CLI。由 Codex 根据采用的研究方案和工作流自主生成每次 action spec；材料专属内容只能作为项目数据或测试 fixture。
+- 用户决定默认只保存摘要、哈希、时间和可选 Codex task reference，不保存完整聊天。事实、推断和决定分开写入；研究者未明确陈述或确认时，Codex 不得记录 researcher conclusion。
+- Codex 恢复任务和规划卡壳步骤前应通过 CLI 检索项目/任务相关经验；验证成功或诊断失败后，可沉淀带条件、症状、处理方式和适用边界的候选经验。候选经验不是证据或研究者结论，只有证据绑定且研究者确认的经验才可提升为不可变记录。
+- 未单独获准迁移正式库前，不得为了检查界面或 Context 而让新版服务连接 `data/workbench.db`；使用注入的临时数据库完成开发和测试。
+
 ## 当前功能基线
 
 - 项目与任务 CRUD、任务步骤进度追踪。
@@ -99,7 +111,7 @@ npm run build
 - 通用及多软件栈 One-shot DFT+DMFT 工作流（QE/Wannier90/TRIQS、非磁 H0 自发磁性 DMFT、WIEN2k/dmftproj）及交互流程图。
 - 工作流模板数据库持久化、可视化编辑和重置。
 - 步骤笔记、自定义命令、文件关联。
-- 经验库。
-- HPC 配置与 LSF 提交向导（复制粘贴模式，不直接连接 SSH）。
+- 独立证据库与经验库；证据索引文件/校验，经验保存可复用的研究记忆。
+- 超算管理页面保存项目级连接元数据并观察边界、传输和作业；Web 不直接执行远程动作。
 
 继续开发前可参考 `progress.md` 和 `doc/`，但最终以当前代码、数据库 schema 和实际运行结果为准。

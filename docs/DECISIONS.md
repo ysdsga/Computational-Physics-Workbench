@@ -75,4 +75,34 @@ Project、Task 或 ResearchPlan 一旦被研究运行引用，物理删除会破
 
 合同和 policy 不是只用于界面展示的元数据。方案自动修订必须保留已有参数范围、必需阶段、证据义务、人工门禁和科学目标；删除约束或改变目标进入评价。评价请求使用运行内幂等键，重试返回同一请求。
 
-远程动作执行前再次读取当前运行已采用的合同与有效 policy。`protectedPaths` 阻止覆盖相对路径及其子树，固定 smoke 必须同时满足双方的 1 核/1 分钟和并发预算。调用 `bsub` 后发生超时或连接错误时视为提交结果不确定，只允许按记录的唯一作业名对账或人工处理，不自动重提。
+远程动作执行前再次读取当前运行已采用的合同与有效 policy。`protectedPaths` 阻止覆盖相对路径及其子树，`job.submit` 的 queue/核数/墙钟和并发必须同时满足 manifest、合同与 policy。调用 `bsub` 后发生超时或连接错误时视为提交结果不确定，只允许按记录的唯一作业名对账或人工处理，不自动重提。
+
+## ADR-006：执行层提供通用 capability，不注册材料路线
+
+- 状态：已采用
+- 日期：2026-08-15
+
+Codex 项目对话是规划和执行主体。Workbench 不应替 Codex 判断“这个材料该走哪个脚本”，也不应要求每种材料或软件栈注册产品 adapter。执行层只公开 `local.process`、`remote.inspect`、`remote.task-root.create`、`files.upload/download`、`job.submit/cancel` 等材料无关 capability，并校验 context、workflow step、Task 根、policy、输入/脚本哈希、资源、幂等键和状态图。
+
+材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数只能出现在研究方案、任务工作流、项目文件或 Codex 为单次 action 生成的 spec/manifest 中，禁止进入执行器、路由和 CLI。新增材料不需要改产品代码。首个具体材料仍可作为真实 pilot，但没有专用 API，也不代表单独的产品支持路线。
+
+旧的材料专用 action 服务与 CLI 已删除；task 级 inspect/upload/download/smoke/cancel 直通写入口也已移除。状态、日志和不确定提交对账保留为已记录作业的观察/恢复入口。跨材料、跨 workflow 隔离测试和静态字符串门禁防止回归。
+
+## ADR-007：工作流、证据、经验和超算配置分层
+
+- 状态：已采用
+- 日期：2026-08-15
+
+任务工作流只表示长期稳定的核心科学/软件骨架：必要阶段、关键转换、人工或科学检查点与完成证据。试跑命令、失败重试、上传下载、参数扫描批次和临时诊断绑定到最近的骨架步骤，以 action/event/artifact 形式记录，不为每次执行细节创建工作流节点。
+
+研究方案采用“工作副本 + 采用快照”：日常小改直接更新 Markdown；只有研究者与 Codex 明确将方案用于 Research Run 时，才与合同、工作流和策略一起形成不可变 context。后续修改以 drift 提醒重新沟通，不保存每次按键或小改版本。
+
+证据库与经验库分离。证据库索引用于判断任务结果的原始/派生文件、远端产物、下载副本、图和 validator 结论；Experience 保存可跨任务复用的条件、症状、处理方式和边界。Codex 候选经验可自动检索和沉淀，但不是证据或研究者结论；证据确认的提升记录保持不可变。
+
+旧复制粘贴式超算提交页面删除。超算管理保存项目级 OpenSSH 连接、用户只读根、项目根和 Task 目录映射，并显示有效 policy、传输 action 与作业快照；连接配置不是授权，Web 不执行远程创建、上传、下载、提交、取消或对账。Agent 运行记录可显示已授权 manifest 的命令预览和最近观察，但不是实时 SSH 终端。
+
+## ADR-008：远程目录采用用户只读、Task 独占写入的三级边界
+
+研究者在同一超算用户目录下维护多个项目目录，每个项目目录再包含稳定 Task 目录。单一 `remoteRoot` 无法区分只读观察范围与写入范围，也无法阻止写入同项目的其他 Task。
+
+连接 profile 因此分别登记用户只读根和项目根，Task 只保存项目根下的单段相对目录名。active policy 使用 `remoteReadRoot`、`remoteProjectRoot`、`remoteWriteRoot` 表达相同三级边界；远程 action 执行前必须同时匹配配置和 policy。读取可以位于用户根内，所有传输写入和作业工作目录必须使用当前 Task 写根。Codex 可以在精确 manifest 获批后创建该 Task 根，但不能通用地在项目根下创建其他目录。旧 `remoteRoot` 仅用于读取历史 policy，不允许驱动新的远程 action。

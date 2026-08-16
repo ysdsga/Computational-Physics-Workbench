@@ -252,7 +252,7 @@ const SYSTEM_DEFAULT: AgentPolicyDocument = {
   schemaVersion: 1,
   remoteEnabled: false,
   smokeAuthorized: false,
-  allowedOperations: ['context', 'event.append', 'review.request'],
+  allowedOperations: ['context', 'event.append', 'review.request', 'local.process'],
   allowedHosts: [],
   allowedMethods: [],
   limits: { maxCoresPerJob: 1, maxWallMinutes: 1, maxConcurrentJobs: 1, maxAutomaticRetries: 1 },
@@ -265,6 +265,19 @@ export function validatePolicy(input: unknown): AgentPolicyDocument {
   const value = input as Record<string, any>;
   if (value.schemaVersion !== 1) throw new AgentCoreError(400, 'POLICY_INVALID', 'schemaVersion must be 1');
   const limits = value.limits ?? {};
+  const legacyRemoteRoot = typeof value.remoteRoot === 'string' && value.remoteRoot.trim() ? normalizeRemoteRoot(value.remoteRoot) : undefined;
+  const remoteReadRoot = typeof value.remoteReadRoot === 'string' && value.remoteReadRoot.trim() ? normalizeRemoteRoot(value.remoteReadRoot) : undefined;
+  const remoteProjectRoot = typeof value.remoteProjectRoot === 'string' && value.remoteProjectRoot.trim() ? normalizeRemoteRoot(value.remoteProjectRoot) : undefined;
+  const remoteWriteRoot = typeof value.remoteWriteRoot === 'string' && value.remoteWriteRoot.trim() ? normalizeRemoteRoot(value.remoteWriteRoot) : undefined;
+  const usesSplitBoundary = Boolean(remoteReadRoot || remoteProjectRoot || remoteWriteRoot);
+  if (legacyRemoteRoot && usesSplitBoundary) throw new AgentCoreError(400, 'POLICY_INVALID', 'remoteRoot cannot be combined with split remote read/project/write roots');
+  if (usesSplitBoundary && (!remoteReadRoot || !remoteProjectRoot || !remoteWriteRoot)) {
+    throw new AgentCoreError(400, 'POLICY_INVALID', 'remoteReadRoot, remoteProjectRoot and remoteWriteRoot must be configured together');
+  }
+  if (remoteReadRoot && remoteProjectRoot && remoteWriteRoot) {
+    if (!remoteChild(remoteProjectRoot, remoteReadRoot)) throw new AgentCoreError(400, 'POLICY_INVALID', 'remoteProjectRoot must remain inside remoteReadRoot');
+    if (!remoteChild(remoteWriteRoot, remoteProjectRoot)) throw new AgentCoreError(400, 'POLICY_INVALID', 'remoteWriteRoot must remain inside remoteProjectRoot');
+  }
   return {
     schemaVersion: 1,
     remoteEnabled: value.remoteEnabled === true,
@@ -273,7 +286,10 @@ export function validatePolicy(input: unknown): AgentPolicyDocument {
     allowedHosts: stringList(value.allowedHosts, 'allowedHosts'),
     allowedMethods: stringList(value.allowedMethods, 'allowedMethods'),
     ...(typeof value.localRoot === 'string' && value.localRoot.trim() ? { localRoot: path.resolve(value.localRoot) } : {}),
-    ...(typeof value.remoteRoot === 'string' && value.remoteRoot.trim() ? { remoteRoot: normalizeRemoteRoot(value.remoteRoot) } : {}),
+    ...(legacyRemoteRoot ? { remoteRoot: legacyRemoteRoot } : {}),
+    ...(remoteReadRoot ? { remoteReadRoot } : {}),
+    ...(remoteProjectRoot ? { remoteProjectRoot } : {}),
+    ...(remoteWriteRoot ? { remoteWriteRoot } : {}),
     limits: {
       maxCoresPerJob: positiveNumber(limits.maxCoresPerJob, 'limits.maxCoresPerJob'),
       maxWallMinutes: positiveNumber(limits.maxWallMinutes, 'limits.maxWallMinutes'),
@@ -303,6 +319,23 @@ function remoteChild(child: string, parent: string): boolean {
   return c === p || (p === '/' ? c.startsWith('/') : c.startsWith(`${p}/`));
 }
 
+export function policyRemoteRoots(policy: AgentPolicyDocument): {
+  readRoot?: string;
+  projectRoot?: string;
+  writeRoot?: string;
+  legacy: boolean;
+} {
+  if (policy.remoteRoot) {
+    return { readRoot: policy.remoteRoot, projectRoot: policy.remoteRoot, writeRoot: policy.remoteRoot, legacy: true };
+  }
+  return {
+    readRoot: policy.remoteReadRoot,
+    projectRoot: policy.remoteProjectRoot,
+    writeRoot: policy.remoteWriteRoot,
+    legacy: false,
+  };
+}
+
 function intersect(left: string[], right: string[]): string[] {
   return left.filter(value => right.includes(value)).sort();
 }
@@ -314,7 +347,11 @@ export function tightenPolicy(parent: AgentPolicyDocument, child: AgentPolicyDoc
   if (!subset(child.allowedHosts, parent.allowedHosts)) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower policy expands allowed hosts');
   if (!subset(child.allowedMethods, parent.allowedMethods)) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower policy expands allowed methods');
   if (parent.localRoot && (!child.localRoot || !localChild(child.localRoot, parent.localRoot))) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower local root must remain inside its parent');
-  if (parent.remoteRoot && (!child.remoteRoot || !remoteChild(child.remoteRoot, parent.remoteRoot))) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower remote root must remain inside its parent');
+  const parentRoots = policyRemoteRoots(parent);
+  const childRoots = policyRemoteRoots(child);
+  if (parentRoots.readRoot && (!childRoots.readRoot || !remoteChild(childRoots.readRoot, parentRoots.readRoot))) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower remote read root must remain inside its parent');
+  if (parentRoots.projectRoot && (!childRoots.projectRoot || !remoteChild(childRoots.projectRoot, parentRoots.projectRoot))) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower remote project root must remain inside its parent');
+  if (parentRoots.writeRoot && (!childRoots.writeRoot || !remoteChild(childRoots.writeRoot, parentRoots.writeRoot))) throw new AgentCoreError(409, 'POLICY_EXPANSION', 'Lower remote write root must remain inside its parent');
   for (const key of Object.keys(parent.limits) as Array<keyof AgentPolicyDocument['limits']>) {
     if (child.limits[key] > parent.limits[key]) throw new AgentCoreError(409, 'POLICY_EXPANSION', `Lower policy expands ${key}`);
   }
@@ -405,9 +442,31 @@ export function activatePolicy(id: string) {
 }
 
 function serializeEvent(row: any): RunEvent { return { ...row, payload: JSON.parse(row.payload_json) }; }
-function serializeReview(row: any): ReviewRequest { return { ...row, options: JSON.parse(row.options_json), recommendation: JSON.parse(row.recommendation_json), evidence: JSON.parse(row.evidence_json), proposal: row.proposal_json ? JSON.parse(row.proposal_json) : null }; }
+function serializeReview(row: any): ReviewRequest {
+  const review = {
+    ...row,
+    options: JSON.parse(row.options_json),
+    recommendation: JSON.parse(row.recommendation_json),
+    evidence: JSON.parse(row.evidence_json),
+    proposal: row.proposal_json ? JSON.parse(row.proposal_json) : null,
+  };
+  if (row.decision_id) {
+    review.decision = {
+      id: row.decision_id,
+      request_id: row.id,
+      decision: row.decision_value,
+      comment: row.decision_comment,
+      actor: row.decision_actor,
+      source: row.decision_source,
+      conversation_ref: row.decision_conversation_ref,
+      decision_sha256: row.decision_sha256,
+      created_at: row.decision_created_at,
+    };
+  }
+  return review;
+}
 
-export function appendEvent(runId: string, input: { category: RunEvent['category']; eventType: string; actorType: RunEvent['actor_type']; payload?: Record<string, unknown>; idempotencyKey?: string; contextVersionId?: string | null }) {
+export function appendEvent(runId: string, input: { category: RunEvent['category']; eventType: string; actorType: RunEvent['actor_type']; payload?: Record<string, unknown>; idempotencyKey?: string; contextVersionId?: string | null; source?: string; conversationRef?: string | null }) {
   if (!['fact', 'inference', 'decision', 'conclusion'].includes(input.category)) throw new AgentCoreError(400, 'EVENT_INVALID', 'Invalid event category');
   if (input.category === 'conclusion' && input.actorType !== 'researcher') throw new AgentCoreError(403, 'CONCLUSION_REQUIRES_RESEARCHER', 'Only a researcher can record a final conclusion');
   const run = db.prepare('SELECT * FROM research_runs WHERE id = ?').get(runId) as any;
@@ -418,8 +477,8 @@ export function appendEvent(runId: string, input: { category: RunEvent['category
   }
   const sequence = ((db.prepare('SELECT MAX(sequence) AS sequence FROM run_events WHERE run_id = ?').get(runId) as any)?.sequence ?? 0) + 1;
   const id = newId('event');
-  db.prepare(`INSERT INTO run_events (id, run_id, context_version_id, sequence, category, event_type, actor_type, payload_json, idempotency_key, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, runId, input.contextVersionId === undefined ? run.current_context_version_id : input.contextVersionId, sequence, input.category, input.eventType, input.actorType, stableJson(input.payload ?? {}), input.idempotencyKey ?? null, now());
+  db.prepare(`INSERT INTO run_events (id, run_id, context_version_id, sequence, category, event_type, actor_type, payload_json, idempotency_key, source, conversation_ref, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, runId, input.contextVersionId === undefined ? run.current_context_version_id : input.contextVersionId, sequence, input.category, input.eventType, input.actorType, stableJson(input.payload ?? {}), input.idempotencyKey ?? null, input.source ?? 'workbench', input.conversationRef ?? null, now());
   return serializeEvent(db.prepare('SELECT * FROM run_events WHERE id = ?').get(id));
 }
 
@@ -571,7 +630,7 @@ export function reviseRun(runId: string, input: { planContent: string; contractC
   return { status: 'adopted', contextVersion: context };
 }
 
-export function createReview(runId: string, input: { gateType: string; question: string; options?: unknown[]; recommendation?: Record<string, unknown>; evidence?: unknown[]; proposal?: Record<string, unknown> | null; idempotencyKey?: string }) {
+export function createReview(runId: string, input: { gateType: string; question: string; options?: unknown[]; recommendation?: Record<string, unknown>; evidence?: unknown[]; proposal?: Record<string, unknown> | null; idempotencyKey?: string; source?: string; conversationRef?: string | null }) {
   const run = db.prepare('SELECT * FROM research_runs WHERE id = ?').get(runId) as any;
   if (!run) throw new AgentCoreError(404, 'RUN_NOT_FOUND', 'Run not found');
   if (!run.current_context_version_id) throw new AgentCoreError(409, 'CONTEXT_REQUIRED', 'Run has no context version');
@@ -581,21 +640,27 @@ export function createReview(runId: string, input: { gateType: string; question:
   }
   const id = newId('review'); const ts = now();
   db.transaction(() => {
-    db.prepare(`INSERT INTO review_requests (id, run_id, context_version_id, status, gate_type, question, options_json, recommendation_json, evidence_json, proposal_json, idempotency_key, created_at) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, runId, run.current_context_version_id, input.gateType, input.question, stableJson(input.options ?? []), stableJson(input.recommendation ?? {}), stableJson(input.evidence ?? []), input.proposal ? stableJson(input.proposal) : null, input.idempotencyKey ?? null, ts);
+    db.prepare(`INSERT INTO review_requests (id, run_id, context_version_id, status, gate_type, question, options_json, recommendation_json, evidence_json, proposal_json, idempotency_key, source, conversation_ref, created_at) VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, runId, run.current_context_version_id, input.gateType, input.question, stableJson(input.options ?? []), stableJson(input.recommendation ?? {}), stableJson(input.evidence ?? []), input.proposal ? stableJson(input.proposal) : null, input.idempotencyKey ?? null, input.source ?? 'workbench', input.conversationRef ?? null, ts);
     db.prepare("UPDATE research_runs SET status = 'waiting_review', updated_at = ? WHERE id = ?").run(ts, runId);
-    appendEvent(runId, { category: 'decision', eventType: 'review.requested', actorType: 'agent', payload: { requestId: id, gateType: input.gateType }, idempotencyKey: input.idempotencyKey });
+    appendEvent(runId, { category: 'decision', eventType: 'review.requested', actorType: 'agent', payload: { requestId: id, gateType: input.gateType }, idempotencyKey: input.idempotencyKey, source: input.source, conversationRef: input.conversationRef });
   })();
   return serializeReview(db.prepare('SELECT * FROM review_requests WHERE id = ?').get(id));
 }
 
-export function decideReview(requestId: string, decision: 'approve' | 'reject' | 'supplement' | 'terminate', comment: string) {
+export function decideReview(requestId: string, decision: 'approve' | 'reject' | 'supplement' | 'terminate', comment: string, metadata: { source?: string; conversationRef?: string | null } = {}) {
+  if (metadata.source !== 'codex_conversation') {
+    throw new AgentCoreError(400, 'DECISION_SOURCE_INVALID', 'Researcher review decisions must originate from an explicit Codex conversation decision');
+  }
   const request = db.prepare('SELECT * FROM review_requests WHERE id = ?').get(requestId) as any;
   if (!request) throw new AgentCoreError(404, 'REVIEW_NOT_FOUND', 'Review request not found');
   if (request.status !== 'open') throw new AgentCoreError(409, 'REVIEW_ALREADY_DECIDED', 'Review request is no longer open');
   const run = db.prepare('SELECT * FROM research_runs WHERE id = ?').get(request.run_id) as any;
   if (run.current_context_version_id !== request.context_version_id) throw new AgentCoreError(409, 'STALE_REVIEW', 'Review request belongs to an older context version');
   const id = newId('decision'); const ts = now();
+  const source = 'codex_conversation';
+  const conversationRef = metadata.conversationRef?.trim() || null;
+  const decisionSha256 = sha256(stableJson({ requestId, decision, comment, source, conversationRef }));
   let approvedContext: RunContextVersion | null = null;
   let rollbackSources: (() => void) | null = null;
   let approvedSnapshot: ReturnType<typeof readPlanAndContract> | null = null;
@@ -636,12 +701,12 @@ export function decideReview(requestId: string, decision: 'approve' | 'reject' |
       if (approvedSnapshot && approvedTask) {
         approvedContext = createContextVersion(run.id, approvedSnapshot, JSON.parse(approvedTask.workflow_snapshot), effectivePolicy(approvedTask.project_id, approvedTask.id).effective, approvedReason);
       }
-      db.prepare(`INSERT INTO review_decisions (id, request_id, decision, comment, actor, created_at) VALUES (?, ?, ?, ?, 'researcher', ?)`)
-        .run(id, requestId, decision, comment, ts);
+      db.prepare(`INSERT INTO review_decisions (id, request_id, decision, comment, actor, source, conversation_ref, decision_sha256, created_at) VALUES (?, ?, ?, ?, 'researcher', ?, ?, ?, ?)`)
+        .run(id, requestId, decision, comment, source, conversationRef, decisionSha256, ts);
       db.prepare("UPDATE review_requests SET status = 'decided', decided_at = ? WHERE id = ?").run(ts, requestId);
       if (decision === 'terminate') db.prepare("UPDATE research_runs SET status = 'terminated', ended_at = ?, updated_at = ? WHERE id = ?").run(ts, ts, run.id);
       else db.prepare("UPDATE research_runs SET status = 'active', updated_at = ? WHERE id = ?").run(ts, run.id);
-      appendEvent(run.id, { category: 'decision', eventType: `review.${decision}`, actorType: 'researcher', payload: { requestId, comment, approvedContextVersionId: approvedContext?.id ?? null } });
+      appendEvent(run.id, { category: 'decision', eventType: `review.${decision}`, actorType: 'researcher', payload: { requestId, comment, approvedContextVersionId: approvedContext?.id ?? null, decisionSha256 }, source, conversationRef });
     })();
   } catch (error) {
     if (rollbackSources) {
@@ -673,15 +738,48 @@ export function buildAgentContext(taskId: string): AgentContextV1 {
   if (!row.task_root_rel) blockers.push({ code: 'TASK_ROOT_UNRESOLVED', message: 'Task root has not been resolved' });
   else try { taskRootAbsolute = resolveWithinRoot(row.working_dir, normalizeTaskRootRel(row.task_root_rel), { allowRoot: false, label: 'task root' }); }
     catch (error) { blockers.push({ code: 'TASK_ROOT_INVALID', message: (error as Error).message }); }
+  try {
+    const hpcConfig = row.hpc_config ? JSON.parse(row.hpc_config) as { profiles?: unknown[]; taskBindings?: Array<{ taskId?: string }> } : null;
+    if (!hpcConfig?.profiles?.length) blockers.push({ code: 'HPC_CONNECTION_NOT_REGISTERED', message: 'Project has no registered HPC connection metadata' });
+    else if (!hpcConfig.taskBindings?.some(binding => binding.taskId === taskId)) blockers.push({ code: 'REMOTE_TASK_BINDING_REQUIRED', message: 'Task has no registered remote directory binding' });
+  } catch {
+    blockers.push({ code: 'HPC_CONFIG_INVALID', message: 'Project HPC connection metadata is invalid' });
+  }
   if (!run) blockers.push({ code: 'RUN_NOT_STARTED', message: 'No active research run exists for this task' });
   const hashes = run ? currentHashes(run) : { plan: null, contract: null };
   if (run && (!hashes.plan || !hashes.contract)) blockers.push({ code: 'CONTRACT_INVALID_OR_MISSING', message: 'Current research plan contract cannot be validated' });
   if (context && (hashes.plan !== context.plan_sha256 || hashes.contract !== context.contract_sha256)) blockers.push({ code: 'SOURCE_DRIFT', message: 'Plan or contract differs from the adopted run context' });
+  if (context && row.workflow_snapshot) {
+    try {
+      if (hashJson(JSON.parse(row.workflow_snapshot)) !== context.workflow_sha256) blockers.push({ code: 'WORKFLOW_CONTEXT_DRIFT', message: 'Task workflow differs from the workflow adopted by this run' });
+    } catch {
+      blockers.push({ code: 'WORKFLOW_SNAPSHOT_INVALID', message: 'Task workflow snapshot is invalid' });
+    }
+  }
   const policy = effectivePolicy(row.project_id, taskId);
   if (context && context.policy_sha256 !== hashJson(policy.effective)) blockers.push({ code: 'POLICY_CONTEXT_DRIFT', message: 'Active policy differs from the policy adopted by this run; adopt it before remote actions' });
   if (!policy.effective.remoteEnabled) blockers.push({ code: 'REMOTE_DISABLED_BY_POLICY', message: 'Effective policy does not allow remote actions' });
   const pending = run ? (db.prepare("SELECT * FROM review_requests WHERE run_id = ? AND status = 'open' ORDER BY created_at").all(run.id) as any[]).map(serializeReview) : [];
-  const jobs = run ? db.prepare('SELECT *, last_observation_json FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC LIMIT 20').all(run.id).map((job: any) => ({ ...job, last_observation: JSON.parse(job.last_observation_json) })) as any : [];
+  const actions = run ? (db.prepare('SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC LIMIT 50').all(run.id) as any[]).map(({ manifest_json, result_json, error_json, ...action }) => ({
+    ...action,
+    manifest: JSON.parse(manifest_json),
+    result: JSON.parse(result_json),
+    error: JSON.parse(error_json),
+  })) : [];
+  const jobs = run ? db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC LIMIT 20').all(run.id).map((job: any) => ({
+    ...job,
+    execution_manifest: JSON.parse(job.execution_manifest_json),
+    resources: JSON.parse(job.resources_json),
+    last_observation: JSON.parse(job.last_observation_json),
+  })) as any : [];
+  const artifacts = run ? (db.prepare('SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 50').all(run.id) as any[]).map(({ metadata_json, ...artifact }) => ({
+    ...artifact,
+    metadata: JSON.parse(metadata_json),
+  })) : [];
+  const evidenceChecks = run ? (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC LIMIT 50').all(run.id) as any[]).map(({ result_json, ...check }) => ({
+    ...check,
+    result: JSON.parse(result_json),
+  })) : [];
   const eventCursor = run ? ((db.prepare('SELECT MAX(sequence) AS sequence FROM run_events WHERE run_id = ?').get(run.id) as any)?.sequence ?? 0) : 0;
   const evidence = run ? (db.prepare("SELECT id, event_type, occurred_at FROM run_events WHERE run_id = ? AND category = 'fact' ORDER BY sequence DESC LIMIT 20").all(run.id) as any[]).map(item => ({ eventId: item.id, eventType: item.event_type, occurredAt: item.occurred_at })) : [];
   const capabilityEvent = run ? db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'remote.capability_inspected' ORDER BY sequence DESC LIMIT 1").get(run.id) as any : null;
@@ -693,7 +791,15 @@ export function buildAgentContext(taskId: string): AgentContextV1 {
     run, contextVersion: context,
     research: { planId: run?.research_plan_id ?? null, currentPlanSha256: hashes.plan, adoptedPlanSha256: context?.plan_sha256 ?? null, currentContractSha256: hashes.contract, adoptedContractSha256: context?.contract_sha256 ?? null, drift: Boolean(context && (hashes.plan !== context.plan_sha256 || hashes.contract !== context.contract_sha256)) },
     workflow, effectivePolicy: policy.effective, policySources: policy.sources.map(item => ({ id: item.id, scope_type: item.scope_type, version: item.version, sha256: item.sha256 })),
-    remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null, recentJobs: jobs, pendingReviews: pending, eventCursor, evidenceIndex: evidence, blockers,
+    remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null,
+    recentActions: actions,
+    recentJobs: jobs,
+    recentArtifacts: artifacts,
+    recentEvidenceChecks: evidenceChecks,
+    pendingReviews: pending,
+    eventCursor,
+    evidenceIndex: evidence,
+    blockers,
   };
 }
 
@@ -701,9 +807,30 @@ export function listEvents(runId: string, after = 0, limit = 100) {
   return (db.prepare('SELECT * FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?').all(runId, after, Math.min(Math.max(limit, 1), 500)) as any[]).map(serializeEvent);
 }
 
-export function listReviews(runId?: string) {
-  const rows = runId
-    ? db.prepare('SELECT * FROM review_requests WHERE run_id = ? ORDER BY created_at DESC').all(runId)
-    : db.prepare("SELECT * FROM review_requests WHERE status = 'open' ORDER BY created_at").all();
+export function listReviews(filters: { runId?: string; projectId?: string; taskId?: string; status?: string } = {}) {
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (filters.runId) { conditions.push('rr.run_id = ?'); params.push(filters.runId); }
+  if (filters.projectId) { conditions.push('t.project_id = ?'); params.push(filters.projectId); }
+  if (filters.taskId) { conditions.push('r.task_id = ?'); params.push(filters.taskId); }
+  if (filters.status) {
+    if (!['open', 'decided', 'superseded'].includes(filters.status)) throw new AgentCoreError(400, 'REVIEW_STATUS_INVALID', 'status must be open, decided or superseded');
+    conditions.push('rr.status = ?'); params.push(filters.status);
+  }
+  const rows = db.prepare(`
+    SELECT rr.*, r.task_id, r.status AS run_status,
+           t.project_id, t.name AS task_name, p.name AS project_name,
+           rd.id AS decision_id, rd.decision AS decision_value,
+           rd.comment AS decision_comment, rd.actor AS decision_actor,
+           rd.source AS decision_source, rd.conversation_ref AS decision_conversation_ref,
+           rd.decision_sha256, rd.created_at AS decision_created_at
+    FROM review_requests rr
+    JOIN research_runs r ON r.id = rr.run_id
+    JOIN tasks t ON t.id = r.task_id
+    JOIN projects p ON p.id = t.project_id
+    LEFT JOIN review_decisions rd ON rd.request_id = rr.id
+    ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+    ORDER BY CASE rr.status WHEN 'open' THEN 0 ELSE 1 END, rr.created_at DESC
+  `).all(...params);
   return (rows as any[]).map(serializeReview);
 }

@@ -1,6 +1,6 @@
 # TESTING.md — 应用主体测试基线（D 盘根）
 
-> 最后更新：2026-08-15（Agent 科研环境 V1 提交前加固）
+> 最后更新：2026-08-15（Workbench V2 隔离验收）
 > 本文件描述 DFT+DMFT Workbench **应用主体**（D 盘根）的测试现状与命令。
 
 ## 现状
@@ -36,33 +36,34 @@ npm start             # 生产运行，http://127.0.0.1:3001
 8. **研究方案目录容错**：项目工作目录暂时不可用时，列表仍返回全部元数据，并把对应方案标记为文件丢失。
 9. **研究方案迁移安全**：旧的全局文件名唯一约束迁移为项目内唯一，已有元数据在初始化后仍然存在。
 10. **路径安全**：绝对路径、`..`、同名前缀目录和符号链接逃逸失败关闭。
-11. **Agent V1 内核**：合同绑定、运行/上下文冻结、事件幂等、越界修订评价、重复评价拒绝和归档保护。
+11. **Agent / Codex 内核**：合同绑定、运行/上下文冻结、事件幂等、越界修订评价、重复评价拒绝和归档保护。
 12. **策略边界**：下层 host、操作、方法、根和资源上限不能扩大上层权限。
-13. **提交前加固**：任务根不可回退到项目根；合同约束不能静默删除；评价请求幂等；保护路径和 smoke 预算在执行点生效。
+13. **提交前加固**：任务根不可回退到项目根；合同约束不能静默删除；评价请求幂等；保护路径与资源预算在执行点生效。
+14. **Action 与证据链**：immutable manifest、显式授权、状态图、artifact/evidence 归属、哈希 drift 与崩溃重试。
+15. **材料无关执行器**：两个不同材料、不同 workflow 的 `local.process` 共用同一接口；通用 `job.submit` 单次提交、响应不确定后只对账不重提，并有失败评价门禁和静态无硬编码检查。
+16. **结论与经验提升**：只有 `codex_conversation` 来源可记录 researcher conclusion；Experience 提升重新校验本地证据哈希并保护 provenance 不可变。
+17. **schema v4 迁移**：V0→V4、V1→V4、重复启动、原业务行数、外键和完整性检查。
+18. **Web 观察面**：源代码静态门禁和浏览器请求监听共同保证 Agent/评价页面只发 GET。
 
-浏览器 E2E 使用临时数据库覆盖空状态，以及“初始化合同 → 激活任务策略 → 启动运行 → 创建并批准评价”的完整研究者路径。
+浏览器 E2E 使用临时数据库覆盖空状态，以及预置 `run + open review` 后的运行观察台/待沟通事项。测试监听浏览器请求，断言访问和刷新期间没有任何 `/api/agent` POST/PUT/DELETE，并断言不存在启动、批准、提交、取消或对账控件。
 
-## 真实 SSH/LSF pilot
+## 真实 capability pilot
 
-真实测试不会进入 `npm test`，也不会使用真实用户数据库。先用普通 `ssh <alias>` 人工确认 host key，并在测试用临时 Project/Task/Run 中配置 active task policy。服务需设置：
+真实测试不会进入 `npm test`，也不会使用真实用户数据库。先人工确认 OpenSSH host key，并在测试用 Project/Task/Run 中配置 active task policy。先用 Codex 对话确认研究方案和动作边界，再让 Codex 生成通用 capability spec：
 
 ```powershell
-$env:WORKBENCH_REMOTE_ENABLED='1'
-$env:WORKBENCH_ALLOW_REMOTE_SMOKE='1'  # 仅 smoke 时
-$env:WORKBENCH_TEST_TASK_ID='<临时任务 ID>'
-$env:WORKBENCH_TEST_SSH_HOST='<OpenSSH alias>'
-$env:WORKBENCH_TEST_REMOTE_ROOT='<批准的测试根>'
-$env:WORKBENCH_TEST_LSF_QUEUE='<可选 queue>'
-
-npm run test:ssh:inspect
-$env:WORKBENCH_LIVE_SMOKE_CONFIRM='1'
-npm run test:ssh:lsf-smoke
+$env:WORKBENCH_TEST_RUN_ID='<run ID>'
+$env:WORKBENCH_TEST_CONTEXT_VERSION_ID='<context version ID>'
+$env:WORKBENCH_TEST_STEP_ID='<workflow step ID>'
+$env:WORKBENCH_TEST_CAPABILITY='remote.inspect' # 或 remote.task-root.create/files.upload/job.submit 等
+$env:WORKBENCH_TEST_SPEC_FILE='<由 Codex 准备的 JSON spec>'
+npm run test:remote:prepare
 ```
 
-`inspect` 不创建目录、不传文件、不提交作业。固定 smoke 使用 1 核、1 分钟上限，保留远程 `.workbench-smoke/<token>/` 证据，不自动删除。没有上述 pilot 参数时两个命令明确输出 `SKIP`。
+`prepare` 只创建 proposed action 并输出完整 manifest 与哈希，不执行。研究者在 Codex 对话中确认该精确 manifest 后，才可显式设置 action ID、manifest hash、授权摘要和 `WORKBENCH_LIVE_ACTION_CONFIRM=1`，再运行 `npm run test:remote:execute`。脚本、输入、路径、queue、核数和墙钟均来自 spec/manifest；测试脚本中没有材料、Task、step 或科学脚本硬编码。未提供 prepare 参数时命令明确输出 `SKIP`；execute 缺少精确授权参数时失败关闭。
 
 ## 已知限制
 
-- 已于 2026-08-15 在研究者指定的上海超算魔方-III pilot 上完成 SSH inspect、SFTP 往返、`score` 队列固定 smoke、幂等去重和重启恢复验收。该验收依赖研究者本机 SSH 配置，普通回归仍不会连接或伪造真实集群。
+- V1 曾在研究者指定的上海超算环境完成 SSH inspect、SFTP 往返、固定 smoke、幂等去重和重启恢复验收；V2 已移除绕过 manifest 的专用 smoke 入口。普通回归不会连接或伪造真实集群，新的真实作业必须走通用 capability manifest 并单独获准。
 - 运行测试时 Windows 偶发临时目录文件锁（WAL 句柄释放延迟），测试会忽略该清理错误（无害）。
 - 历史测试文件（vitest 配置、hpcPaths.test.ts 等）已在 2026-08-09 快照中被移除；如需单元测试框架，后续另立任务。

@@ -1,4 +1,4 @@
 interface:
   display_name: "DFT+DMFT Workbench Agent"
-  short_description: "Operate bounded research runs through the Workbench CLI"
-  default_prompt: "Use $workbench-agent to inspect the current task context and take the next permitted action."
+  short_description: "Run researcher-approved work from the Codex conversation"
+  default_prompt: "Use $workbench-agent to recover the current Workbench context, discuss the research plan/workflow and exact manifest with me, then perform only the action I explicitly authorize through the bounded CLI."

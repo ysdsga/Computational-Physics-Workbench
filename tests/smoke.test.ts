@@ -28,6 +28,12 @@ const ROOT = path.resolve(__dirname, '..');
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-smoke-'));
 process.env.WORKBENCH_DB_PATH = path.join(tmpRoot, 'test.db');
 process.env.WORKBENCH_PORT = '0'; // 0 = 系统分配随机端口
+const pythonExecutable = spawnSync('python', ['--version'], { windowsHide: true }).status === 0 ? 'python' : 'python3';
+process.env.WORKBENCH_LOCAL_EXEC_ENABLED = '1';
+process.env.WORKBENCH_LOCAL_EXECUTABLES = pythonExecutable;
+process.env.WORKBENCH_REMOTE_ENABLED = '1';
+process.env.WORKBENCH_ALLOW_REMOTE_LSF = '1';
+process.env.WORKBENCH_REMOTE_TEST_MODE = '1';
 
 let server: Server | undefined;
 let base = '';
@@ -92,6 +98,42 @@ test('workbench CLI uses the HTTP API and returns machine-readable output', asyn
   assert.equal(result.code, 0, result.stderr);
   const output = JSON.parse(result.stdout) as { ok: boolean; baseUrl: string; projectCount: number };
   assert.equal(output.ok, true); assert.equal(output.baseUrl, base); assert.equal(typeof output.projectCount, 'number');
+});
+
+test('workbench CLI configures and reads validated HPC metadata', async () => {
+  const workingDir = path.join(tmpRoot, 'cli-hpc-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await fetch(`${base}/api/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'cli-hpc-project', working_dir: workingDir }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const project = await projectResponse.json() as { id: string };
+  const configPath = path.join(tmpRoot, 'cli-hpc-config.json');
+  fs.writeFileSync(configPath, JSON.stringify({
+    schemaVersion: 2,
+    defaultProfileId: 'cluster',
+    profiles: [{
+      id: 'cluster',
+      name: 'Test cluster',
+      sshAlias: 'test-cluster',
+      scheduler: 'LSF',
+      userRoot: '/remote/home/tester',
+      projectRoot: '/remote/home/tester/pj001_test',
+    }],
+    taskBindings: [],
+  }));
+
+  const configured = await runCli(['hpc', 'configure', '--project', project.id, '--file', configPath]);
+  assert.equal(configured.code, 0, configured.stderr);
+  const configuredOutput = JSON.parse(configured.stdout) as { projectId: string; config: { profiles: Array<{ sshAlias: string }> } };
+  assert.equal(configuredOutput.projectId, project.id);
+  assert.equal(configuredOutput.config.profiles[0]?.sshAlias, 'test-cluster');
+
+  const shown = await runCli(['hpc', 'show', '--project', project.id]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.deepEqual(JSON.parse(shown.stdout), configuredOutput);
 });
 
 test('new one-shot software-stack templates are seeded and create their stage folders', async () => {
@@ -516,9 +558,9 @@ test('Agent V1 freezes context, keeps an append-only ledger, and routes expansio
   const revise = await fetch(`${base}/api/agent/v1/runs/${run.id}/revise`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ planContent: candidatePlan, contractContent: stringifyYaml(candidateContract), expectedContextVersionId: context.contextVersion.id, reason: 'method correction', idempotencyKey: 'revision-one' }) });
   assert.equal(revise.status, 202);
   const revisionResult = await revise.json() as { request: { id: string } };
-  const decision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve', comment: 'scientifically justified' }) });
+  const decision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve', comment: 'scientifically justified', source: 'codex_conversation' }) });
   assert.equal(decision.status, 201);
-  const doubleDecision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve' }) });
+  const doubleDecision = await fetch(`${base}/api/agent/v1/reviews/${revisionResult.request.id}/decisions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision: 'approve', source: 'codex_conversation' }) });
   assert.equal(doubleDecision.status, 409);
   const adoptedContext = await fetch(`${base}/api/agent/v1/context/tasks/${task.id}`).then(response => response.json()) as { contextVersion: { id: string; version: number }; research: { drift: boolean } };
   assert.equal(adoptedContext.contextVersion.version, 2); assert.equal(adoptedContext.research.drift, false);
@@ -543,6 +585,462 @@ test('Agent V1 freezes context, keeps an append-only ledger, and routes expansio
   const deletePlan = await fetch(`${base}/api/research-plans/${plan.id}`, { method: 'DELETE' });
   const deleteProject = await fetch(`${base}/api/projects/${project.id}`, { method: 'DELETE' });
   assert.equal(deleteTask.status, 409); assert.equal(deletePlan.status, 409); assert.equal(deleteProject.status, 409);
+});
+
+test('Codex actions bind immutable manifests to workflow steps and persist artifacts and evidence', async () => {
+  const workingDir = path.join(tmpRoot, 'agent-v2-actions');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'agent-v2-actions', working_dir: workingDir }),
+  });
+  assert.equal(projectResponse.status, 201);
+  const project = await projectResponse.json() as { id: string };
+  const taskResponse = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'bounded-action-task', workflow_id: 'dft-dmft-oneshot' }),
+  });
+  assert.equal(taskResponse.status, 201);
+  const task = await taskResponse.json() as { id: string; task_root_rel: string; workflow: { steps: { id: string }[] } };
+  const stepId = task.workflow.steps[0].id;
+  const planResponse = await fetch(`${base}/api/research-plans`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Action Contract Plan', project_id: project.id, content: '# Action Contract Plan' }),
+  });
+  assert.equal(planResponse.status, 201);
+  const plan = await planResponse.json() as { id: string };
+  assert.equal((await fetch(`${base}/api/research-plans/${plan.id}/contract/initialize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  })).status, 201);
+  const runResponse = await fetch(`${base}/api/agent/v1/runs`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'action-run-once' }),
+  });
+  assert.equal(runResponse.status, 201);
+  const run = await runResponse.json() as { id: string; current_context_version_id: string };
+  const manifest = { command: 'validate_prepared_files', inputs: ['input.in'], resources: { cores: 1 } };
+  const proposalBody = {
+    contextVersionId: run.current_context_version_id,
+    stepId,
+    actionType: 'local.validator',
+    manifest,
+    idempotencyKey: 'validator-action-once',
+    conversationRef: 'codex-task:test-actions',
+  };
+
+  const proposedResponse = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(proposalBody),
+  });
+  assert.equal(proposedResponse.status, 201);
+  const proposed = await proposedResponse.json() as { id: string; status: string; manifest_sha256: string };
+  assert.equal(proposed.status, 'proposed');
+  assert.match(proposed.manifest_sha256, /^[a-f0-9]{64}$/);
+
+  const repeatedProposal = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(proposalBody),
+  });
+  assert.equal((await repeatedProposal.json() as { id: string }).id, proposed.id);
+  const conflictingProposal = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...proposalBody, manifest: { ...manifest, command: 'different' } }),
+  });
+  assert.equal(conflictingProposal.status, 409);
+  assert.equal((await conflictingProposal.json() as { code: string }).code, 'ACTION_IDEMPOTENCY_CONFLICT');
+
+  const staleProposal = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...proposalBody, contextVersionId: 'ctx-stale', idempotencyKey: 'stale-action' }),
+  });
+  assert.equal(staleProposal.status, 409);
+  assert.equal((await staleProposal.json() as { code: string }).code, 'STALE_CONTEXT');
+  const unknownStep = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...proposalBody, stepId: 'unknown-step', idempotencyKey: 'unknown-step-action' }),
+  });
+  assert.equal(unknownStep.status, 400);
+
+  const prematureExecution = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'executing' }),
+  });
+  assert.equal(prematureExecution.status, 409);
+  assert.equal((await prematureExecution.json() as { code: string }).code, 'ACTION_TRANSITION_INVALID');
+  const wrongSource = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: proposed.manifest_sha256, authorizationSummary: 'confirmed', source: 'web' }),
+  });
+  assert.equal(wrongSource.status, 400);
+  const wrongManifest = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: '0'.repeat(64), authorizationSummary: 'confirmed', source: 'codex_conversation' }),
+  });
+  assert.equal(wrongManifest.status, 409);
+
+  const authorizationBody = {
+    expectedContextVersionId: run.current_context_version_id,
+    expectedManifestSha256: proposed.manifest_sha256,
+    authorizationSummary: '研究者确认执行该不可变 validator manifest。',
+    source: 'codex_conversation',
+    conversationRef: 'codex-task:test-actions',
+  };
+  const authorization = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(authorizationBody),
+  });
+  assert.equal(authorization.status, 200);
+  const authorized = await authorization.json() as { status: string; authorization_sha256: string };
+  assert.equal(authorized.status, 'authorized');
+  assert.match(authorized.authorization_sha256, /^[a-f0-9]{64}$/);
+  const repeatedAuthorization = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(authorizationBody),
+  });
+  assert.equal(repeatedAuthorization.status, 200);
+  const changedAuthorization = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...authorizationBody, authorizationSummary: 'different summary' }),
+  });
+  assert.equal(changedAuthorization.status, 409);
+  assert.equal((await changedAuthorization.json() as { code: string }).code, 'ACTION_AUTHORIZATION_CONFLICT');
+
+  const executing = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'executing' }),
+  });
+  assert.equal(executing.status, 200);
+
+  const artifactRelativePath = 'validator-output.json';
+  const artifactContent = '{"ok":true}\n';
+  fs.writeFileSync(path.join(workingDir, task.task_root_rel, artifactRelativePath), artifactContent, 'utf8');
+  const artifactBody = { location: 'local', path: artifactRelativePath, category: 'validation_report', idempotencyKey: 'artifact-once', metadata: { format: 'json' } };
+  const artifactResponse = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/artifacts`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(artifactBody),
+  });
+  assert.equal(artifactResponse.status, 201);
+  const artifact = await artifactResponse.json() as { id: string; size_bytes: number; sha256: string; path: string };
+  assert.equal(artifact.size_bytes, Buffer.byteLength(artifactContent));
+  assert.equal(artifact.path, artifactRelativePath);
+  assert.equal(artifact.sha256, crypto.createHash('sha256').update(artifactContent).digest('hex'));
+  const repeatedArtifact = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/artifacts`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(artifactBody),
+  });
+  assert.equal((await repeatedArtifact.json() as { id: string }).id, artifact.id);
+  const escapedArtifact = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/artifacts`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...artifactBody, path: '../outside.txt', idempotencyKey: 'artifact-escape' }),
+  });
+  assert.equal(escapedArtifact.status, 400);
+
+  const evidenceBody = { artifactId: artifact.id, validatorName: 'prepared-files', validatorVersion: '1.0.0', status: 'pass', result: { checks: 4, failures: 0 }, idempotencyKey: 'evidence-once' };
+  const evidenceResponse = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/evidence-checks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(evidenceBody),
+  });
+  assert.equal(evidenceResponse.status, 201);
+  const evidence = await evidenceResponse.json() as { id: string; status: string };
+  assert.equal(evidence.status, 'pass');
+  const repeatedEvidence = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/evidence-checks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(evidenceBody),
+  });
+  assert.equal((await repeatedEvidence.json() as { id: string }).id, evidence.id);
+  const conflictingEvidence = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/evidence-checks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...evidenceBody, result: { checks: 4, failures: 1 } }),
+  });
+  assert.equal(conflictingEvidence.status, 409);
+
+  for (const transition of [
+    { status: 'waiting_remote', result: { submitted: true } },
+    { status: 'executing', result: { reconciled: true } },
+    { status: 'succeeded', result: { evidenceCheckId: evidence.id } },
+  ]) {
+    const response = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/status`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(transition),
+    });
+    assert.equal(response.status, 200);
+  }
+  const terminalRewrite = await fetch(`${base}/api/agent/v1/actions/${proposed.id}/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'failed' }),
+  });
+  assert.equal(terminalRewrite.status, 409);
+
+  const actionDetail = await fetch(`${base}/api/agent/v1/actions/${proposed.id}`).then(response => response.json()) as { status: string; artifacts: unknown[]; evidenceChecks: unknown[] };
+  assert.equal(actionDetail.status, 'succeeded');
+  assert.equal(actionDetail.artifacts.length, 1);
+  assert.equal(actionDetail.evidenceChecks.length, 1);
+  const context = await fetch(`${base}/api/agent/v1/context/tasks/${task.id}`).then(response => response.json()) as { recentActions: unknown[]; recentArtifacts: unknown[]; recentEvidenceChecks: unknown[] };
+  assert.equal(context.recentActions.length, 1);
+  assert.equal(context.recentArtifacts.length, 1);
+  assert.equal(context.recentEvidenceChecks.length, 1);
+
+  const cliPlanShow = await runCli(['plan', 'show', '--plan', plan.id]);
+  assert.equal(cliPlanShow.code, 0, cliPlanShow.stderr);
+  const cliPlan = JSON.parse(cliPlanShow.stdout) as { content: string; sha256: string };
+  assert.match(cliPlan.sha256, /^[a-f0-9]{64}$/);
+  const planFile = path.join(tmpRoot, 'cli-plan.md');
+  fs.writeFileSync(planFile, cliPlan.content, 'utf8');
+  const cliPlanUpdate = await runCli(['plan', 'update', '--plan', plan.id, '--file', planFile, '--expected-sha', cliPlan.sha256]);
+  assert.equal(cliPlanUpdate.code, 0, cliPlanUpdate.stderr);
+  const stalePlanUpdate = await runCli(['plan', 'update', '--plan', plan.id, '--file', planFile, '--expected-sha', '0'.repeat(64)]);
+  assert.equal(stalePlanUpdate.code, 3);
+  assert.equal((JSON.parse(stalePlanUpdate.stderr) as { code: string }).code, 'STALE_PLAN');
+
+  const cliWorkflowShow = await runCli(['workflow', 'show', '--task', task.id]);
+  assert.equal(cliWorkflowShow.code, 0, cliWorkflowShow.stderr);
+  const cliWorkflow = JSON.parse(cliWorkflowShow.stdout) as { sha256: string } & Record<string, unknown>;
+  assert.match(cliWorkflow.sha256, /^[a-f0-9]{64}$/);
+  const workflowFile = path.join(tmpRoot, 'cli-workflow.json');
+  fs.writeFileSync(workflowFile, JSON.stringify(cliWorkflow), 'utf8');
+  const cliWorkflowUpdate = await runCli(['workflow', 'update', '--task', task.id, '--file', workflowFile, '--expected-sha', cliWorkflow.sha256]);
+  assert.equal(cliWorkflowUpdate.code, 0, cliWorkflowUpdate.stderr);
+  const staleWorkflowUpdate = await runCli(['workflow', 'update', '--task', task.id, '--file', workflowFile, '--expected-sha', '0'.repeat(64)]);
+  assert.equal(staleWorkflowUpdate.code, 3);
+  assert.equal((JSON.parse(staleWorkflowUpdate.stderr) as { code: string }).code, 'STALE_WORKFLOW');
+
+  const manifestFile = path.join(tmpRoot, 'cli-manifest.json');
+  fs.writeFileSync(manifestFile, JSON.stringify({ command: 'preflight' }), 'utf8');
+  const cliProposal = await runCli(['action', 'propose', '--run', run.id, '--context-version', run.current_context_version_id, '--step', stepId, '--type', 'local.preflight', '--manifest-file', manifestFile, '--idempotency-key', 'cli-action-once', '--conversation-ref', 'codex-task:test-cli']);
+  assert.equal(cliProposal.code, 0, cliProposal.stderr);
+  const cliAction = JSON.parse(cliProposal.stdout) as { id: string; manifest_sha256: string };
+  const cliAuthorization = await runCli(['action', 'authorize', '--action', cliAction.id, '--context-version', run.current_context_version_id, '--manifest-sha', cliAction.manifest_sha256, '--summary', '研究者确认 CLI manifest', '--conversation-ref', 'codex-task:test-cli']);
+  assert.equal(cliAuthorization.code, 0, cliAuthorization.stderr);
+  const cliBlockedTransition = await runCli(['action', 'status', '--action', cliAction.id, '--status', 'succeeded']);
+  assert.equal(cliBlockedTransition.code, 4);
+  assert.equal((JSON.parse(cliBlockedTransition.stderr) as { code: string }).code, 'ACTION_TRANSITION_INVALID');
+  const cliList = await runCli(['action', 'list', '--run', run.id]);
+  assert.equal(cliList.code, 0, cliList.stderr);
+  assert.equal((JSON.parse(cliList.stdout) as unknown[]).length, 2);
+
+  fs.writeFileSync(planFile, `${cliPlan.content}\nChanged outside the adopted context.\n`, 'utf8');
+  const driftPlanUpdate = await runCli(['plan', 'update', '--plan', plan.id, '--file', planFile, '--expected-sha', cliPlan.sha256]);
+  assert.equal(driftPlanUpdate.code, 0, driftPlanUpdate.stderr);
+  const blockedByDrift = await runCli(['action', 'propose', '--run', run.id, '--context-version', run.current_context_version_id, '--step', stepId, '--type', 'local.preflight', '--manifest-file', manifestFile, '--idempotency-key', 'after-source-drift']);
+  assert.equal(blockedByDrift.code, 4);
+  assert.equal((JSON.parse(blockedByDrift.stderr) as { code: string }).code, 'CONTEXT_DRIFT');
+});
+
+test('researcher conclusions and promoted experiences stay evidence-bound and Codex-sourced', async () => {
+  const workingDir = path.join(tmpRoot, 'conclusion-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const project = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Conclusion fixture', working_dir: workingDir }),
+  }).then(response => response.json()) as { id: string };
+  const task = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Conclusion route', workflow_id: 'qe-w90-triqs-spontaneous-magnetic-oneshot' }),
+  }).then(response => response.json()) as { id: string; task_root_rel: string };
+  const taskRoot = path.join(workingDir, task.task_root_rel);
+  const evidencePath = path.join(taskRoot, 'check', 'conclusion-evidence.json');
+  fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+  const evidenceContent = '{"validator":"fixture","status":"pass"}\n';
+  fs.writeFileSync(evidencePath, evidenceContent, 'utf8');
+  const plan = await fetch(`${base}/api/research-plans`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Conclusion Plan', project_id: project.id, content: '# Conclusion Plan' }),
+  }).then(response => response.json()) as { id: string };
+  assert.equal((await fetch(`${base}/api/research-plans/${plan.id}/contract/initialize`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 201);
+  const run = await fetch(`${base}/api/agent/v1/runs`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'conclusion-run' }),
+  }).then(response => response.json()) as { id: string; current_context_version_id: string };
+  const action = await fetch(`${base}/api/agent/v1/runs/${run.id}/actions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ contextVersionId: run.current_context_version_id, stepId: 'qenm-check-01', actionType: 'fixture.validation', manifest: { schemaVersion: 1, output: 'check/conclusion-evidence.json' }, idempotencyKey: 'conclusion-action' }),
+  }).then(response => response.json()) as { id: string; manifest_sha256: string };
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${action.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: action.manifest_sha256, authorizationSummary: '研究者确认 fixture validator', source: 'codex_conversation' }),
+  })).status, 200);
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${action.id}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'executing' }) })).status, 200);
+  const artifact = await fetch(`${base}/api/agent/v1/actions/${action.id}/artifacts`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ location: 'local', path: 'check/conclusion-evidence.json', category: 'validation_report', idempotencyKey: 'conclusion-evidence' }),
+  }).then(response => response.json()) as { id: string; sha256: string };
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${action.id}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'succeeded' }) })).status, 200);
+
+  const genericConclusion = await fetch(`${base}/api/agent/v1/runs/${run.id}/events`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ category: 'conclusion', eventType: 'bypass', actorType: 'researcher' }),
+  });
+  assert.equal(genericConclusion.status, 400);
+  assert.equal((await genericConclusion.json() as { code: string }).code, 'CONCLUSION_ENDPOINT_REQUIRED');
+  const noConversationSource = await fetch(`${base}/api/agent/v1/runs/${run.id}/conclusions`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ summary: 'fixture conclusion', artifactIds: [artifact.id], idempotencyKey: 'conclusion-one' }),
+  });
+  assert.equal(noConversationSource.status, 400);
+
+  const conclusionResult = await runCli(['conclusion', 'record', '--run', run.id, '--summary', '研究者确认 fixture 证据通过', '--artifacts', artifact.id, '--idempotency-key', 'conclusion-one', '--conversation-ref', 'codex-task:conclusion-test']);
+  assert.equal(conclusionResult.code, 0, conclusionResult.stderr);
+  const conclusion = JSON.parse(conclusionResult.stdout) as { id: string; category: string; payload: { conclusionSha256: string } };
+  assert.equal(conclusion.category, 'conclusion');
+  assert.match(conclusion.payload.conclusionSha256, /^[a-f0-9]{64}$/);
+
+  const experienceContentFile = path.join(tmpRoot, 'promoted-experience.md');
+  fs.writeFileSync(experienceContentFile, '由研究者确认的 fixture 经验。\n', 'utf8');
+  fs.writeFileSync(evidencePath, `${evidenceContent.trimEnd()} changed\n`, 'utf8');
+  const driftedPromotion = await runCli(['experience', 'promote', '--run', run.id, '--conclusion', conclusion.id, '--artifacts', artifact.id, '--title', 'Fixture evidence lesson', '--content-file', experienceContentFile, '--idempotency-key', 'promotion-one']);
+  assert.equal(driftedPromotion.code, 3);
+  assert.equal((JSON.parse(driftedPromotion.stderr) as { code: string }).code, 'EVIDENCE_SOURCE_DRIFT');
+  fs.writeFileSync(evidencePath, evidenceContent, 'utf8');
+  const promotion = await runCli(['experience', 'promote', '--run', run.id, '--conclusion', conclusion.id, '--artifacts', artifact.id, '--title', 'Fixture evidence lesson', '--content-file', experienceContentFile, '--tags', 'fixture,validated', '--idempotency-key', 'promotion-one', '--conversation-ref', 'codex-task:conclusion-test']);
+  assert.equal(promotion.code, 0, promotion.stderr);
+  const promoted = JSON.parse(promotion.stdout) as { id: string; promoted: number };
+  assert.equal(promoted.promoted, 1);
+  const repeated = await runCli(['experience', 'promote', '--run', run.id, '--conclusion', conclusion.id, '--artifacts', artifact.id, '--title', 'Fixture evidence lesson', '--content-file', experienceContentFile, '--tags', 'fixture,validated', '--idempotency-key', 'promotion-one', '--conversation-ref', 'codex-task:conclusion-test']);
+  assert.equal(repeated.code, 0, repeated.stderr);
+  assert.equal((JSON.parse(repeated.stdout) as { id: string }).id, promoted.id);
+  const conflictingPromotion = await runCli(['experience', 'promote', '--run', run.id, '--conclusion', conclusion.id, '--artifacts', artifact.id, '--title', 'Different lesson', '--content-file', experienceContentFile, '--tags', 'fixture,validated', '--idempotency-key', 'promotion-one', '--conversation-ref', 'codex-task:conclusion-test']);
+  assert.equal(conflictingPromotion.code, 3);
+  assert.equal((JSON.parse(conflictingPromotion.stderr) as { code: string }).code, 'EXPERIENCE_PROMOTION_IDEMPOTENCY_CONFLICT');
+  assert.equal((await fetch(`${base}/api/experiences/${promoted.id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'mutated' }) })).status, 409);
+  assert.equal((await fetch(`${base}/api/experiences/${promoted.id}`, { method: 'DELETE' })).status, 409);
+  const provenance = await fetch(`${base}/api/experiences/${promoted.id}/provenance`).then(response => response.json()) as { run_id: string; artifacts: { artifact_sha256: string }[] };
+  assert.equal(provenance.run_id, run.id);
+  assert.equal(provenance.artifacts[0].artifact_sha256, artifact.sha256);
+
+  const library = await fetch(`${base}/api/agent/v1/evidence-library?projectId=${project.id}&taskId=${task.id}&location=local`).then(response => response.json()) as Array<{ id: string; project_name: string; task_id: string; local_available: boolean; checks: unknown[] }>;
+  const indexedArtifact = library.find(item => item.id === artifact.id);
+  assert.ok(indexedArtifact);
+  assert.equal(indexedArtifact.task_id, task.id);
+  assert.equal(indexedArtifact.local_available, true);
+
+  const candidateFile = path.join(tmpRoot, 'candidate-experience.md');
+  fs.writeFileSync(candidateFile, '条件：fixture validator。现象：输出哈希漂移。处理：重新生成 manifest 后再验证。适用边界：仅相同 validator 版本。\n', 'utf8');
+  const captured = await runCli(['experience', 'capture', '--run', run.id, '--step', 'qenm-check-01', '--title', 'Fixture validator hash drift', '--content-file', candidateFile, '--tags', 'fixture,hash-drift', '--idempotency-key', 'candidate-one', '--conversation-ref', 'codex-task:conclusion-test']);
+  assert.equal(captured.code, 0, captured.stderr);
+  const candidate = JSON.parse(captured.stdout) as { id: string; tags: string };
+  assert.match(candidate.id, /^exp-codex-/);
+  assert.ok((JSON.parse(candidate.tags) as string[]).includes('codex-captured'));
+  const repeatedCapture = await runCli(['experience', 'capture', '--run', run.id, '--step', 'qenm-check-01', '--title', 'Fixture validator hash drift', '--content-file', candidateFile, '--tags', 'fixture,hash-drift', '--idempotency-key', 'candidate-one']);
+  assert.equal(repeatedCapture.code, 0, repeatedCapture.stderr);
+  assert.equal((JSON.parse(repeatedCapture.stdout) as { id: string }).id, candidate.id);
+  const searchExperience = await runCli(['experience', 'search', '--task', task.id, '--query', 'hash drift']);
+  assert.equal(searchExperience.code, 0, searchExperience.stderr);
+  assert.ok((JSON.parse(searchExperience.stdout) as Array<{ id: string }>).some(item => item.id === candidate.id));
+});
+
+test('generic executor runs different materials and workflows without product adapters', async () => {
+  const executionContract = await fetch(`${base}/api/agent/v1/execution-contract`).then(response => response.json()) as { capabilities: string[] };
+  assert.deepEqual(executionContract.capabilities, ['local.process', 'remote.inspect', 'remote.task-root.create', 'files.upload', 'files.download', 'job.submit', 'job.cancel']);
+  assert.doesNotMatch(JSON.stringify(executionContract), /cacro3|material|qe|wien/i);
+
+  const createFixture = async (fixture: { material: string; workflowId: string; stepId: string; token: string }) => {
+    const workingDir = path.join(tmpRoot, `generic-${fixture.material}`);
+    fs.mkdirSync(workingDir, { recursive: true });
+    const project = await fetch(`${base}/api/projects`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: `${fixture.material} project`, material: fixture.material, working_dir: workingDir }),
+    }).then(response => response.json()) as { id: string };
+    const task = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: `${fixture.material} validation`, workflow_id: fixture.workflowId }),
+    }).then(response => response.json()) as { id: string; task_root_rel: string };
+    const taskRoot = path.join(workingDir, task.task_root_rel);
+    fs.mkdirSync(path.join(taskRoot, 'check'), { recursive: true });
+    fs.mkdirSync(path.join(taskRoot, 'inputs'), { recursive: true });
+    fs.writeFileSync(path.join(taskRoot, 'check', 'validate.py'), `print(${JSON.stringify(fixture.token)})\n`, 'utf8');
+    fs.writeFileSync(path.join(taskRoot, 'check', 'fail.py'), "import sys\nprint('fixture failed', file=sys.stderr)\nsys.exit(2)\n", 'utf8');
+    fs.writeFileSync(path.join(taskRoot, 'inputs', 'parameters.json'), JSON.stringify({ material: fixture.material }), 'utf8');
+    const plan = await fetch(`${base}/api/research-plans`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: `${fixture.material} plan`, project_id: project.id, content: `# ${fixture.material} plan` }),
+    }).then(response => response.json()) as { id: string };
+    assert.equal((await fetch(`${base}/api/research-plans/${plan.id}/contract/initialize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    })).status, 201);
+    const run = await fetch(`${base}/api/agent/v1/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: `${fixture.material}-run` }),
+    }).then(response => response.json()) as { id: string; current_context_version_id: string };
+    return { ...fixture, taskRoot, run };
+  };
+
+  const fixtures = [
+    await createFixture({ material: 'Material-A', workflowId: 'qe-w90-triqs-spontaneous-magnetic-oneshot', stepId: 'qenm-prep-03', token: 'A_READY' }),
+    await createFixture({ material: 'Material-B', workflowId: 'wien2k-dmftproj-triqs-oneshot', stepId: 'wien-prep-02', token: 'B_READY' }),
+  ];
+
+  for (const [index, fixture] of fixtures.entries()) {
+    const specFile = path.join(tmpRoot, `${fixture.material}-spec.json`);
+    fs.writeFileSync(specFile, JSON.stringify({
+      executable: pythonExecutable,
+      scriptPath: 'check/validate.py',
+      inputPaths: ['inputs'],
+      stdoutIncludes: [fixture.token],
+      validatorName: `${fixture.material}-validator`,
+    }), 'utf8');
+    const proposal = await runCli([
+      'action', 'prepare', '--run', fixture.run.id, '--context-version', fixture.run.current_context_version_id,
+      '--step', fixture.stepId, '--capability', 'local.process', '--spec-file', specFile,
+      '--idempotency-key', `${fixture.material}-validate`, '--conversation-ref', `codex-task:${fixture.material}`,
+    ]);
+    assert.equal(proposal.code, 0, proposal.stderr);
+    const action = JSON.parse(proposal.stdout) as {
+      id: string; status: string; manifest_sha256: string;
+      manifest: { capability: string; inputSnapshot: { sha256: string }; receipt: { path: string } };
+    };
+    assert.equal(action.status, 'proposed');
+    assert.equal(action.manifest.capability, 'local.process');
+    assert.equal(Object.hasOwn(action.manifest, 'adapter'), false);
+    assert.match(action.manifest.inputSnapshot.sha256, /^[a-f0-9]{64}$/);
+    const premature = await runCli(['action', 'execute', '--action', action.id]);
+    assert.equal(premature.code, 4);
+    assert.equal((JSON.parse(premature.stderr) as { code: string }).code, 'ACTION_NOT_AUTHORIZED');
+    const authorization = await runCli([
+      'action', 'authorize', '--action', action.id, '--context-version', fixture.run.current_context_version_id,
+      '--manifest-sha', action.manifest_sha256, '--summary', `研究者确认 ${fixture.material} 通用 manifest`,
+      '--conversation-ref', `codex-task:${fixture.material}`,
+    ]);
+    assert.equal(authorization.code, 0, authorization.stderr);
+
+    const inputPath = path.join(fixture.taskRoot, 'inputs', 'parameters.json');
+    const authorizedInput = fs.readFileSync(inputPath, 'utf8');
+    if (index === 0) {
+      fs.writeFileSync(inputPath, `${authorizedInput}\n`, 'utf8');
+      const drift = await fetch(`${base}/api/agent/v1/actions/${action.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      assert.equal(drift.status, 409);
+      assert.equal((await drift.json() as { code: string }).code, 'EXECUTION_INPUT_DRIFT');
+      fs.writeFileSync(inputPath, authorizedInput, 'utf8');
+    }
+
+    const execution = await runCli(['action', 'execute', '--action', action.id]);
+    assert.equal(execution.code, 0, execution.stderr);
+    const completed = JSON.parse(execution.stdout) as { status: string; artifacts: { path: string }[]; evidenceChecks: { status: string }[] };
+    assert.equal(completed.status, 'succeeded', JSON.stringify(completed));
+    assert.equal(completed.evidenceChecks[0].status, 'pass');
+    assert.ok(fs.existsSync(path.join(fixture.taskRoot, action.manifest.receipt.path)));
+  }
+
+  const recoveryFixture = fixtures[1];
+  const recoverySpec = path.join(tmpRoot, 'generic-recovery-spec.json');
+  fs.writeFileSync(recoverySpec, JSON.stringify({ executable: pythonExecutable, scriptPath: 'check/validate.py', validatorName: 'generic-recovery' }), 'utf8');
+  const recoveryProposal = await runCli([
+    'action', 'prepare', '--run', recoveryFixture.run.id, '--context-version', recoveryFixture.run.current_context_version_id,
+    '--step', recoveryFixture.stepId, '--capability', 'local.process', '--spec-file', recoverySpec,
+    '--idempotency-key', 'generic-recovery',
+  ]);
+  const recoveryAction = JSON.parse(recoveryProposal.stdout) as { id: string; manifest_sha256: string };
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${recoveryAction.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedContextVersionId: recoveryFixture.run.current_context_version_id, expectedManifestSha256: recoveryAction.manifest_sha256, authorizationSummary: '研究者确认恢复门禁测试', source: 'codex_conversation' }),
+  })).status, 200);
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${recoveryAction.id}/status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'executing' }),
+  })).status, 200);
+  const uncertainRecovery = await fetch(`${base}/api/agent/v1/actions/${recoveryAction.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(uncertainRecovery.status, 409);
+  assert.equal((await uncertainRecovery.json() as { code: string }).code, 'EXECUTION_RECOVERY_UNCERTAIN');
+  const recoveryReviews = await fetch(`${base}/api/agent/v1/reviews?runId=${recoveryFixture.run.id}`).then(response => response.json()) as { gate_type: string; status: string }[];
+  assert.ok(recoveryReviews.some(review => review.gate_type === 'execution_recovery_uncertain' && review.status === 'open'));
+
+  const failingFixture = fixtures[0];
+  const failureSpec = path.join(tmpRoot, 'generic-failure-spec.json');
+  fs.writeFileSync(failureSpec, JSON.stringify({ executable: pythonExecutable, scriptPath: 'check/fail.py', validatorName: 'generic-failure' }), 'utf8');
+  const failureProposal = await runCli([
+    'action', 'prepare', '--run', failingFixture.run.id, '--context-version', failingFixture.run.current_context_version_id,
+    '--step', failingFixture.stepId, '--capability', 'local.process', '--spec-file', failureSpec,
+    '--idempotency-key', 'generic-failure',
+  ]);
+  const failingAction = JSON.parse(failureProposal.stdout) as { id: string; manifest_sha256: string };
+  assert.equal((await fetch(`${base}/api/agent/v1/actions/${failingAction.id}/authorize`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedContextVersionId: failingFixture.run.current_context_version_id, expectedManifestSha256: failingAction.manifest_sha256, authorizationSummary: '研究者确认失败分支测试', source: 'codex_conversation' }),
+  })).status, 200);
+  const failed = await fetch(`${base}/api/agent/v1/actions/${failingAction.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(response => response.json()) as { status: string; evidenceChecks: { status: string }[] };
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.evidenceChecks[0].status, 'fail');
+  const reviews = await fetch(`${base}/api/agent/v1/reviews?runId=${failingFixture.run.id}`).then(response => response.json()) as { gate_type: string; status: string }[];
+  assert.ok(reviews.some(review => review.gate_type === 'execution_failed' && review.status === 'open'));
 });
 
 test('policy activation rejects lower-scope privilege expansion', async () => {
@@ -575,8 +1073,8 @@ test('contract strictness rejects removed parameter bounds, stages, evidence and
   assert.ok(result.expansions.includes('parameter:U:removed'));
 });
 
-test('LSF capability parser recognizes the real Spectrum LSF banner', async () => {
-  const { isProtectedRelativePath, parseLsfScheduler, smokeBudgetAllowsOneCoreMinute } = await import('../server/services/remote.js');
+test('LSF capability and resource parsers recognize the bounded remote contract', async () => {
+  const { isProtectedRelativePath, parseLsfResources, parseLsfScheduler, smokeBudgetAllowsOneCoreMinute } = await import('../server/services/remote.js');
   const banner = 'IBM Spectrum LSF Standard 10.1.0.8, May 10 2019';
   assert.equal(parseLsfScheduler([banner]), banner);
   assert.equal(isProtectedRelativePath('results/final.h5', ['results']), true);
@@ -589,6 +1087,203 @@ test('LSF capability parser recognizes the real Spectrum LSF banner', async () =
   const policy = { schemaVersion: 1 as const, remoteEnabled: true, smokeAuthorized: true, allowedOperations: [], allowedHosts: [], allowedMethods: [], limits: { ...contract.resourceBudget }, protectedPaths: ['results'], humanGates: [] };
   assert.equal(smokeBudgetAllowsOneCoreMinute(policy, contract), true);
   assert.equal(smokeBudgetAllowsOneCoreMinute({ ...policy, limits: { ...policy.limits, maxWallMinutes: 0.5 } }, contract), false);
+  assert.deepEqual(parseLsfResources('#BSUB -q snode\n#BSUB -n 64\n#BSUB -W 04:00\n'), { queue: 'snode', cores: 64, wallMinutes: 240 });
+  assert.throws(() => parseLsfResources('#BSUB -n 64\n'), (error: { code?: string }) => error.code === 'LSF_RESOURCES_INCOMPLETE');
+});
+
+test('authorized generic LSF submission is single-shot and uncertain responses reconcile without resubmission', async () => {
+  const userReadRoot = '/pilot/user';
+  const projectRoot = '/pilot/user/project-remote';
+  const taskWriteRoot = '/pilot/user/project-remote/tk001-generic';
+  const systemRemotePolicy = {
+    schemaVersion: 1, remoteEnabled: true, smokeAuthorized: false,
+    allowedOperations: ['context', 'event.append', 'review.request', 'remote.inspect', 'remote.task-root.create', 'files.upload', 'files.download', 'job.submit', 'job.status', 'job.logs', 'job.reconcile', 'job.cancel'],
+    allowedHosts: ['pilot'], allowedMethods: ['qe-scf'],
+    remoteReadRoot: userReadRoot, remoteProjectRoot: userReadRoot, remoteWriteRoot: userReadRoot,
+    limits: { maxCoresPerJob: 64, maxWallMinutes: 240, maxConcurrentJobs: 2, maxAutomaticRetries: 0 },
+    protectedPaths: ['results'], humanGates: ['final_interpretation'],
+  };
+  assert.equal((await fetch(`${base}/api/agent/v1/policies`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scopeType: 'system', policy: systemRemotePolicy, activate: true }),
+  })).status, 201);
+
+  const workingDir = path.join(tmpRoot, 'generic-remote-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const project = await fetch(`${base}/api/projects`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Remote material fixture', material: 'Material-Remote', working_dir: workingDir }),
+  }).then(response => response.json()) as { id: string };
+  const task = await fetch(`${base}/api/projects/${project.id}/tasks`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Generic remote route', workflow_id: 'qe-w90-triqs-spontaneous-magnetic-oneshot' }),
+  }).then(response => response.json()) as { id: string; task_root_rel: string };
+  const hpcConfig = {
+    schemaVersion: 2,
+    profiles: [{ id: 'pilot-profile', name: 'Pilot cluster', sshAlias: 'pilot', userRoot: userReadRoot, projectRoot, scheduler: 'LSF', notes: '' }],
+    defaultProfileId: 'pilot-profile',
+    taskBindings: [{ taskId: task.id, profileId: 'pilot-profile', taskRootRel: 'tk001-generic' }],
+  };
+  assert.equal((await fetch(`${base}/api/projects/${project.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hpc_config: JSON.stringify(hpcConfig) }),
+  })).status, 200);
+  assert.equal((await fetch(`${base}/api/agent/v1/remote/tasks/${task.id}/inspect`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: 'pilot', remoteRoot: userReadRoot }),
+  })).status, 404);
+  const taskRemotePolicy = {
+    ...systemRemotePolicy,
+    remoteReadRoot: userReadRoot,
+    remoteProjectRoot: projectRoot,
+    remoteWriteRoot: taskWriteRoot,
+  };
+  assert.equal((await fetch(`${base}/api/agent/v1/policies`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scopeType: 'task', scopeId: task.id, policy: taskRemotePolicy, activate: true }),
+  })).status, 201);
+
+  const taskRoot = path.join(workingDir, task.task_root_rel);
+  fs.mkdirSync(path.join(taskRoot, 'jobs'), { recursive: true });
+  fs.mkdirSync(path.join(taskRoot, 'inputs'), { recursive: true });
+  fs.writeFileSync(path.join(taskRoot, 'jobs', 'run.lsf'), '#!/bin/sh\n#BSUB -J fixture\n#BSUB -q snode\n#BSUB -n 64\n#BSUB -W 04:00\necho fixture\n', 'utf8');
+  fs.writeFileSync(path.join(taskRoot, 'inputs', 'model.dat'), 'fixture input\n', 'utf8');
+  const plan = await fetch(`${base}/api/research-plans`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Generic remote plan', project_id: project.id, content: '# Remote Plan' }),
+  }).then(response => response.json()) as { id: string };
+  assert.equal((await fetch(`${base}/api/research-plans/${plan.id}/contract/initialize`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 201);
+  const currentContract = await fetch(`${base}/api/research-plans/${plan.id}/contract`).then(response => response.json()) as { contract: any; planSha256: string };
+  const scientificContract = {
+    ...currentContract.contract,
+    boundaries: { ...currentContract.contract.boundaries, allowedSoftwareStacks: ['qe'], allowedMethods: ['qe-scf'] },
+    resourceBudget: { maxCoresPerJob: 64, maxWallMinutes: 240, maxConcurrentJobs: 2, maxAutomaticRetries: 0 },
+  };
+  assert.equal((await fetch(`${base}/api/research-plans/${plan.id}/contract`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: stringifyYaml(scientificContract), expectedPlanSha256: currentContract.planSha256 }),
+  })).status, 200);
+  const run = await fetch(`${base}/api/agent/v1/runs`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'remote-run' }),
+  }).then(response => response.json()) as { id: string; current_context_version_id: string };
+
+  const { setRemoteProcessRunnerForTests } = await import('../server/services/remote.js');
+  let bsubCalls = 0;
+  let uncertainJobName = '';
+  setRemoteProcessRunnerForTests(async (command, args) => {
+    assert.equal(command, 'ssh');
+    const remoteCommand = args.at(-1) ?? '';
+    if (remoteCommand.includes('mkdir -- "$target"')) {
+      return { code: 0, stdout: `PROJECT_ROOT=${projectRoot}\nTASK_ROOT=${taskWriteRoot}\nCREATED=1\n`, stderr: '' };
+    }
+    if (remoteCommand.includes('sha256sum')) {
+      assert.match(remoteCommand, /jobs\/run\.lsf/);
+      assert.match(remoteCommand, /inputs\/model\.dat/);
+      return { code: 0, stdout: 'VERIFIED_FILES=2\n', stderr: '' };
+    }
+    if (remoteCommand.includes('bsub -J')) {
+      bsubCalls += 1;
+      return bsubCalls === 1
+        ? { code: 0, stdout: 'Job <4242> is submitted to queue <snode>.\n', stderr: '' }
+        : { code: 255, stdout: '', stderr: 'connection closed after request\n' };
+    }
+    if (remoteCommand.includes('bjobs -a -J')) return { code: 0, stdout: `5252 RUN ${uncertainJobName}\n`, stderr: '' };
+    if (remoteCommand.includes('bjobs -noheader -o stat')) return { code: 0, stdout: 'DONE\n', stderr: '' };
+    return { code: 1, stdout: '', stderr: `unexpected fixture command: ${remoteCommand}` };
+  });
+  try {
+    const taskRootActionResponse = await fetch(`${base}/api/agent/v1/runs/${run.id}/executable-actions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contextVersionId: run.current_context_version_id,
+        stepId: 'qenm-prep-02',
+        capability: 'remote.task-root.create',
+        spec: { host: 'pilot', remoteRoot: taskWriteRoot },
+        idempotencyKey: 'create-remote-task-root',
+        conversationRef: 'codex-task:remote-test',
+      }),
+    });
+    assert.equal(taskRootActionResponse.status, 201);
+    const taskRootAction = await taskRootActionResponse.json() as { id: string; manifest_sha256: string; manifest: { remote: { root: string }; executionPreview: { commands: string[] } } };
+    assert.equal(taskRootAction.manifest.remote.root, taskWriteRoot);
+    assert.match(taskRootAction.manifest.executionPreview.commands[0], /tk001-generic/);
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${taskRootAction.id}/authorize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: taskRootAction.manifest_sha256, authorizationSummary: '研究者确认创建精确远程 Task 根 fixture', source: 'codex_conversation' }),
+    })).status, 200);
+    const taskRootCreated = await fetch(`${base}/api/agent/v1/actions/${taskRootAction.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(response => response.json()) as { status: string };
+    assert.equal(taskRootCreated.status, 'succeeded');
+
+    const readProposal = await fetch(`${base}/api/agent/v1/runs/${run.id}/executable-actions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contextVersionId: run.current_context_version_id, stepId: 'qenm-prep-02', capability: 'files.download', spec: { host: 'pilot', remoteRoot: userReadRoot, remotePath: 'shared/reference.dat', localPath: 'inputs/reference.dat' }, idempotencyKey: 'read-user-root' }),
+    });
+    assert.equal(readProposal.status, 201);
+    const escapedRead = await fetch(`${base}/api/agent/v1/runs/${run.id}/executable-actions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contextVersionId: run.current_context_version_id, stepId: 'qenm-prep-02', capability: 'files.download', spec: { host: 'pilot', remoteRoot: '/pilot/other-user', remotePath: 'reference.dat', localPath: 'inputs/outside.dat' }, idempotencyKey: 'read-outside-user-root' }),
+    });
+    assert.equal(escapedRead.status, 403);
+    assert.equal((await escapedRead.json() as { code: string }).code, 'REMOTE_READ_ROOT_DENIED');
+    const escapedWrite = await fetch(`${base}/api/agent/v1/runs/${run.id}/executable-actions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contextVersionId: run.current_context_version_id, stepId: 'qenm-prep-02', capability: 'files.upload', spec: { host: 'pilot', remoteRoot: projectRoot, remotePath: 'other-task/input.dat', localPath: 'inputs/model.dat' }, idempotencyKey: 'write-project-root' }),
+    });
+    assert.equal(escapedWrite.status, 403);
+    assert.equal((await escapedWrite.json() as { code: string }).code, 'REMOTE_WRITE_ROOT_DENIED');
+
+    const propose = async (key: string) => fetch(`${base}/api/agent/v1/runs/${run.id}/executable-actions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contextVersionId: run.current_context_version_id,
+        stepId: 'qenm-dft-02',
+        capability: 'job.submit',
+        spec: {
+          host: 'pilot',
+          remoteRoot: taskWriteRoot,
+          method: 'qe-scf',
+          softwareStack: 'qe',
+          remoteWorkdir: 'material-remote',
+          localScriptPath: 'jobs/run.lsf',
+          remoteScriptPath: 'jobs/run.lsf',
+          remoteInputs: [{ localPath: 'inputs/model.dat', remotePath: 'inputs/model.dat' }],
+        },
+        idempotencyKey: key,
+        conversationRef: 'codex-task:remote-test',
+      }),
+    }).then(response => response.json()) as Promise<{ id: string; manifest_sha256: string; manifest: { submission: { resources: { cores: number; wallMinutes: number } } } }>;
+    const first = await propose('scientific-submit-one');
+    assert.deepEqual(first.manifest.submission.resources, { queue: 'snode', cores: 64, wallMinutes: 240 });
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${first.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 409);
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${first.id}/authorize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: first.manifest_sha256, authorizationSummary: '研究者确认 64 核 4 小时 SCF fixture', source: 'codex_conversation' }),
+    })).status, 200);
+    const submitted = await fetch(`${base}/api/agent/v1/actions/${first.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(response => response.json()) as { status: string; remoteJob: { id: string; job_id: string } };
+    assert.equal(submitted.status, 'waiting_remote');
+    assert.equal(submitted.remoteJob.job_id, '4242');
+    assert.equal((await fetch(`${base}/api/agent/v1/remote/jobs/${submitted.remoteJob.id}/cancel`, { method: 'POST' })).status, 404);
+    const observed = await fetch(`${base}/api/agent/v1/remote/jobs/${submitted.remoteJob.id}/status`, { method: 'POST' }).then(response => response.json()) as { status: string };
+    assert.equal(observed.status, 'done');
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${first.id}`).then(response => response.json()) as { status: string }).status, 'succeeded');
+
+    const uncertain = await propose('scientific-submit-uncertain');
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${uncertain.id}/authorize`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedContextVersionId: run.current_context_version_id, expectedManifestSha256: uncertain.manifest_sha256, authorizationSummary: '研究者确认第二个 SCF fixture', source: 'codex_conversation' }),
+    })).status, 200);
+    const uncertainAction = await fetch(`${base}/api/agent/v1/actions/${uncertain.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(response => response.json()) as { status: string; remoteJob: { id: string; job_name: string; status: string } };
+    assert.equal(uncertainAction.status, 'waiting_user');
+    assert.equal(uncertainAction.remoteJob.status, 'submission_uncertain');
+    assert.match(uncertainAction.remoteJob.job_name, /^wb-action-/);
+    assert.doesNotMatch(uncertainAction.remoteJob.job_name, /material|qe|scf/i);
+    uncertainJobName = uncertainAction.remoteJob.job_name;
+    const reconciled = await fetch(`${base}/api/agent/v1/remote/jobs/${uncertainAction.remoteJob.id}/reconcile`, { method: 'POST' }).then(response => response.json()) as { job_id: string; status: string };
+    assert.equal(reconciled.job_id, '5252');
+    assert.equal(reconciled.status, 'done');
+    assert.equal((await fetch(`${base}/api/agent/v1/actions/${uncertain.id}`).then(response => response.json()) as { status: string }).status, 'succeeded');
+    assert.equal(bsubCalls, 2);
+  } finally {
+    setRemoteProcessRunnerForTests(null);
+  }
 });
 
 test('research plan metadata survives project-scoped schema migration', () => {
@@ -639,13 +1334,23 @@ test('research plan metadata survives project-scoped schema migration', () => {
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'research_plans'",
   ).get() as { sql: string };
   const reviewColumns = verifyDb.prepare('PRAGMA table_info(review_requests)').all() as { name: string }[];
+  const remoteJobColumns = verifyDb.prepare('PRAGMA table_info(remote_jobs)').all() as { name: string }[];
+  const v2Tables = new Set((verifyDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(item => item.name));
   const userVersion = verifyDb.pragma('user_version', { simple: true }) as number;
   verifyDb.close();
 
   assert.equal(row?.project_id, 'proj-existing');
   assert.match(schema.sql.replace(/\s+/g, ''), /UNIQUE\(project_id,file_name\)/i);
-  assert.equal(userVersion, 2);
+  assert.equal(userVersion, 4);
   assert.ok(reviewColumns.some(column => column.name === 'idempotency_key'));
+  assert.ok(reviewColumns.some(column => column.name === 'source'));
+  assert.ok(remoteJobColumns.some(column => column.name === 'action_id'));
+  assert.ok(remoteJobColumns.some(column => column.name === 'execution_manifest_sha256'));
+  assert.ok(v2Tables.has('run_actions'));
+  assert.ok(v2Tables.has('run_artifacts'));
+  assert.ok(v2Tables.has('evidence_checks'));
+  assert.ok(v2Tables.has('experience_promotions'));
+  assert.ok(v2Tables.has('experience_promotion_artifacts'));
   assert.ok(
     fs.existsSync(path.join(tmpRoot, 'migration.before-research-plans-v3.db')),
     'migration should create a database backup',
@@ -654,4 +1359,25 @@ test('research plan metadata survives project-scoped schema migration', () => {
     fs.existsSync(path.join(tmpRoot, 'migration.before-agent-v1.db')),
     'Agent V1 migration should create a one-time consistency backup',
   );
+  const v1BackupPath = path.join(tmpRoot, 'migration.before-workbench-v2.db');
+  assert.ok(fs.existsSync(v1BackupPath), 'Workbench V2 migration should preserve the V1 schema first');
+
+  const v1UpgradePath = path.join(tmpRoot, 'migration-from-v1.db');
+  fs.copyFileSync(v1BackupPath, v1UpgradePath);
+  const v1UpgradeScript = `
+    process.env.WORKBENCH_DB_PATH = ${JSON.stringify(v1UpgradePath)};
+    const { closeDb } = await import(${JSON.stringify(dbModuleUrl)});
+    closeDb();
+  `;
+  const upgradedFromV1 = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', '--input-type=module', '--eval', v1UpgradeScript],
+    { cwd: ROOT, encoding: 'utf-8' },
+  );
+  assert.equal(upgradedFromV1.status, 0, upgradedFromV1.stderr);
+  const verifyV1Upgrade = new Database(v1UpgradePath, { readonly: true });
+  assert.equal(verifyV1Upgrade.pragma('user_version', { simple: true }), 4);
+  assert.equal(verifyV1Upgrade.pragma('integrity_check', { simple: true }), 'ok');
+  assert.ok(verifyV1Upgrade.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_actions'").get());
+  verifyV1Upgrade.close();
 });

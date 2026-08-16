@@ -2,10 +2,11 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import os from 'os';
 import db from '../db.js';
-import type { AgentPolicyDocument, RemoteCapabilityReport, RemoteJob, ResearchContract } from '../../src/types/index.js';
-import { AgentCoreError, appendEvent, createReview, effectivePolicy, hashJson, newId, normalizeRemoteRoot, now, parseContract, stableJson } from './agentCore.js';
+import type { AgentPolicyDocument, RemoteCapabilityReport, RemoteJob, ResearchContract, RunAction } from '../../src/types/index.js';
+import { AgentCoreError, appendEvent, createReview, effectivePolicy, hashJson, newId, normalizeRemoteRoot, now, parseContract, policyRemoteRoots, stableJson } from './agentCore.js';
+import { transitionAction } from './agentActions.js';
+import { isRemotePathWithin, resolveRemoteTaskBinding, type ResolvedRemoteTaskBinding } from './hpcConfig.js';
 import { isPathInside, resolveWithinRoot } from './pathSafety.js';
 import { normalizeTaskRootRel } from './taskRoots.js';
 
@@ -13,8 +14,18 @@ const MAX_OUTPUT = 1024 * 1024;
 const SSH_TIMEOUT_MS = 20_000;
 
 interface ProcessResult { code: number; stdout: string; stderr: string }
+export type RemoteProcessRunner = (command: string, args: string[], options: { input?: string; timeoutMs?: number }) => Promise<ProcessResult>;
+let remoteProcessRunnerForTests: RemoteProcessRunner | null = null;
+
+export function setRemoteProcessRunnerForTests(runner: RemoteProcessRunner | null): void {
+  if (process.env.WORKBENCH_REMOTE_TEST_MODE !== '1') {
+    throw new AgentCoreError(403, 'REMOTE_TEST_MODE_DISABLED', 'Remote process injection is available only in explicit test mode');
+  }
+  remoteProcessRunnerForTests = runner;
+}
 
 function runProcess(command: string, args: string[], options: { input?: string; timeoutMs?: number } = {}): Promise<ProcessResult> {
+  if (remoteProcessRunnerForTests) return remoteProcessRunnerForTests(command, args, options);
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = ''; let stderr = ''; let killedForLimit = false; let timedOut = false;
@@ -64,7 +75,7 @@ function sftpQuote(value: string): string {
   return `"${value}"`;
 }
 
-interface RemoteAccess {
+export interface RemoteAccess {
   task: any;
   run: any;
   policy: AgentPolicyDocument;
@@ -72,6 +83,7 @@ interface RemoteAccess {
   host: string;
   remoteRoot: string;
   taskRoot: string;
+  binding: ResolvedRemoteTaskBinding;
 }
 
 export function isProtectedRelativePath(relativePath: unknown, protectedPaths: string[]): boolean {
@@ -87,9 +99,9 @@ export function smokeBudgetAllowsOneCoreMinute(policy: AgentPolicyDocument, cont
     && contract.resourceBudget.maxWallMinutes >= 1;
 }
 
-function authorize(taskId: string, hostInput: unknown, rootInput: unknown, operation: string, smoke = false): RemoteAccess {
-  if (process.env.WORKBENCH_REMOTE_ENABLED !== '1') throw new AgentCoreError(403, 'REMOTE_ENV_DISABLED', 'Set WORKBENCH_REMOTE_ENABLED=1 to enable remote actions');
-  const task = db.prepare(`SELECT tasks.*, projects.working_dir FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ?`).get(taskId) as any;
+export function authorizeRemoteOperation(taskId: string, hostInput: unknown, rootInput: unknown, operation: string, smoke = false, requireEnvironment = true): RemoteAccess {
+  if (requireEnvironment && process.env.WORKBENCH_REMOTE_ENABLED !== '1') throw new AgentCoreError(403, 'REMOTE_ENV_DISABLED', 'Set WORKBENCH_REMOTE_ENABLED=1 to enable remote actions');
+  const task = db.prepare(`SELECT tasks.*, projects.working_dir, projects.hpc_config FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ?`).get(taskId) as any;
   if (!task) throw new AgentCoreError(404, 'TASK_NOT_FOUND', 'Task not found');
   if (!task.task_root_rel) throw new AgentCoreError(409, 'TASK_ROOT_UNRESOLVED', 'Task root is unresolved');
   const run = db.prepare("SELECT * FROM research_runs WHERE task_id = ? AND status IN ('active','waiting_review') ORDER BY started_at DESC LIMIT 1").get(taskId) as any;
@@ -102,8 +114,25 @@ function authorize(taskId: string, hostInput: unknown, rootInput: unknown, opera
   if (!effective.allowedOperations.includes(operation)) throw new AgentCoreError(403, 'REMOTE_OPERATION_DENIED', `Policy does not allow ${operation}`);
   const host = validateHost(hostInput);
   if (!effective.allowedHosts.includes(host)) throw new AgentCoreError(403, 'REMOTE_HOST_DENIED', 'Host is outside the effective policy');
+  const binding = resolveRemoteTaskBinding(task.hpc_config, taskId, host);
+  const policyRoots = policyRemoteRoots(effective);
+  if (policyRoots.legacy || !policyRoots.readRoot || !policyRoots.projectRoot || !policyRoots.writeRoot) {
+    throw new AgentCoreError(409, 'REMOTE_SPLIT_BOUNDARY_REQUIRED', 'Remote actions require separate read, project and Task write roots in the effective policy');
+  }
+  if (
+    policyRoots.readRoot !== binding.userReadRoot
+    || policyRoots.projectRoot !== binding.projectRoot
+    || policyRoots.writeRoot !== binding.taskWriteRoot
+  ) {
+    throw new AgentCoreError(409, 'REMOTE_BOUNDARY_CONFIG_DRIFT', 'Effective policy roots do not match the registered project and Task directory binding');
+  }
   const remoteRoot = normalizeRemoteRoot(String(rootInput ?? ''));
-  if (!effective.remoteRoot || (remoteRoot !== effective.remoteRoot && !(effective.remoteRoot === '/' ? remoteRoot.startsWith('/') : remoteRoot.startsWith(`${effective.remoteRoot}/`)))) throw new AgentCoreError(403, 'REMOTE_ROOT_DENIED', 'Remote root is outside the effective policy');
+  const readOperation = operation === 'remote.inspect' || operation === 'files.download';
+  if (readOperation) {
+    if (!isRemotePathWithin(remoteRoot, binding.userReadRoot)) throw new AgentCoreError(403, 'REMOTE_READ_ROOT_DENIED', 'Read operation is outside the registered user read root');
+  } else if (remoteRoot !== binding.taskWriteRoot) {
+    throw new AgentCoreError(403, 'REMOTE_WRITE_ROOT_DENIED', 'Write and scheduler operations must use the registered Task write root');
+  }
   if (smoke) {
     if (process.env.WORKBENCH_ALLOW_REMOTE_SMOKE !== '1') throw new AgentCoreError(403, 'REMOTE_SMOKE_ENV_DISABLED', 'Set WORKBENCH_ALLOW_REMOTE_SMOKE=1 to enable smoke submission');
     if (!effective.smokeAuthorized) throw new AgentCoreError(403, 'REMOTE_SMOKE_POLICY_DENIED', 'Effective policy does not authorize smoke submission');
@@ -112,7 +141,36 @@ function authorize(taskId: string, hostInput: unknown, rootInput: unknown, opera
   if (effective.localRoot && !isPathInside(path.resolve(effective.localRoot), path.resolve(taskRoot))) {
     throw new AgentCoreError(403, 'LOCAL_ROOT_DENIED', 'Task root is outside the effective local policy root');
   }
-  return { task, run, policy: effective, contract: parseContract(adoptedContext.contract_content), host, remoteRoot, taskRoot };
+  return { task, run, policy: effective, contract: parseContract(adoptedContext.contract_content), host, remoteRoot, taskRoot, binding };
+}
+
+export async function createRemoteTaskRoot(taskId: string, input: { host: unknown; remoteRoot: unknown }) {
+  const access = authorizeRemoteOperation(taskId, input.host, input.remoteRoot, 'remote.task-root.create');
+  const script = [
+    'set -eu',
+    `read_root=$(cd ${shellQuote(access.binding.userReadRoot)} && pwd -P)`,
+    `project_root=$(cd ${shellQuote(access.binding.projectRoot)} && pwd -P)`,
+    'case "$project_root" in "$read_root"/*) ;; *) exit 73;; esac',
+    `target=${shellQuote(access.binding.taskWriteRoot)}`,
+    'created=0',
+    'if [ -e "$target" ]; then test -d "$target"; else mkdir -- "$target"; created=1; fi',
+    'task_root=$(cd "$target" && pwd -P)',
+    'case "$task_root" in "$project_root"/*) ;; *) exit 73;; esac',
+    'test "${task_root%/*}" = "$project_root"',
+    'printf "PROJECT_ROOT=%s\\nTASK_ROOT=%s\\nCREATED=%s\\n" "$project_root" "$task_root" "$created"',
+  ].join('; ');
+  const result = await runProcess('ssh', sshArgs(access.host, script));
+  if (result.code === 73) throw new AgentCoreError(403, 'REMOTE_PATH_ESCAPE', 'Configured remote Task root resolves outside the project root');
+  if (result.code !== 0) explainSshFailure(result);
+  const lines = result.stdout.split(/\r?\n/);
+  const payload = {
+    host: access.host,
+    projectRoot: lines.find(line => line.startsWith('PROJECT_ROOT='))?.slice(13) ?? access.binding.projectRoot,
+    taskRoot: lines.find(line => line.startsWith('TASK_ROOT='))?.slice(10) ?? access.binding.taskWriteRoot,
+    created: lines.find(line => line.startsWith('CREATED='))?.slice(8) === '1',
+  };
+  appendEvent(access.run.id, { category: 'fact', eventType: 'remote.task_root_ready', actorType: 'system', payload });
+  return payload;
 }
 
 function explainSshFailure(result: ProcessResult): never {
@@ -129,12 +187,13 @@ export function parseLsfScheduler(lines: string[]): string | undefined {
 }
 
 export async function inspectRemote(taskId: string, hostInput: unknown, rootInput: unknown): Promise<RemoteCapabilityReport> {
-  const access = authorize(taskId, hostInput, rootInput, 'remote.inspect');
+  const access = authorizeRemoteOperation(taskId, hostInput, rootInput, 'remote.inspect');
   const commands = ['lsid', 'bsub', 'bjobs', 'bhist', 'bpeek', 'bkill'];
-  const script = `set -eu; test -d ${shellQuote(access.remoteRoot)}; cd ${shellQuote(access.remoteRoot)}; printf 'ROOT=%s\\n' "$(pwd -P)"; ${commands.map(name => `printf '${name}='; command -v ${name} || true`).join('; ')}; lsid 2>/dev/null || true`;
+  const script = `set -eu; read_root=$(cd ${shellQuote(access.binding.userReadRoot)} && pwd -P); root=$(cd ${shellQuote(access.remoteRoot)} && pwd -P); case "$root" in "$read_root"|"$read_root"/*) ;; *) exit 73;; esac; cd "$root"; printf 'ROOT=%s\\n' "$root"; ${commands.map(name => `printf '${name}='; command -v ${name} || true`).join('; ')}; lsid 2>/dev/null || true`;
   let result: ProcessResult;
   try {
     result = await runProcess('ssh', sshArgs(access.host, script));
+    if (result.code === 73) throw new AgentCoreError(403, 'REMOTE_PATH_ESCAPE', 'Remote inspection root resolves outside the registered user read root');
     if (result.code !== 0) explainSshFailure(result);
   } catch (error) {
     const item = error as AgentCoreError;
@@ -157,16 +216,17 @@ async function existsRemote(host: string, remotePath: string): Promise<boolean> 
   return result.code === 0;
 }
 
-async function prepareRemoteParent(host: string, remoteRoot: string, targetPath: string, create: boolean): Promise<void> {
+async function prepareRemoteParent(host: string, remoteRoot: string, targetPath: string, create: boolean, scopeRoot: string, directRoot = false): Promise<void> {
   const parent = targetPath.slice(0, targetPath.lastIndexOf('/')) || '/';
-  const script = `set -eu; root=$(cd ${shellQuote(remoteRoot)} && pwd -P); target=${shellQuote(parent)}; probe="$target"; while [ ! -e "$probe" ]; do next=\${probe%/*}; [ "$next" != "$probe" ] || exit 74; probe="$next"; done; actual=$(cd "$probe" && pwd -P); case "$actual" in "$root"|"$root"/*) ;; *) exit 73;; esac; ${create ? 'mkdir -p -- "$target"' : 'test -d "$target"'}; final=$(cd "$target" && pwd -P); case "$final" in "$root"|"$root"/*) ;; *) exit 73;; esac`;
+  const directCheck = directRoot ? 'test "${root%/*}" = "$scope"' : ':';
+  const script = `set -eu; scope=$(cd ${shellQuote(scopeRoot)} && pwd -P); root=$(cd ${shellQuote(remoteRoot)} && pwd -P); case "$root" in "$scope"|"$scope"/*) ;; *) exit 73;; esac; ${directCheck}; target=${shellQuote(parent)}; probe="$target"; while [ ! -e "$probe" ]; do next=\${probe%/*}; [ "$next" != "$probe" ] || exit 74; probe="$next"; done; actual=$(cd "$probe" && pwd -P); case "$actual" in "$root"|"$root"/*) ;; *) exit 73;; esac; ${create ? 'mkdir -p -- "$target"' : 'test -d "$target"'}; final=$(cd "$target" && pwd -P); case "$final" in "$root"|"$root"/*) ;; *) exit 73;; esac`;
   const result = await runProcess('ssh', sshArgs(host, script));
   if (result.code === 73) throw new AgentCoreError(403, 'REMOTE_PATH_ESCAPE', 'Remote path resolves outside the approved root');
   if (result.code !== 0) explainSshFailure(result);
 }
 
 export async function upload(taskId: string, input: any) {
-  const access = authorize(taskId, input.host, input.remoteRoot, 'files.upload');
+  const access = authorizeRemoteOperation(taskId, input.host, input.remoteRoot, 'files.upload');
   const local = resolveWithinRoot(access.taskRoot, input.localPath, { mustExist: true, allowRoot: false, label: 'local upload path' });
   if (!fs.statSync(local).isFile()) throw new AgentCoreError(400, 'UPLOAD_FILE_REQUIRED', 'Upload source must be a file');
   if (fs.statSync(local).size > 10 * 1024 * 1024) throw new AgentCoreError(413, 'UPLOAD_TOO_LARGE', 'V1 upload limit is 10 MB');
@@ -174,8 +234,8 @@ export async function upload(taskId: string, input: any) {
   if (input.overwrite === true && isProtectedRelativePath(input.remotePath, access.policy.protectedPaths)) {
     throw new AgentCoreError(403, 'PROTECTED_PATH', 'Policy forbids overwriting this remote path');
   }
+  await prepareRemoteParent(access.host, access.remoteRoot, remote, true, access.binding.projectRoot, true);
   if (!input.overwrite && await existsRemote(access.host, remote)) throw new AgentCoreError(409, 'REMOTE_FILE_EXISTS', 'Remote target exists; overwrite is disabled');
-  await prepareRemoteParent(access.host, access.remoteRoot, remote, true);
   const result = await runProcess('sftp', sftpArgs(access.host), { input: `put ${sftpQuote(local)} ${sftpQuote(remote)}\n` });
   if (result.code !== 0) explainSshFailure(result);
   const payload = { host: access.host, localPath: input.localPath, remotePath: input.remotePath, size: fs.statSync(local).size };
@@ -184,10 +244,10 @@ export async function upload(taskId: string, input: any) {
 }
 
 export async function download(taskId: string, input: any) {
-  const access = authorize(taskId, input.host, input.remoteRoot, 'files.download');
+  const access = authorizeRemoteOperation(taskId, input.host, input.remoteRoot, 'files.download');
   const local = resolveWithinRoot(access.taskRoot, input.localPath, { allowRoot: false, label: 'local download path' });
   const remote = remoteRelative(access.remoteRoot, input.remotePath);
-  await prepareRemoteParent(access.host, access.remoteRoot, remote, false);
+  await prepareRemoteParent(access.host, access.remoteRoot, remote, false, access.binding.userReadRoot);
   if (input.overwrite === true && isProtectedRelativePath(input.localPath, access.policy.protectedPaths)) {
     throw new AgentCoreError(403, 'PROTECTED_PATH', 'Policy forbids overwriting this local path');
   }
@@ -206,62 +266,169 @@ export async function download(taskId: string, input: any) {
   return payload;
 }
 
-function serializeJob(row: any): RemoteJob { return { ...row, last_observation: JSON.parse(row.last_observation_json) }; }
+function serializeJob(row: any): RemoteJob {
+  return {
+    ...row,
+    execution_manifest: JSON.parse(row.execution_manifest_json),
+    resources: JSON.parse(row.resources_json),
+    last_observation: JSON.parse(row.last_observation_json),
+  };
+}
 
 function parseJobId(output: string): string | null { return output.match(/Job\s+<([0-9]+)>/i)?.[1] ?? null; }
 
-export async function submitSmoke(taskId: string, input: any) {
-  const access = authorize(taskId, input.host, input.remoteRoot, 'job.submit_smoke', true);
-  if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim()) throw new AgentCoreError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'idempotencyKey is required');
-  if (input.queue && !/^[a-zA-Z0-9._-]+$/.test(input.queue)) throw new AgentCoreError(400, 'LSF_QUEUE_INVALID', 'Queue name contains unsupported characters');
-  const existing = db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? AND idempotency_key = ?').get(access.run.id, input.idempotencyKey) as any;
-  if (existing) return serializeJob(existing);
-  if (input.confirmed !== true) throw new AgentCoreError(403, 'REMOTE_SMOKE_CONFIRMATION_REQUIRED', 'The first smoke submission requires explicit UI/CLI confirmation');
-  if (!smokeBudgetAllowsOneCoreMinute(access.policy, access.contract)) {
-    throw new AgentCoreError(403, 'REMOTE_SMOKE_BUDGET_DENIED', 'The adopted contract or policy budget is below the fixed 1-core/1-minute smoke requirement');
+export interface LsfResources {
+  queue: string | null;
+  cores: number;
+  wallMinutes: number;
+}
+
+export function parseLsfResources(script: string): LsfResources {
+  const queue = script.match(/^\s*#BSUB\s+-q\s+([^\s#]+)\s*$/mi)?.[1] ?? null;
+  const coresText = script.match(/^\s*#BSUB\s+-n\s+(\d+)\s*$/mi)?.[1];
+  const wall = script.match(/^\s*#BSUB\s+-W\s+(\d+):(\d{2})\s*$/mi);
+  if (!coresText || !wall) {
+    throw new AgentCoreError(400, 'LSF_RESOURCES_INCOMPLETE', 'LSF script must declare #BSUB -n and #BSUB -W HH:MM');
   }
+  const cores = Number(coresText);
+  const hours = Number(wall[1]);
+  const minutes = Number(wall[2]);
+  if (!Number.isSafeInteger(cores) || cores <= 0 || minutes >= 60) {
+    throw new AgentCoreError(400, 'LSF_RESOURCES_INVALID', 'LSF cores and walltime must be positive and use HH:MM');
+  }
+  return { queue, cores, wallMinutes: hours * 60 + minutes };
+}
+
+function assertScientificBudget(access: RemoteAccess, resources: LsfResources): void {
+  if (resources.cores > access.policy.limits.maxCoresPerJob || resources.cores > access.contract.resourceBudget.maxCoresPerJob) {
+    throw new AgentCoreError(403, 'REMOTE_CORES_DENIED', 'LSF cores exceed the adopted contract or effective policy');
+  }
+  if (resources.wallMinutes > access.policy.limits.maxWallMinutes || resources.wallMinutes > access.contract.resourceBudget.maxWallMinutes) {
+    throw new AgentCoreError(403, 'REMOTE_WALLTIME_DENIED', 'LSF walltime exceeds the adopted contract or effective policy');
+  }
+}
+
+function taskWorkdirGuard(access: RemoteAccess, remoteWorkdir: string): string {
+  return `project_root=$(cd ${shellQuote(access.binding.projectRoot)} && pwd -P); task_root=$(cd ${shellQuote(access.binding.taskWriteRoot)} && pwd -P); case "$task_root" in "$project_root"/*) ;; *) exit 73;; esac; test "\${task_root%/*}" = "$project_root"; work_root=$(cd ${shellQuote(remoteWorkdir)} && pwd -P); case "$work_root" in "$task_root"|"$task_root"/*) ;; *) exit 73;; esac`;
+}
+
+export interface LsfActionSubmission {
+  taskId: string;
+  host: string;
+  remoteRoot: string;
+  remoteWorkdir: string;
+  remoteScriptPath: string;
+  scriptSha256: string;
+  remoteInputs: Array<{ remotePath: string; sha256: string }>;
+  resources: LsfResources;
+}
+
+/**
+ * Submit the exact LSF script bound to an already-authorized Codex action.
+ * The job row is inserted before bsub and one action can own only one job, so
+ * a lost response is reconciled and never retried as a second submission.
+ */
+export async function submitAuthorizedLsfAction(action: RunAction, input: LsfActionSubmission): Promise<RemoteJob> {
+  if (process.env.WORKBENCH_ALLOW_REMOTE_LSF !== '1') {
+    throw new AgentCoreError(403, 'REMOTE_LSF_ENV_DISABLED', 'Set WORKBENCH_ALLOW_REMOTE_LSF=1 to enable authorized scientific LSF submission');
+  }
+  const access = authorizeRemoteOperation(input.taskId, input.host, input.remoteRoot, 'job.submit');
+  if (access.run.id !== action.run_id || access.run.current_context_version_id !== action.context_version_id) {
+    throw new AgentCoreError(409, 'REMOTE_ACTION_CONTEXT_MISMATCH', 'Remote access does not belong to the authorized action context');
+  }
+  assertScientificBudget(access, input.resources);
   const concurrentLimit = Math.min(access.policy.limits.maxConcurrentJobs, access.contract.resourceBudget.maxConcurrentJobs);
-  const openJobs = (db.prepare(`SELECT COUNT(*) AS count FROM remote_jobs WHERE run_id = ? AND lower(status) NOT IN ('done', 'exit', 'zombi', 'unkwn', 'preparation_failed')`).get(access.run.id) as { count: number }).count;
+  const existing = db.prepare('SELECT * FROM remote_jobs WHERE action_id = ?').get(action.id) as any;
+  if (existing) return serializeJob(existing);
+  const openJobs = (db.prepare(`SELECT COUNT(*) AS count FROM remote_jobs WHERE run_id = ? AND lower(status) NOT IN ('done', 'exit', 'zombi', 'unkwn', 'preparation_failed')`).get(action.run_id) as { count: number }).count;
   if (openJobs >= concurrentLimit) throw new AgentCoreError(409, 'REMOTE_CONCURRENCY_LIMIT', 'The adopted contract or policy concurrent-job limit has been reached');
-  const token = crypto.randomBytes(12).toString('hex');
-  const jobName = `wb-smoke-${token.slice(0, 10)}`;
-  const remoteWorkdir = remoteRelative(access.remoteRoot, `.workbench-smoke/${token}`);
-  const id = newId('rjob'); const ts = now();
-  db.prepare(`INSERT INTO remote_jobs (id, run_id, context_version_id, action_token, idempotency_key, host, remote_root, remote_workdir, job_name, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)`)
-    .run(id, access.run.id, access.run.current_context_version_id, token, input.idempotencyKey, access.host, access.remoteRoot, remoteWorkdir, jobName, ts);
-  const queueLine = input.queue ? `#BSUB -q ${input.queue}\n` : '';
-  const script = `#!/bin/sh\n#BSUB -J ${jobName}\n#BSUB -n 1\n#BSUB -W 00:01\n#BSUB -oo smoke.%J.out\n#BSUB -eo smoke.%J.err\n${queueLine}set -eu\nprintf 'WORKBENCH_TOKEN=%s\\n' '${token}'\nhostname\ndate -u '+%Y-%m-%dT%H:%M:%SZ'\n`;
+
+  const token = crypto.createHash('sha256').update(`workbench-lsf:${action.id}`).digest('hex').slice(0, 24);
+  const jobName = `wb-action-${token.slice(0, 10)}`;
+  const remoteWorkdir = remoteRelative(access.remoteRoot, input.remoteWorkdir);
+  const workdirGuard = taskWorkdirGuard(access, remoteWorkdir);
+  remoteRelative(remoteWorkdir, input.remoteScriptPath); // validate the bound script path before any job row is created
+  for (const item of input.remoteInputs) remoteRelative(remoteWorkdir, item.remotePath);
+  const id = newId('rjob');
+  const timestamp = now();
+  db.prepare(`
+    INSERT INTO remote_jobs (
+      id, run_id, context_version_id, action_id, step_id, action_token,
+      idempotency_key, host, remote_root, remote_workdir, job_name, status,
+      execution_manifest_json, execution_manifest_sha256, script_sha256,
+      resources_json, resources_sha256, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, action.run_id, action.context_version_id, action.id, action.step_id, token,
+    action.idempotency_key, access.host, access.remoteRoot, remoteWorkdir, jobName,
+    stableJson(action.manifest), action.manifest_sha256, input.scriptSha256,
+    stableJson(input.resources), hashJson(input.resources), timestamp,
+  );
+
+  const failPreparation = (error: unknown) => {
+    const item = error as AgentCoreError;
+    db.prepare("UPDATE remote_jobs SET status = 'preparation_failed', submit_stderr = ?, reconciled_at = ? WHERE id = ?")
+      .run(`${item.code ?? 'REMOTE_PREPARATION_FAILED'}: ${item.message}`, now(), id);
+    appendEvent(action.run_id, {
+      category: 'fact', eventType: 'remote.scientific_preparation_failed', actorType: 'system',
+      payload: { remoteJobId: id, actionId: action.id, code: item.code ?? 'REMOTE_PREPARATION_FAILED', message: item.message },
+    });
+  };
+
   try {
-    await prepareRemoteParent(access.host, access.remoteRoot, `${remoteWorkdir}/smoke.lsf`, true);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-smoke-'));
-    const tempFile = path.join(tempDir, 'smoke.lsf');
-    fs.writeFileSync(tempFile, script, 'utf8');
-    try {
-      const put = await runProcess('sftp', sftpArgs(access.host), { input: `put ${sftpQuote(tempFile)} ${sftpQuote(`${remoteWorkdir}/smoke.lsf`)}\n` });
-      if (put.code !== 0) explainSshFailure(put);
-    } finally { fs.rmSync(tempDir, { recursive: true, force: true }); }
+    const boundFiles = [
+      { remotePath: input.remoteScriptPath, sha256: input.scriptSha256 },
+      ...input.remoteInputs,
+    ];
+    const checks = boundFiles.map((item, index) => `test -f ${shellQuote(item.remotePath)}; actual_${index}=$(sha256sum -- ${shellQuote(item.remotePath)}); actual_${index}=\${actual_${index}%% *}; test "$actual_${index}" = ${shellQuote(item.sha256)}`).join('; ');
+    const verify = await runProcess('ssh', sshArgs(access.host, `set -eu; ${workdirGuard}; cd "$work_root"; command -v sha256sum >/dev/null; ${checks}; printf 'VERIFIED_FILES=%s\\n' '${boundFiles.length}'`));
+    if (verify.code !== 0) explainSshFailure(verify);
   } catch (error) {
-    db.prepare("UPDATE remote_jobs SET status = 'preparation_failed', submit_stderr = ?, reconciled_at = ? WHERE id = ?").run((error as Error).message, now(), id);
-    appendEvent(access.run.id, { category: 'fact', eventType: 'remote.smoke_preparation_failed', actorType: 'system', payload: { remoteJobId: id, code: (error as AgentCoreError).code ?? 'REMOTE_PREPARATION_FAILED', message: (error as Error).message } });
+    failPreparation(error);
     throw error;
   }
+
   let submit: ProcessResult;
   try {
-    submit = await runProcess('ssh', sshArgs(access.host, `cd ${shellQuote(remoteWorkdir)} && bsub < smoke.lsf`));
+    submit = await runProcess('ssh', sshArgs(access.host, `set -eu; ${workdirGuard}; cd "$work_root"; bsub -J ${shellQuote(jobName)} < ${shellQuote(input.remoteScriptPath)}`));
   } catch (error) {
     const item = error as AgentCoreError;
-    db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', submit_stderr = ?, reconciled_at = ? WHERE id = ?").run(`${item.code ?? 'SSH_FAILED'}: ${item.message}`, now(), id);
-    createReview(access.run.id, { gateType: 'remote_submission_uncertain', question: 'LSF 提交响应不确定，需人工确认唯一作业后再继续。', recommendation: { action: 'reconcile_by_token', token }, evidence: [{ code: item.code ?? 'SSH_FAILED', message: item.message, jobName }], proposal: { remoteJobId: id }, idempotencyKey: `remote-submission-uncertain:${id}` });
+    db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', submit_stderr = ?, reconciled_at = ? WHERE id = ?")
+      .run(`${item.code ?? 'SSH_FAILED'}: ${item.message}`, now(), id);
+    createReview(action.run_id, {
+      gateType: 'remote_submission_uncertain',
+      question: '科学 LSF 提交响应不确定。Codex 必须按唯一 job name 对账，不得重提。',
+      recommendation: { action: 'reconcile_by_job_name', jobName },
+      evidence: [{ code: item.code ?? 'SSH_FAILED', message: item.message, jobName }],
+      proposal: { remoteJobId: id, actionId: action.id },
+      idempotencyKey: `remote-submission-uncertain:${id}`,
+      source: 'codex',
+      conversationRef: action.conversation_ref,
+    });
     return serializeJob(db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id));
   }
-  const jobId = parseJobId(`${submit.stdout}\n${submit.stderr}`);
-  if (submit.code !== 0 || !jobId) {
-    db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', submit_stdout = ?, submit_stderr = ?, reconciled_at = ? WHERE id = ?").run(submit.stdout, submit.stderr, now(), id);
-    createReview(access.run.id, { gateType: 'remote_submission_uncertain', question: 'LSF 提交响应不确定，需人工确认唯一作业后再继续。', recommendation: { action: 'reconcile_by_token', token }, evidence: [{ stdout: submit.stdout, stderr: submit.stderr, jobName }], proposal: { remoteJobId: id }, idempotencyKey: `remote-submission-uncertain:${id}` });
+  const schedulerJobId = parseJobId(`${submit.stdout}\n${submit.stderr}`);
+  if (submit.code !== 0 || !schedulerJobId) {
+    db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', submit_stdout = ?, submit_stderr = ?, reconciled_at = ? WHERE id = ?")
+      .run(submit.stdout, submit.stderr, now(), id);
+    createReview(action.run_id, {
+      gateType: 'remote_submission_uncertain',
+      question: '科学 LSF 提交没有返回可确认的唯一 job ID。Codex 必须对账，不得重提。',
+      recommendation: { action: 'reconcile_by_job_name', jobName },
+      evidence: [{ stdout: submit.stdout, stderr: submit.stderr, jobName }],
+      proposal: { remoteJobId: id, actionId: action.id },
+      idempotencyKey: `remote-submission-uncertain:${id}`,
+      source: 'codex',
+      conversationRef: action.conversation_ref,
+    });
     return serializeJob(db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id));
   }
-  db.prepare("UPDATE remote_jobs SET job_id = ?, status = 'submitted', submit_stdout = ?, submit_stderr = ?, submitted_at = ? WHERE id = ?").run(jobId, submit.stdout, submit.stderr, now(), id);
-  appendEvent(access.run.id, { category: 'fact', eventType: 'remote.smoke_submitted', actorType: 'system', payload: { remoteJobId: id, jobId, jobName, token, remoteWorkdir } });
+  db.prepare("UPDATE remote_jobs SET job_id = ?, status = 'submitted', submit_stdout = ?, submit_stderr = ?, submitted_at = ? WHERE id = ?")
+    .run(schedulerJobId, submit.stdout, submit.stderr, now(), id);
+  appendEvent(action.run_id, {
+    category: 'fact', eventType: 'remote.scientific_submitted', actorType: 'system',
+    payload: { remoteJobId: id, actionId: action.id, jobId: schedulerJobId, jobName, token, remoteWorkdir, scriptSha256: input.scriptSha256, resources: input.resources },
+  });
   return serializeJob(db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id));
 }
 
@@ -269,6 +436,25 @@ function loadJob(id: string): any {
   const row = db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id) as any;
   if (!row) throw new AgentCoreError(404, 'REMOTE_JOB_NOT_FOUND', 'Remote job not found');
   return row;
+}
+
+function syncLinkedAction(row: any, schedulerStatus: string): void {
+  if (!row.action_id) return;
+  const action = db.prepare('SELECT status FROM run_actions WHERE id = ?').get(row.action_id) as { status: string } | undefined;
+  if (!action || ['succeeded', 'failed', 'cancelled'].includes(action.status)) return;
+  if (action.status === 'waiting_user') {
+    transitionAction(row.action_id, { status: 'executing', result: { remoteJobId: row.id, reconciled: true } });
+    if (!['DONE', 'EXIT', 'ZOMBI', 'UNKWN'].includes(schedulerStatus)) {
+      transitionAction(row.action_id, { status: 'waiting_remote', result: { remoteJobId: row.id, schedulerStatus } });
+    }
+  }
+  if (schedulerStatus === 'DONE') {
+    transitionAction(row.action_id, { status: 'succeeded', result: { remoteJobId: row.id, schedulerStatus } });
+  } else if (['EXIT', 'ZOMBI', 'UNKWN'].includes(schedulerStatus)) {
+    transitionAction(row.action_id, { status: 'failed', error: { code: 'REMOTE_JOB_FAILED', remoteJobId: row.id, schedulerStatus } });
+  } else if (action.status === 'executing') {
+    transitionAction(row.action_id, { status: 'waiting_remote', result: { remoteJobId: row.id, schedulerStatus } });
+  }
 }
 
 async function observeJob(row: any) {
@@ -284,13 +470,14 @@ async function observeJob(row: any) {
   const terminal = ['DONE', 'EXIT', 'ZOMBI', 'UNKWN'].includes(schedulerStatus);
   const observation = { source, schedulerStatus, raw, observedAt: now() };
   db.prepare('UPDATE remote_jobs SET status = ?, last_observation_json = ?, reconciled_at = ? WHERE id = ?').run(terminal ? schedulerStatus.toLowerCase() : schedulerStatus.toLowerCase(), stableJson(observation), observation.observedAt, row.id);
+  syncLinkedAction(row, schedulerStatus);
   appendEvent(row.run_id, { category: 'fact', eventType: 'remote.job_reconciled', actorType: 'system', payload: { remoteJobId: row.id, ...observation } });
   return serializeJob(db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(row.id));
 }
 
 function authorizeRecordedJob(row: any, operation: string) {
   const taskId = (db.prepare('SELECT task_id FROM research_runs WHERE id = ?').get(row.run_id) as any)?.task_id;
-  return authorize(taskId, row.host, row.remote_root, operation);
+  return authorizeRemoteOperation(taskId, row.host, row.remote_root, operation);
 }
 
 async function identifyUncertainJob(row: any) {
@@ -336,6 +523,12 @@ export async function cancelJob(id: string) {
   const result = await runProcess('ssh', sshArgs(row.host, `bkill ${row.job_id}`));
   if (result.code !== 0) explainSshFailure(result);
   db.prepare("UPDATE remote_jobs SET status = 'cancel_requested', reconciled_at = ? WHERE id = ?").run(now(), id);
+  if (row.action_id) {
+    const linked = db.prepare('SELECT status FROM run_actions WHERE id = ?').get(row.action_id) as { status: string } | undefined;
+    if (linked && ['executing', 'waiting_remote', 'waiting_user'].includes(linked.status)) {
+      transitionAction(row.action_id, { status: 'cancelled', result: { remoteJobId: id, jobId: row.job_id, cancelRequested: true } });
+    }
+  }
   appendEvent(row.run_id, { category: 'decision', eventType: 'remote.job_cancel_requested', actorType: 'researcher', payload: { remoteJobId: id, jobId: row.job_id } });
   return serializeJob(db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id));
 }

@@ -465,6 +465,10 @@ export default function ResearchPlansPage() {
               </div>
             </div>
 
+            <div className="border-b border-[#2d2d44] bg-[#171725] px-6 py-3 text-[10px] leading-5 text-[#9898b0]">
+              <strong className="text-[#c4b5fd]">版本规则：</strong>这里编辑的是可持续修订的工作副本，普通保存直接更新 Markdown，不为每个小改动生成完整版本。只有研究者与 Codex 明确把方案用于某个 Research Run 时，才把方案、合同、工作流和策略作为不可变 context 快照采用；之后继续编辑会显示 drift，需要重新沟通后采用。
+            </div>
+
             {/* Toolbar: preview/edit + save content */}
             <div className="px-6 py-2 border-b border-[#2d2d44] flex items-center justify-between">
               <div className="flex gap-1">

@@ -5,6 +5,7 @@ import { getWorkflowFromDB } from './workflows.js';
 import type { WorkflowTemplate } from '../../src/types/index.js';
 import { PathBoundaryError, resolveWithinRoot } from '../services/pathSafety.js';
 import { allocateTaskRoot, ensureTaskStageFolders, normalizeTaskRootRel, sanitizeTaskFolderName } from '../services/taskRoots.js';
+import { hashJson } from '../services/agentCore.js';
 
 const router = Router({ mergeParams: true });
 
@@ -41,7 +42,8 @@ function readWorkflowSnapshot(row: TaskRow): WorkflowTemplate | undefined {
 
 function serializeTask(row: TaskRow) {
   const { workflow_snapshot: _snapshot, ...task } = row;
-  return { ...task, task_root_unresolved: !row.task_root_rel, workflow: readWorkflowSnapshot(row) };
+  const workflow = readWorkflowSnapshot(row);
+  return { ...task, task_root_unresolved: !row.task_root_rel, workflow, workflow_sha256: workflow ? hashJson(workflow) : null };
 }
 
 function backfillTaskWorkflowSnapshots(): void {
@@ -183,6 +185,18 @@ router.put('/:taskId/workflow', (req, res) => {
   `).get(taskId) as (TaskRow & { working_dir: string }) | undefined;
   if (!task) return res.status(404).json({ error: 'Task not found' });
 
+  if (req.body.expectedWorkflowSha256) {
+    const currentWorkflow = readWorkflowSnapshot(task);
+    const currentWorkflowSha256 = currentWorkflow ? hashJson(currentWorkflow) : null;
+    if (req.body.expectedWorkflowSha256 !== currentWorkflowSha256) {
+      return res.status(409).json({
+        error: 'Task workflow changed since it was read',
+        code: 'STALE_WORKFLOW',
+        details: { expectedWorkflowSha256: req.body.expectedWorkflowSha256, currentWorkflowSha256 },
+      });
+    }
+  }
+
   const workflow: WorkflowTemplate = {
     id: task.workflow_id,
     name: req.body.name,
@@ -206,7 +220,7 @@ router.put('/:taskId/workflow', (req, res) => {
     }
   }
 
-  res.json(workflow);
+  res.json({ ...workflow, sha256: hashJson(workflow) });
 });
 
 // Resolve an old task's stable root without moving existing scientific data.

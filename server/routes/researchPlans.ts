@@ -1,4 +1,5 @@
 import { Router, type Response } from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
@@ -83,6 +84,7 @@ function fileNameToTitle(fileName: string): string {
 
 const now = () => new Date().toISOString();
 const newId = () => `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const sha256 = (content: string) => crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 
 /**
  * Scan a plan's base dir for *.md and auto-insert metadata rows
@@ -290,7 +292,7 @@ router.get('/:id/content', (req, res) => {
     const stat = fs.statSync(full);
     if (stat.size > 10 * 1024 * 1024) return res.status(413).json({ error: 'File too large (max 10MB)' });
     const content = fs.readFileSync(full, 'utf-8');
-    res.json({ content, size: stat.size, modified: stat.mtime.toISOString() });
+    res.json({ content, size: stat.size, modified: stat.mtime.toISOString(), sha256: sha256(content) });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -298,7 +300,7 @@ router.get('/:id/content', (req, res) => {
 
 // ===== PUT CONTENT =====
 router.put('/:id/content', (req, res) => {
-  const { content } = req.body || {};
+  const { content, expectedSha256 } = req.body || {};
   if (content === undefined) return res.status(400).json({ error: 'content is required' });
   const row = db.prepare('SELECT file_name, project_id FROM research_plans WHERE id = ?').get(req.params.id) as
     | { file_name: string; project_id: string | null }
@@ -309,10 +311,23 @@ router.put('/:id/content', (req, res) => {
   const full = safeResolve(dir, row.file_name);
   if (!full) return res.status(400).json({ error: 'Invalid stored file name' });
   try {
-    fs.writeFileSync(full, String(content), 'utf-8');
+    if (!fs.existsSync(full)) return res.status(404).json({ error: `File missing on disk: ${row.file_name}` });
+    const currentContent = fs.readFileSync(full, 'utf8');
+    const currentSha256 = sha256(currentContent);
+    if (expectedSha256 && expectedSha256 !== currentSha256) {
+      return res.status(409).json({ error: 'Research plan changed since it was read', code: 'STALE_PLAN', details: { expectedSha256, currentSha256 } });
+    }
+    const nextContent = String(content);
+    const temp = `${full}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+    try {
+      fs.writeFileSync(temp, nextContent, 'utf-8');
+      fs.renameSync(temp, full);
+    } finally {
+      if (fs.existsSync(temp)) fs.unlinkSync(temp);
+    }
     const ts = now();
     db.prepare('UPDATE research_plans SET updated_at = ? WHERE id = ?').run(ts, req.params.id);
-    res.json({ success: true, updated_at: ts });
+    res.json({ success: true, updated_at: ts, sha256: sha256(nextContent) });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
