@@ -125,6 +125,7 @@ function compactContext(context) {
       currentStageId: context.run.working_plan?.currentStageId,
       summary: context.run.working_plan?.summary,
       nextActions: context.run.working_plan?.nextActions,
+      explorationReview: context.run.working_plan?.explorationReview,
     },
     boundary: {
       hpcProfileId: context.run.confirmed_envelope?.hpcProfileId,

@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import type Database from 'better-sqlite3';
+import { WORKFLOWS } from '../src/data/workflows.js';
 
 const AGENT_V1_SCHEMA_VERSION = 2;
 const WORKBENCH_V2_SCHEMA_VERSION = 3;
 const EXPERIENCE_PROVENANCE_SCHEMA_VERSION = 4;
 const ESSENTIAL_WORKBENCH_SCHEMA_VERSION = 5;
 const JOB_MONITOR_SCHEMA_VERSION = 6;
+const THEORETICAL_EXPLORATION_SCHEMA_VERSION = 7;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -61,15 +63,27 @@ function backupBeforeJobMonitor(db: Database.Database, dbPath: string): void {
   db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
 }
 
+function backupBeforeTheoreticalExploration(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-theoretical-exploration-v7.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
 function tableCount(db: Database.Database, table: string): number {
   return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
 }
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= JOB_MONITOR_SCHEMA_VERSION) return;
+  if (currentVersion >= THEORETICAL_EXPLORATION_SCHEMA_VERSION) return;
 
-  backupBeforeAgentV1(db, dbPath);
+  if (currentVersion < JOB_MONITOR_SCHEMA_VERSION) backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
     if (!columnExists(db, 'tasks', 'task_root_rel')) {
       db.exec('ALTER TABLE tasks ADD COLUMN task_root_rel TEXT DEFAULT NULL');
@@ -651,6 +665,36 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
           ON run_monitors(status, next_check_at);
       `);
       db.pragma(`user_version = ${JOB_MONITOR_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < 7) {
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?')
+      .get('theoretical-research') as { data: string } | undefined;
+    if (stored) backupBeforeTheoreticalExploration(db, dbPath);
+    db.transaction(() => {
+      if (stored) {
+        let data: { stages?: Array<{ id: string }>; steps?: Array<{ id: string }> };
+        try {
+          data = JSON.parse(stored.data) as typeof data;
+        } catch {
+          throw new Error('The theoretical-research workflow template is invalid JSON; database was left unchanged');
+        }
+        if (!Array.isArray(data.stages) || !Array.isArray(data.steps)) {
+          throw new Error('The theoretical-research workflow template is missing stages or steps; database was left unchanged');
+        }
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === 'theoretical-research');
+        const reviewStep = builtIn?.steps.find(step => step.id === 'theory-interpretation-04');
+        if (!reviewStep || !data.stages.some(stage => stage.id === reviewStep.stageId)) {
+          throw new Error('The theoretical-research workflow cannot accept the exploration review step; database was left unchanged');
+        }
+        if (!data.steps.some(step => step.id === reviewStep.id)) {
+          data.steps.push(reviewStep);
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(data), new Date().toISOString(), 'theoretical-research');
+        }
+      }
+      db.pragma(`user_version = ${THEORETICAL_EXPLORATION_SCHEMA_VERSION}`);
     })();
   }
 }

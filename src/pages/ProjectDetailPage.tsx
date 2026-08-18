@@ -25,6 +25,8 @@ export default function ProjectDetailPage() {
   const [taskName, setTaskName] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
   const [taskWorkflow, setTaskWorkflow] = useState('');
+  const [taskFormError, setTaskFormError] = useState('');
+  const [taskSaving, setTaskSaving] = useState(false);
   const workflows = useWorkflowList();
 
   // Set default workflow once workflows are loaded
@@ -52,17 +54,41 @@ export default function ProjectDetailPage() {
 
   const resetTaskForm = () => {
     setTaskName(''); setTaskDesc(''); setTaskWorkflow(workflows[0]?.id ?? '');
+    setTaskFormError(''); setTaskSaving(false);
     setEditingTask(null); setShowTaskForm(false);
   };
 
   const handleCreateTask = async () => {
-    if (!projectId || !taskName.trim()) return;
-    if (editingTask) {
-      await tasksApi.update(editingTask.id, { name: taskName.trim(), description: taskDesc.trim() });
-    } else {
-      await tasksApi.create(projectId, { name: taskName.trim(), description: taskDesc.trim(), workflow_id: taskWorkflow });
+    if (!projectId) {
+      setTaskFormError('项目信息缺失，请刷新页面后重试。');
+      return;
     }
-    resetTaskForm(); load();
+    const name = taskName.trim();
+    if (!name) {
+      setTaskFormError('请输入任务名称。');
+      return;
+    }
+    if (!editingTask && !taskWorkflow) {
+      setTaskFormError('工作流模板尚未加载，请稍后重试。');
+      return;
+    }
+
+    setTaskFormError('');
+    setTaskSaving(true);
+    try {
+      if (editingTask) {
+        await tasksApi.update(editingTask.id, { name, description: taskDesc.trim() });
+      } else {
+        await tasksApi.create(projectId, { name, description: taskDesc.trim(), workflow_id: taskWorkflow });
+      }
+      resetTaskForm();
+      await load();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setTaskFormError(`${editingTask ? '保存失败' : '创建失败'}：${message}`);
+    } finally {
+      setTaskSaving(false);
+    }
   };
 
   const handleDeleteTask = async (id: string) => {
@@ -227,7 +253,8 @@ export default function ProjectDetailPage() {
             <div className="p-5 space-y-4">
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">任务名称 *</label>
-                <input value={taskName} onChange={e => setTaskName(e.target.value)}
+                <input value={taskName} onChange={e => { setTaskName(e.target.value); setTaskFormError(''); }}
+                  aria-invalid={Boolean(taskFormError && !taskName.trim())}
                   className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-2 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]"
                   placeholder="例如：V2O3 顺磁性 one-shot DMFT" />
               </div>
@@ -240,16 +267,23 @@ export default function ProjectDetailPage() {
               {!editingTask && (
                 <div>
                   <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">工作流模板</label>
-                  <select value={taskWorkflow} onChange={e => setTaskWorkflow(e.target.value)}
+                  <select value={taskWorkflow} aria-label="工作流模板" onChange={e => { setTaskWorkflow(e.target.value); setTaskFormError(''); }}
                     className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-2 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]">
                     {workflows.map(w => <option key={w.id} value={w.id}>{w.name} — {w.description}</option>)}
                   </select>
                 </div>
               )}
+              {taskFormError && (
+                <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {taskFormError}
+                </div>
+              )}
             </div>
             <div className="px-5 py-4 border-t border-[#2d2d44] flex justify-end gap-2">
-              <button onClick={resetTaskForm} className="px-4 py-2 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44]">取消</button>
-              <button onClick={handleCreateTask} className="px-4 py-2 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb]">{editingTask ? '保存修改' : '创建任务'}</button>
+              <button onClick={resetTaskForm} disabled={taskSaving} className="px-4 py-2 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44] disabled:cursor-not-allowed disabled:opacity-50">取消</button>
+              <button onClick={handleCreateTask} disabled={taskSaving} className="px-4 py-2 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50">
+                {taskSaving ? (editingTask ? '保存中...' : '创建中...') : (editingTask ? '保存修改' : '创建任务')}
+              </button>
             </div>
           </div>
         </div>

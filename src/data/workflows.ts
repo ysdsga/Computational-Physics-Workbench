@@ -352,6 +352,9 @@ const WORKFLOW_STAGE_STYLES = [
   { color: '#f59e0b', colorBg: 'rgba(245,158,11,0.12)', colorBorder: 'rgba(245,158,11,0.4)' },
   { color: '#8b5cf6', colorBg: 'rgba(139,92,246,0.12)', colorBorder: 'rgba(139,92,246,0.4)' },
   { color: '#ef4444', colorBg: 'rgba(239,68,68,0.12)', colorBorder: 'rgba(239,68,68,0.4)' },
+  { color: '#06b6d4', colorBg: 'rgba(6,182,212,0.12)', colorBorder: 'rgba(6,182,212,0.4)' },
+  { color: '#ec4899', colorBg: 'rgba(236,72,153,0.12)', colorBorder: 'rgba(236,72,153,0.4)' },
+  { color: '#64748b', colorBg: 'rgba(100,116,139,0.12)', colorBorder: 'rgba(100,116,139,0.4)' },
 ] as const;
 
 function makeWorkflowStages(
@@ -582,6 +585,121 @@ const WIEN2K_DMFTPROJ_STEPS: WorkflowStep[] = [
   },
 ];
 
+// === General theoretical physics research ===
+const THEORETICAL_RESEARCH_STAGES = makeWorkflowStages([
+  { id: 'question', name: '问题定义', description: '明确研究对象、目标观测量、物理区域与可证伪判据' },
+  { id: 'context', name: '文献与约束', description: '建立已有结果、严格约束、基准事实和工作增量' },
+  { id: 'model', name: '模型与假设', description: '定义自由度、理论结构、对称性、近似和适用域' },
+  { id: 'baseline', name: '基准极限', description: '研究已知极限、可解情形和最小玩具模型' },
+  { id: 'derivation', name: '核心推导', description: '完成主要解析论证，并记录关键依赖与未决缺口' },
+  { id: 'validation', name: '一致性验证', description: '检查量纲、对称性、守恒律、已知极限和独立推导' },
+  { id: 'interpretation', name: '解释与预测', description: '评估稳健性、物理机制、可检验预测与失效条件' },
+  { id: 'release', name: '成果封装', description: '整理可审计的论证链、完成证据和研究报告' },
+]);
+
+const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
+  {
+    id: 'theory-question-01', stageId: 'question', order: 1, name: '明确科学问题与目标观测量',
+    description: '明确研究对象、控制参数、关注的物理区域和需要解释或预测的观测量。具体科学问题及其背景写入研究方案。',
+    outputFiles: ['problem_statement.md'],
+  },
+  {
+    id: 'theory-question-02', stageId: 'question', order: 2, name: '定义成功、失败与可证伪判据',
+    description: '规定哪些结果构成问题得到回答、哪些结果否定当前设想，以及本次研究可以被接受的完成证据。',
+    outputFiles: ['success_and_falsification_criteria.md'],
+  },
+  {
+    id: 'theory-context-01', stageId: 'context', order: 1, name: '建立文献与基准事实',
+    description: '整理严格结果、主流解释、已有解析或数值基准，以及当前理论必须满足的实验事实。',
+    outputFiles: ['literature_constraints.md'],
+  },
+  {
+    id: 'theory-context-02', stageId: 'context', order: 2, name: '识别理论缺口与研究新增量',
+    description: '比较已有路线的覆盖范围与矛盾，明确尚未解决的问题，以及本研究准备增加的理论内容。',
+    outputFiles: ['novelty_statement.md'],
+  },
+  {
+    id: 'theory-model-01', stageId: 'model', order: 1, name: '定义自由度与理论结构',
+    description: '给出研究对象的自由度、哈密顿量、拉格朗日量或作用量、相互作用结构，以及必要的初始和边界条件。',
+    outputFiles: ['model_definition.md'],
+  },
+  {
+    id: 'theory-model-02', stageId: 'model', order: 2, name: '梳理对称性、守恒律与符号',
+    description: '明确模型的连续和离散对称性、守恒量、规范约定、归一化及后续推导使用的统一符号。',
+    outputFiles: ['symmetry_and_conservation.md', 'notation.md'],
+  },
+  {
+    id: 'theory-model-03', stageId: 'model', order: 3, name: '明确近似、适用域与失效条件',
+    description: '列出采用的近似、被忽略的自由度或相互作用、能标和参数范围，并说明理论在哪些条件下不再可靠。',
+    outputFiles: ['assumptions_and_scope.md'],
+  },
+  {
+    id: 'theory-baseline-01', stageId: 'baseline', order: 1, name: '检查已知解析极限',
+    description: '研究非相互作用、弱强耦合、高低温、连续或热力学极限等可控情形，整理完整理论必须恢复的结果。',
+    outputFiles: ['known_limits.md'],
+  },
+  {
+    id: 'theory-baseline-02', stageId: 'baseline', order: 2, name: '建立玩具模型或可解基准',
+    description: '构造保留关键机制的最小模型或特殊可解点，用于检验直觉、符号和后续推导结果。',
+    outputFiles: ['toy_model_benchmarks.md'],
+  },
+  {
+    id: 'theory-derivation-01', stageId: 'derivation', order: 1, name: '确定推导策略',
+    description: '根据研究方案选择解析方法、表示、展开参数和近似层级，说明该路线为何适用于目标问题。',
+    outputFiles: ['derivation_strategy.md'],
+  },
+  {
+    id: 'theory-derivation-02', stageId: 'derivation', order: 2, name: '完成核心推导',
+    description: '完成主要公式和逻辑链，保留关键中间结果，并记录对最终结论有影响的推导分支。',
+    outputFiles: ['derivation.md'],
+  },
+  {
+    id: 'theory-derivation-03', stageId: 'derivation', order: 3, name: '整理假设—结论依赖关系',
+    description: '标明每项主要结论依赖的假设、引理和近似，记录失败路线以及尚未闭合的逻辑缺口。',
+    outputFiles: ['assumption_conclusion_map.md', 'derivation_gaps.md'],
+  },
+  {
+    id: 'theory-validation-01', stageId: 'validation', order: 1, name: '执行强制一致性检查',
+    description: '检查量纲、归一化、对称性、守恒律、因果性或正定性，并验证结果能够恢复研究方案要求的已知极限。',
+    outputFiles: ['consistency_checks.md'],
+  },
+  {
+    id: 'theory-validation-02', stageId: 'validation', order: 2, name: '进行独立交叉验证',
+    description: '尽可能采用不同表示、替代推导、符号检查或小规模数值验证关键结论；无法交叉验证的部分必须明确记录。',
+    outputFiles: ['cross_validation.md'],
+  },
+  {
+    id: 'theory-interpretation-01', stageId: 'interpretation', order: 1, name: '分析稳健性与不确定性',
+    description: '评估结论对假设、近似和参数的敏感性，识别结论稳定成立的范围并说明主要不确定性。',
+    outputFiles: ['robustness_analysis.md'],
+  },
+  {
+    id: 'theory-interpretation-02', stageId: 'interpretation', order: 2, name: '提炼物理机制',
+    description: '解释控制结果的主导机制，区分普适行为与模型特有行为，并比较仍然成立的竞争解释。',
+    outputFiles: ['physical_mechanism.md'],
+  },
+  {
+    id: 'theory-interpretation-03', stageId: 'interpretation', order: 3, name: '形成预测与失效条件',
+    description: '提炼可被实验、数值或后续理论检验的预测，同时明确结论的适用范围和可能失效的条件。',
+    outputFiles: ['predictions_and_limits.md'],
+  },
+  {
+    id: 'theory-interpretation-04', stageId: 'interpretation', order: 4, name: '审查关键问题与启发性想法',
+    description: '检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法。任务边界内的分支写入下一轮 Working Plan 并回到推导或验证；超出边界或价值不足的分支说明理由后转后续任务或暂缓。仅在没有高价值未处置分支时通过审查。',
+    outputFiles: ['exploration_review.md'],
+  },
+  {
+    id: 'theory-release-01', stageId: 'release', order: 1, name: '整理可审计论证链',
+    description: '把研究问题、假设、推导、验证、证据、结论和适用范围连接成可复查的完整论证链。',
+    outputFiles: ['argument_map.md', 'evidence_index.md'],
+  },
+  {
+    id: 'theory-release-02', stageId: 'release', order: 2, name: '封装成果与开放问题',
+    description: '形成最终理论报告或论文草稿，列出未解决问题、失败路线和后续可以检验或扩展的方向。',
+    outputFiles: ['theory_report.md', 'open_questions.md'],
+  },
+];
+
 // === Workflow Registry ===
 export const WORKFLOWS: WorkflowTemplate[] = [
   {
@@ -604,6 +722,13 @@ export const WORKFLOWS: WorkflowTemplate[] = [
     description: '全势磁性 DFT、dmftproj 投影、Wien2kConverter 与磁性 DMFT',
     stages: WIEN2K_DMFTPROJ_STAGES,
     steps: WIEN2K_DMFTPROJ_STEPS,
+  },
+  {
+    id: 'theoretical-research',
+    name: '理论研究',
+    description: '从问题定义、模型与推导到一致性验证、物理预测和成果封装',
+    stages: THEORETICAL_RESEARCH_STAGES,
+    steps: THEORETICAL_RESEARCH_STEPS,
   },
 ];
 

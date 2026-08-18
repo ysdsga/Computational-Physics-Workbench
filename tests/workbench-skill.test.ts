@@ -22,6 +22,7 @@ test('workbench-agent uses one Envelope confirmation and preserves Codex autonom
     'submission_uncertain', 'valid`, `suspect`, `invalid`, and `superseded',
     'current-chat Scheduled Task monitor', 'workbench monitor guard', '--retry-of',
     'expectedRunMinutes', 'monitor directive', 'automation-state active', 'monitor close', 'heartbeat lease',
+    'explorationReviewRequired', 'workingPlan.explorationReview', 'materially change, extend, or overturn',
     'Never access `data/workbench.db`', 'Never use a material-specific adapter',
   ]) assert.ok(skill.includes(required), `skill should include ${required}`);
   assert.doesNotMatch(skill, /action authorize|contract show|policy create|review decide/);

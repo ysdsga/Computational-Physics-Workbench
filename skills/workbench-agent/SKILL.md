@@ -31,6 +31,8 @@ The ledger—not chat memory—is the recovery source. Treat experience as a clu
   - Confirmed Envelope freezes objective-critical commitments, permitted methods/software/capabilities, HPC profile, resource limits, protected Task-relative paths, completion evidence, and researcher gates.
   - Working Plan holds the current directory layout, next Actions, diagnostics, retries, and stage-local tactics. Codex may revise it without new confirmation inside the Envelope.
 
+For the `theoretical-research` workflow, new Envelopes default `explorationReviewRequired` to `true`. Before completion, keep `workingPlan.explorationReview` explicit: use `continue` with the unresolved high-value questions or generative ideas that require another derivation/validation cycle; use `passed` only when none remain. Every candidate must be explored, falsified, or deferred with a reason. Do not treat every possible idea as blocking—only one that could materially change, extend, or overturn the central conclusion.
+
 Let Codex choose the directory tree below the Task root. Do not impose stage folders. The remote user root is read-only; the registered remote Task root is read/write.
 
 ## Obtain one execution confirmation
@@ -56,6 +58,8 @@ After confirmation:
 3. Update the Working Plan only when tactics, scientific dependencies, or directory layout materially change—not for each command or small correction.
 4. Create an Action only for a durable scientific milestone that needs provenance, especially scheduler submit/cancel, a multi-Job batch, or an evidence-producing validation. The Action is an automatically recorded unit of scientific work, not permission for every machine call. Do not request per-Action approval inside the Envelope.
 5. Monitor/reconcile Jobs through the Run monitor protocol and register only meaningful outputs and validator results as Artifacts/evidence.
+
+For a theoretical Run with exploration review enabled, do not call `run complete` until the review is `passed`. A `continue` review revises the Working Plan and returns to the smallest relevant derivation or validation stage; it does not add Workflow nodes or widen the Envelope by itself.
 
 One Workflow stage may contain many logged routine operations and a small number of milestone Actions; one Action may own zero, one, or many Jobs. Bind every scheduler Job to its originating Action and stage.
 

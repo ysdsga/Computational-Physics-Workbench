@@ -193,6 +193,9 @@ export function validateEnvelope(input: unknown, task: ReturnType<typeof runtime
     if (!hpcProfileId) throw new AgentCoreError(400, 'TASK_SPEC_HPC_REQUIRED', 'Remote capabilities require hpcProfileId');
     assertHpcBinding(task, hpcProfileId);
   }
+  if (value.explorationReviewRequired !== undefined && typeof value.explorationReviewRequired !== 'boolean') {
+    throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'confirmedEnvelope.explorationReviewRequired must be a boolean');
+  }
   const limits = objectValue(value.resourceLimits, 'confirmedEnvelope.resourceLimits');
   return {
     schemaVersion: 1,
@@ -211,6 +214,7 @@ export function validateEnvelope(input: unknown, task: ReturnType<typeof runtime
     protectedRelativePaths: protectedPathList(value.protectedRelativePaths),
     completionEvidence: orderedStringList(value.completionEvidence, 'confirmedEnvelope.completionEvidence', false),
     researcherGates: orderedStringList(value.researcherGates ?? [], 'confirmedEnvelope.researcherGates'),
+    explorationReviewRequired: value.explorationReviewRequired ?? task.workflow_id === 'theoretical-research',
     autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
   };
 }
@@ -227,8 +231,30 @@ export function validateWorkingPlan(input: unknown, envelope: ConfirmedEnvelope)
   if (value.nextActions !== undefined && (!Array.isArray(value.nextActions) || value.nextActions.some(item => !item || typeof item !== 'object' || Array.isArray(item)))) {
     throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'workingPlan.nextActions must be an array of objects');
   }
+  let explorationReview: WorkingPlan['explorationReview'];
+  if (value.explorationReview !== undefined) {
+    const review = objectValue(value.explorationReview, 'workingPlan.explorationReview');
+    if (review.status !== 'continue' && review.status !== 'passed') {
+      throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'workingPlan.explorationReview.status must be continue or passed');
+    }
+    const unresolvedHighValueItems = orderedStringList(
+      review.unresolvedHighValueItems ?? [],
+      'workingPlan.explorationReview.unresolvedHighValueItems',
+    );
+    if (review.status === 'continue' && unresolvedHighValueItems.length === 0) {
+      throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'A continuing exploration review must name at least one unresolved high-value item');
+    }
+    if (review.status === 'passed' && unresolvedHighValueItems.length > 0) {
+      throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'A passed exploration review cannot retain unresolved high-value items');
+    }
+    explorationReview = {
+      status: review.status,
+      summary: requiredText(review.summary, 'workingPlan.explorationReview.summary'),
+      unresolvedHighValueItems,
+    };
+  }
   if (Buffer.byteLength(stableJson(value), 'utf8') > 512 * 1024) throw new AgentCoreError(413, 'WORKING_PLAN_TOO_LARGE', 'Working Plan exceeds 512 KiB');
-  return { ...value, currentStageId } as WorkingPlan;
+  return { ...value, currentStageId, ...(explorationReview ? { explorationReview } : {}) } as WorkingPlan;
 }
 
 export function validateTaskSpec(input: unknown, task: ReturnType<typeof runtimeTask>): TaskSpec {
@@ -459,6 +485,18 @@ export function terminateRun(runId: string, reason: string) {
 export function completeRun(runId: string, summary: string, source: string, conversationRef?: string | null) {
   if (source !== 'codex_conversation') throw new AgentCoreError(400, 'COMPLETION_SOURCE_INVALID', 'Run completion requires researcher confirmation in Codex');
   const run = activeRun(runId);
+  const task = runtimeTask(run.task_id);
+  if (task.workflow_id === 'theoretical-research' && run.confirmed_envelope.explorationReviewRequired === true) {
+    const review = run.working_plan.explorationReview;
+    if (!review || review.status !== 'passed' || review.unresolvedHighValueItems.length > 0) {
+      throw new AgentCoreError(
+        409,
+        'EXPLORATION_REVIEW_REQUIRED',
+        'Complete the theoretical research exploration review before completing the Run',
+        { workflowId: task.workflow_id, requiredStatus: 'passed' },
+      );
+    }
+  }
   if (db.prepare("SELECT 1 FROM pending_items WHERE run_id = ? AND audience = 'researcher' AND status = 'open' LIMIT 1").get(runId)) throw new AgentCoreError(409, 'PENDING_RESEARCHER_ITEMS', 'Resolve researcher pending items before completing the Run');
   if (db.prepare("SELECT 1 FROM remote_jobs WHERE run_id = ? AND lower(status) NOT IN ('done','exit','zombi','unkwn','preparation_failed','cancelled') LIMIT 1").get(runId)) throw new AgentCoreError(409, 'ACTIVE_REMOTE_JOBS', 'All recorded remote Jobs must reach a terminal state before completing the Run');
   const ts = now();

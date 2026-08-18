@@ -45,6 +45,46 @@ test('Agent run and review centers expose recoverable empty states', async ({ pa
   await expect(page.getByText('工作流只保留核心骨架', { exact: false })).toBeVisible();
 });
 
+test('project task form validates input, reports API failures and creates a task', async ({ page, request }) => {
+  const workingDir = path.join(tempRoot, 'ui-task-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResponse = await request.post('/api/projects', { data: { name: 'UI Task Project', working_dir: workingDir } });
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = await projectResponse.json() as { id: string };
+
+  await page.goto(`/#/project/${project.id}`);
+  await page.getByRole('button', { name: '新建任务' }).click();
+  await page.getByRole('button', { name: '创建任务' }).click();
+  await expect(page.getByRole('alert')).toHaveText('请输入任务名称。');
+
+  let rejectNextCreate = true;
+  await page.route(`**/api/projects/${project.id}/tasks`, async route => {
+    if (route.request().method() === 'POST' && rejectNextCreate) {
+      rejectNextCreate = false;
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: '模拟创建失败' }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByPlaceholder('例如：V2O3 顺磁性 one-shot DMFT').fill('UI Created Task');
+  await page.getByLabel('工作流模板').selectOption('theoretical-research');
+  await page.getByRole('button', { name: '创建任务' }).click();
+  await expect(page.getByRole('alert')).toHaveText('创建失败：模拟创建失败');
+
+  await page.getByRole('button', { name: '创建任务' }).click();
+  await expect(page.getByRole('heading', { name: '新建任务' })).toHaveCount(0);
+  await expect(page.getByText('UI Created Task')).toBeVisible();
+
+  const tasksResponse = await request.get(`/api/projects/${project.id}/tasks`);
+  expect(tasksResponse.ok()).toBeTruthy();
+  const tasks = await tasksResponse.json() as Array<{ name: string; task_root_rel: string; workflow_id: string }>;
+  expect(tasks).toHaveLength(1);
+  expect(tasks[0].name).toBe('UI Created Task');
+  expect(tasks[0].workflow_id).toBe('theoretical-research');
+  expect(fs.statSync(path.join(workingDir, tasks[0].task_root_rel)).isDirectory()).toBeTruthy();
+});
+
 test('Web observes a confirmed Task Spec and pending item without issuing Agent writes', async ({ page, request }) => {
   const workingDir = path.join(tempRoot, 'ui-agent-project');
   fs.mkdirSync(workingDir, { recursive: true });

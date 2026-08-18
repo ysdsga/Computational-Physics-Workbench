@@ -57,14 +57,14 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v6 and CLI doctor start on disposable state', async () => {
+test('server, schema v7 and CLI doctor start on disposable state', async () => {
   const root = await fetch(`${base}/`);
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 6);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 7);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });
@@ -129,6 +129,168 @@ test('Task Spec gets one confirmation while Working Plan and Actions remain auto
 
   const actionResult = await api(`/api/agent/v1/runs/${draft.id}/actions`, { method: 'POST', body: JSON.stringify({ stageId: fixture.stages[0], actionType: 'planning.note', spec: { next: 'prepare inputs' }, idempotencyKey: 'note-1' }) });
   assert.equal(actionResult.response.status, 201); assert.equal((actionResult.payload as any).status, 'ready'); assert.match((actionResult.payload as any).spec_sha256, /^[a-f0-9]{64}$/);
+});
+
+test('theoretical Runs loop on unresolved ideas and complete only after an enabled exploration review passes', async () => {
+  const workingDir = path.join(tmpRoot, 'theory-exploration');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const projectResult = await api('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Theory exploration', working_dir: workingDir }),
+  });
+  assert.equal(projectResult.response.status, 201);
+  const project = projectResult.payload as any;
+  const taskResult = await api(`/api/projects/${project.id}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Theory task', workflow_id: 'theoretical-research' }),
+  });
+  assert.equal(taskResult.response.status, 201);
+  const task = taskResult.payload as any;
+  assert.ok(task.workflow.steps.some((step: any) => step.id === 'theory-interpretation-04'));
+  const planResult = await api('/api/research-plans', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Theory exploration plan', project_id: project.id, linked_task_ids: [task.id] }),
+  });
+  assert.equal(planResult.response.status, 201);
+  const plan = planResult.payload as any;
+  const stages = task.workflow.stages.map((stage: any) => stage.id);
+  const taskSpec = {
+    schemaVersion: 1,
+    objective: 'Resolve a theoretical question and its strongest generative follow-up',
+    confirmedEnvelope: {
+      schemaVersion: 1,
+      coreStageIds: stages,
+      scientificCommitments: ['Test the central claim and material high-value alternatives'],
+      allowedCapabilities: ['local.process'],
+      allowedMethods: ['analytic-derivation'],
+      allowedSoftwareStacks: [],
+      hpcProfileId: null,
+      resourceLimits: { maxCoresPerJob: 1, maxWallMinutes: 10, maxConcurrentJobs: 1, maxAutomaticRetries: 0 },
+      protectedRelativePaths: [],
+      completionEvidence: ['exploration review and final argument'],
+      researcherGates: [],
+      autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
+    },
+    workingPlan: { currentStageId: 'question', summary: 'Start from the central question' },
+  };
+  const draftResult = await api('/api/agent/v1/runs', {
+    method: 'POST',
+    body: JSON.stringify({ taskId: task.id, researchPlanId: plan.id, taskSpec, idempotencyKey: 'theory-exploration-run' }),
+  });
+  assert.equal(draftResult.response.status, 201);
+  const draft = draftResult.payload as any;
+  assert.equal(draft.confirmed_envelope.explorationReviewRequired, true, 'new theoretical Runs default to an enabled review');
+  const confirmed = await api(`/api/agent/v1/runs/${draft.id}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }),
+  });
+  assert.equal(confirmed.response.status, 200);
+
+  const missingReview = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ summary: 'premature', source: 'codex_conversation' }),
+  });
+  assert.equal(missingReview.response.status, 409);
+  assert.equal((missingReview.payload as any).code, 'EXPLORATION_REVIEW_REQUIRED');
+
+  const continuingPlan = await api(`/api/agent/v1/runs/${draft.id}/working-plan`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      workingPlan: {
+        currentStageId: 'derivation',
+        summary: 'Test the strongest new branch',
+        explorationReview: {
+          status: 'continue',
+          summary: 'One idea could still change the central conclusion',
+          unresolvedHighValueItems: ['Can the result be reproduced by the strongest alternative mechanism?'],
+        },
+      },
+      reason: 'Exploration review opened another focused cycle',
+      idempotencyKey: 'theory-review-continue',
+    }),
+  });
+  assert.equal(continuingPlan.response.status, 200);
+  const continuingCompletion = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ summary: 'still premature', source: 'codex_conversation' }),
+  });
+  assert.equal(continuingCompletion.response.status, 409);
+  assert.equal((continuingCompletion.payload as any).code, 'EXPLORATION_REVIEW_REQUIRED');
+
+  const passedPlan = await api(`/api/agent/v1/runs/${draft.id}/working-plan`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      workingPlan: {
+        currentStageId: 'release',
+        summary: 'The decisive branch is resolved',
+        explorationReview: {
+          status: 'passed',
+          summary: 'All high-value ideas were explored, falsified, or deferred with reasons',
+          unresolvedHighValueItems: [],
+        },
+      },
+      reason: 'Exploration review passed after the focused cycle',
+      idempotencyKey: 'theory-review-passed',
+    }),
+  });
+  assert.equal(passedPlan.response.status, 200);
+  const completed = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ summary: 'review passed', source: 'codex_conversation' }),
+  });
+  assert.equal(completed.response.status, 200);
+  assert.equal((completed.payload as any).status, 'completed');
+});
+
+test('theoretical exploration completion guard is explicitly opt-out and does not become global', async () => {
+  const workingDir = path.join(tmpRoot, 'theory-exploration-opt-out');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const project = (await api('/api/projects', {
+    method: 'POST', body: JSON.stringify({ name: 'Theory opt-out', working_dir: workingDir }),
+  })).payload as any;
+  const task = (await api(`/api/projects/${project.id}/tasks`, {
+    method: 'POST', body: JSON.stringify({ name: 'Theory opt-out task', workflow_id: 'theoretical-research' }),
+  })).payload as any;
+  const plan = (await api('/api/research-plans', {
+    method: 'POST', body: JSON.stringify({ title: 'Theory opt-out plan', project_id: project.id, linked_task_ids: [task.id] }),
+  })).payload as any;
+  const stages = task.workflow.stages.map((stage: any) => stage.id);
+  const draft = (await api('/api/agent/v1/runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      taskId: task.id,
+      researchPlanId: plan.id,
+      idempotencyKey: 'theory-opt-out-run',
+      taskSpec: {
+        schemaVersion: 1,
+        objective: 'Compatibility fixture',
+        confirmedEnvelope: {
+          schemaVersion: 1,
+          coreStageIds: stages,
+          scientificCommitments: [],
+          allowedCapabilities: ['local.process'],
+          allowedMethods: [],
+          allowedSoftwareStacks: [],
+          hpcProfileId: null,
+          resourceLimits: { maxCoresPerJob: 1, maxWallMinutes: 10, maxConcurrentJobs: 1, maxAutomaticRetries: 0 },
+          protectedRelativePaths: [],
+          completionEvidence: ['compatibility evidence'],
+          researcherGates: [],
+          explorationReviewRequired: false,
+          autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
+        },
+        workingPlan: { currentStageId: stages[0], summary: 'Compatibility plan' },
+      },
+    }),
+  })).payload as any;
+  assert.equal(draft.confirmed_envelope.explorationReviewRequired, false);
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, {
+    method: 'POST', body: JSON.stringify({ summary: 'confirmed opt-out', source: 'codex_conversation' }),
+  });
+  const completed = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
+    method: 'POST', body: JSON.stringify({ summary: 'opt-out compatibility', source: 'codex_conversation' }),
+  });
+  assert.equal(completed.response.status, 200);
 });
 
 test('Agent ledger reads complete histories while explicit API limits remain opt-in', async () => {

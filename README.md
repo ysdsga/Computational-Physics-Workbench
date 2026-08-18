@@ -5,7 +5,7 @@
 ## 主要功能
 
 - 项目与计算任务管理
-- One-shot DFT+DMFT 工作流和交互式流程图
+- One-shot DFT+DMFT 与通用理论研究工作流，以及交互式流程图
 - 创建任务时复制模板；每个任务拥有可独立增删、修改的工作流
 - 步骤进度、笔记、自定义命令与文件关联
 - 工作流模板持久化、可视化编辑和重置；模板修改只影响之后创建的任务
@@ -14,6 +14,7 @@
 - 经验库：人工记录、Codex 候选经验与证据确认经验分层管理
 - 超算管理：项目级 OpenSSH 连接、用户只读根、项目根、Task 写目录映射、传输记录和作业快照；不在 Web 执行
 - Task Spec = 一次确认的 Confirmed Envelope + Codex 可自主修改的 Working Plan
+- 理论研究在结束前审查仍可能改变、扩展或推翻中心结论的高价值问题与新想法；未处置时回到下一轮 Working Plan
 - Stage → Action → Job → Artifact/Evidence 追加式账本；Action spec 不可变但不逐动作授权
 - Agent 运行记录与待沟通事项：Web 只读展示命令预览、作业监控、证据和决定，并支持项目/任务/状态筛选
 - 材料无关 capability：Codex 自主选择脚本、输入和资源；Workbench 校验边界、快照、路径、哈希和资源

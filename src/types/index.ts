@@ -205,6 +205,7 @@ export interface ConfirmedEnvelope {
   protectedRelativePaths: string[];
   completionEvidence: string[];
   researcherGates: string[];
+  explorationReviewRequired?: boolean;
   autonomy: {
     allowWorkingPlanEdits: true;
     allowRetriesWithinLimits: true;
@@ -212,11 +213,18 @@ export interface ConfirmedEnvelope {
   };
 }
 
+export interface ExplorationReview {
+  status: 'continue' | 'passed';
+  summary: string;
+  unresolvedHighValueItems: string[];
+}
+
 export interface WorkingPlan extends Record<string, unknown> {
   currentStageId?: string | null;
   summary?: string;
   nextActions?: Array<Record<string, unknown>>;
   directoryLayout?: Record<string, unknown>;
+  explorationReview?: ExplorationReview;
 }
 
 export interface TaskSpec {
