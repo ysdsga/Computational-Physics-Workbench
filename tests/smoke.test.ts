@@ -18,8 +18,10 @@ process.env.WORKBENCH_PORT = '0';
 const python = spawnSync('python', ['--version'], { windowsHide: true }).status === 0 ? 'python' : 'python3';
 process.env.WORKBENCH_LOCAL_EXEC_ENABLED = '1';
 process.env.WORKBENCH_LOCAL_EXECUTABLES = python;
-process.env.WORKBENCH_REMOTE_ENABLED = '1';
-process.env.WORKBENCH_ALLOW_REMOTE_LSF = '1';
+delete process.env.WORKBENCH_REMOTE_ENABLED;
+delete process.env.WORKBENCH_ALLOW_REMOTE_LSF;
+delete process.env.WORKBENCH_REMOTE_DISABLED;
+delete process.env.WORKBENCH_REMOTE_SUBMIT_DISABLED;
 process.env.WORKBENCH_REMOTE_TEST_MODE = '1';
 
 let server: Server | undefined;
@@ -60,7 +62,7 @@ test('server, schema v6 and CLI doctor start on disposable state', async () => {
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
-  assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 3);
+  assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
   assert.equal(dbModule.default.pragma('user_version', { simple: true }), 6);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
@@ -129,6 +131,122 @@ test('Task Spec gets one confirmation while Working Plan and Actions remain auto
   assert.equal(actionResult.response.status, 201); assert.equal((actionResult.payload as any).status, 'ready'); assert.match((actionResult.payload as any).spec_sha256, /^[a-f0-9]{64}$/);
 });
 
+test('Agent ledger reads complete histories while explicit API limits remain opt-in', async () => {
+  const fixture = await createFixture('fixture-unbounded-ledger');
+  const draftResult = await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({
+    taskId: fixture.task.id,
+    researchPlanId: fixture.plan.id,
+    taskSpec: fixture.spec,
+    idempotencyKey: 'fixture-unbounded-ledger-run',
+  }) });
+  assert.equal(draftResult.response.status, 201);
+  const run = draftResult.payload as any;
+  const confirmed = await api(`/api/agent/v1/runs/${run.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+  assert.equal(confirmed.response.status, 200);
+
+  const actionsModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'agentActions.ts')).href);
+  const createdActions: any[] = [];
+  for (let index = 0; index < 105; index += 1) {
+    createdActions.push(actionsModule.createAction(run.id, {
+      stageId: fixture.stages[0],
+      actionType: 'ledger.fixture',
+      spec: { index },
+      idempotencyKey: `ledger-action-${index}`,
+    }));
+  }
+  for (let index = 0; index < 105; index += 1) {
+    actionsModule.registerEvidenceCheck(createdActions[0].id, {
+      validatorName: `ledger-validator-${index}`,
+      validatorVersion: '1',
+      status: 'pass',
+      result: { index },
+      idempotencyKey: `ledger-evidence-${index}`,
+    });
+  }
+
+  const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
+  const insertJob = dbModule.default.prepare(`INSERT INTO remote_jobs (
+    id, run_id, action_id, stage_id, action_token, idempotency_key, profile_id,
+    host, remote_workdir, scheduler, job_id, job_name, status, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'lsf', ?, ?, 'done', ?)`);
+  const createdAt = new Date().toISOString();
+  dbModule.default.transaction(() => {
+    for (let index = 0; index < 105; index += 1) {
+      insertJob.run(
+        `ledger-job-${index}`, run.id, createdActions[0].id, fixture.stages[0],
+        `ledger-token-${index}`, `ledger-job-key-${index}`, 'test-lsf', 'test-lsf',
+        `/home/tester/ledger/${index}`, `ledger-scheduler-${index}`, `ledger-job-name-${index}`, createdAt,
+      );
+    }
+  })();
+
+  const contextResult = await api(`/api/agent/v1/context/tasks/${fixture.task.id}`);
+  assert.equal(contextResult.response.status, 200);
+  const context = contextResult.payload as any;
+  assert.equal(context.recentActions.length, 105);
+  assert.equal(context.recentJobs.length, 105);
+  assert.equal(context.recentEvidenceChecks.length, 105);
+
+  const events = await api(`/api/agent/v1/runs/${run.id}/events`);
+  assert.equal(events.response.status, 200);
+  assert.ok((events.payload as any[]).length > 100);
+  const actions = await api(`/api/agent/v1/runs/${run.id}/actions`);
+  assert.equal((actions.payload as any[]).length, 105);
+  const evidence = await api(`/api/agent/v1/runs/${run.id}/evidence-checks`);
+  assert.equal((evidence.payload as any[]).length, 105);
+
+  const limited = await api(`/api/agent/v1/runs/${run.id}/actions?limit=7`);
+  assert.equal(limited.response.status, 200);
+  assert.equal((limited.payload as any[]).length, 7);
+});
+
+test('confirmed Task session runs routine remote commands with automatic logs and no Actions', async () => {
+  const fixture = await createFixture('fixture-session');
+  const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-session-run' }) })).payload as any;
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+
+  const remoteModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'remote.ts')).href);
+  let observedRemoteCommand = '';
+  remoteModule.setRemoteProcessRunnerForTests(async (command: string, args: string[]) => {
+    assert.equal(command, 'ssh');
+    observedRemoteCommand = args.at(-1) ?? '';
+    return { code: observedRemoteCommand.includes('false') ? 9 : 0, stdout: 'session-ok\n', stderr: observedRemoteCommand.includes('false') ? 'expected failure\n' : '' };
+  });
+
+  const session = await runCli(['remote', 'session', '--task', fixture.task.id]);
+  assert.equal(session.code, 0, session.stderr);
+  assert.equal(JSON.parse(session.stdout).routineOperationsCreateActions, false);
+
+  const executed = await runCli(['remote', 'exec', '--task', fixture.task.id, '--access', 'write', '--scope', 'task', '--cwd', '.', '--command', 'mkdir -p work && pwd']);
+  assert.equal(executed.code, 0, executed.stderr);
+  assert.equal(JSON.parse(executed.stdout).ok, true);
+  assert.match(observedRemoteCommand, /WORKBENCH_TASK_ROOT/);
+  assert.match(observedRemoteCommand, /mkdir -p work/);
+
+  const failed = await runCli(['remote', 'exec', '--task', fixture.task.id, '--command', 'false']);
+  assert.equal(failed.code, 0, failed.stderr);
+  assert.equal(JSON.parse(failed.stdout).ok, false);
+
+  const actions = await api(`/api/agent/v1/runs/${draft.id}/actions`);
+  assert.equal((actions.payload as any[]).length, 0, 'routine commands must not create Action permission records');
+  const events = await api(`/api/agent/v1/runs/${draft.id}/events`);
+  assert.ok((events.payload as any[]).some(item => item.event_type === 'remote.command_completed'));
+  assert.ok((events.payload as any[]).some(item => item.event_type === 'remote.command_failed'));
+
+  const schedulerBypass = await runCli(['remote', 'exec', '--task', fixture.task.id, '--access', 'write', '--command', 'bsub < run.lsf']);
+  assert.equal(schedulerBypass.code, 3);
+  assert.equal(JSON.parse(schedulerBypass.stderr).code, 'REMOTE_SCHEDULER_MUTATION_REQUIRES_JOB_API');
+
+  const context = await runCli(['context', '--task', fixture.task.id, '--allow-blocked']);
+  assert.equal(context.code, 0, context.stderr);
+  const compact = JSON.parse(context.stdout);
+  assert.equal(compact.view, 'compact');
+  assert.equal(compact.run.envelopeSha256, draft.confirmed_envelope_sha256);
+  assert.equal(compact.run.confirmed_envelope, undefined);
+  assert.ok(Array.isArray(compact.workflow.stages));
+  assert.equal(compact.workflow.stages[0].steps, undefined);
+});
+
 test('generic local Action records receipts, evidence, corrections and candidate experience without material adapters', async () => {
   const fixture = await createFixture('fixture-b');
   const specFile = path.join(tmpRoot, 'fixture-b-task-spec.json'); fs.writeFileSync(specFile, JSON.stringify(fixture.spec));
@@ -144,6 +262,12 @@ test('generic local Action records receipts, evidence, corrections and candidate
   const prepared = await runCli(['action', 'prepare', '--run', run.id, '--stage', fixture.stages[0], '--capability', 'local.process', '--spec-file', actionSpecPath, '--idempotency-key', 'validate-once']);
   assert.equal(prepared.code, 0, prepared.stderr); const action = JSON.parse(prepared.stdout);
   assert.equal(action.status, 'ready'); assert.equal(action.spec.capability, 'local.process');
+  delete process.env.WORKBENCH_LOCAL_EXEC_ENABLED;
+  const disabled = await api(`/api/agent/v1/actions/${action.id}/execute`, { method: 'POST', body: '{}' });
+  assert.equal(disabled.response.status, 403); assert.equal((disabled.payload as any).code, 'LOCAL_EXEC_ENV_DISABLED');
+  const stillReady = await api(`/api/agent/v1/actions/${action.id}`);
+  assert.equal((stillReady.payload as any).status, 'ready');
+  process.env.WORKBENCH_LOCAL_EXEC_ENABLED = '1';
   const executed = await runCli(['action', 'execute', '--action', action.id]);
   assert.equal(executed.code, 0, executed.stderr); assert.equal(JSON.parse(executed.stdout).status, 'succeeded');
   const details = await api(`/api/agent/v1/actions/${action.id}`); const actionDetails = details.payload as any;
@@ -196,7 +320,7 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
   fs.writeFileSync(path.join(fixture.taskRoot, 'jobs', 'run.lsf'), '#!/bin/sh\n#BSUB -q snode\n#BSUB -n 4\n#BSUB -W 00:10\necho run\n');
 
   const remoteModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'remote.ts')).href);
-  let bsubCount = 0; let failNextSubmit = false; let currentName = ''; let nextJobId = 700;
+  let bsubCount = 0; let failNextSubmit = false; let currentName = ''; let nextJobId = 700; let schedulerStatus = 'RUN';
   remoteModule.setRemoteProcessRunnerForTests(async (command: string, args: string[]) => {
     const remoteCommand = args.at(-1) ?? '';
     if (command === 'ssh' && remoteCommand.includes('bsub -J')) {
@@ -204,8 +328,8 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
       if (failNextSubmit) { failNextSubmit = false; throw new Error('simulated lost SSH response'); }
       nextJobId += 1; return { code: 0, stdout: `Job <${nextJobId}> is submitted.\n`, stderr: '' };
     }
-    if (command === 'ssh' && remoteCommand.includes('bjobs -a -J')) return { code: 0, stdout: `${nextJobId + 1} RUN ${currentName}\n`, stderr: '' };
-    if (command === 'ssh' && remoteCommand.includes("bjobs -a '") && remoteCommand.includes('-noheader')) return { code: 0, stdout: `${nextJobId} RUN ${currentName}\n`, stderr: '' };
+    if (command === 'ssh' && remoteCommand.includes("bjobs -a -noheader -o 'jobid stat job_name' -J")) return { code: 0, stdout: `${nextJobId + 1} ${schedulerStatus} ${currentName}\n`, stderr: '' };
+    if (command === 'ssh' && remoteCommand.includes("bjobs -a -noheader -o 'jobid stat job_name'") && !remoteCommand.includes(' -J ')) return { code: 0, stdout: `${nextJobId} ${schedulerStatus} ${currentName}\n`, stderr: '' };
     return { code: 0, stdout: '', stderr: '' };
   });
 
@@ -218,8 +342,11 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
   assert.equal(firstExecute.response.status, 200); assert.equal((firstExecute.payload as any).status, 'waiting_remote'); assert.equal(bsubCount, 1);
   const guardBefore = await api('/api/agent/v1/monitor/guard');
   assert.equal((guardBefore.payload as any).ok, false);
-  const attached = await api(`/api/agent/v1/runs/${draft.id}/monitor/attach`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', cadenceMinutes: 10 }) });
+  const inactiveAttach = await api(`/api/agent/v1/runs/${draft.id}/monitor/attach`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', automationState: 'paused', cadenceMinutes: 10 }) });
+  assert.equal(inactiveAttach.response.status, 409, 'a paused automation ID must not satisfy the monitor guard');
+  const attached = await api(`/api/agent/v1/runs/${draft.id}/monitor/attach`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', automationState: 'active', cadenceMinutes: 10 }) });
   assert.equal(attached.response.status, 200); assert.equal((attached.payload as any).status, 'scheduled');
+  assert.equal((attached.payload as any).heartbeat_fresh, true);
   const guardAfter = await api('/api/agent/v1/monitor/guard');
   assert.equal((guardAfter.payload as any).ok, true);
 
@@ -235,7 +362,72 @@ test('LSF submission is recorded before bsub, sanity checked, and uncertain resp
   assert.equal(ticked.response.status, 200); assert.equal((ticked.payload as any).checkedJobs, 1); assert.equal(bsubCount, 2, 'monitor tick must never call bsub again');
   const contextAfter = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
   assert.equal(contextAfter.monitor.status, 'scheduled');
+  assert.equal(contextAfter.monitor.recommended_cadence_minutes, 2);
+  assert.equal(contextAfter.monitor.heartbeat_fresh, true);
   assert.equal(contextAfter.recentJobs.find((item: any) => item.id === uncertainJob.id).status, 'run');
+
+  schedulerStatus = 'DONE';
+  const activeJobs = contextAfter.recentJobs.filter((item: any) => item.status === 'run');
+  for (const job of activeJobs) {
+    const terminal = await api(`/api/agent/v1/remote/jobs/${job.id}/reconcile`, { method: 'POST', body: '{}' });
+    assert.equal(terminal.response.status, 200);
+    assert.equal((terminal.payload as any).status, 'done');
+  }
+  const terminalMonitor = (await api(`/api/agent/v1/runs/${draft.id}/monitor`)).payload as any;
+  assert.equal(terminalMonitor.status, 'complete');
+  assert.equal(terminalMonitor.automation_ref, 'automation:test-current-chat', 'automation remains bound until deletion is acknowledged');
+  const terminalDirective = (await api(`/api/agent/v1/runs/${draft.id}/monitor/directive`)).payload as any;
+  assert.equal(terminalDirective.action, 'delete');
+  const guardNeedsCleanup = (await api('/api/agent/v1/monitor/guard')).payload as any;
+  assert.equal(guardNeedsCleanup.ok, false);
+  assert.equal(guardNeedsCleanup.cleanupRequired.length, 1);
+  const contextNeedsCleanup = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+  assert.ok(contextNeedsCleanup.blockers.some((item: any) => item.code === 'MONITOR_AUTOMATION_CLEANUP_REQUIRED'));
+  const prematureClose = await api(`/api/agent/v1/runs/${draft.id}/monitor/close`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', automationState: 'active' }) });
+  assert.equal(prematureClose.response.status, 409);
+  const closed = await api(`/api/agent/v1/runs/${draft.id}/monitor/close`, { method: 'POST', body: JSON.stringify({ automationRef: 'automation:test-current-chat', automationState: 'deleted' }) });
+  assert.equal(closed.response.status, 200);
+  assert.equal((closed.payload as any).automation_ref, null);
+  assert.equal((closed.payload as any).status, 'complete');
+  const contextClosed = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+  assert.ok(!contextClosed.blockers.some((item: any) => item.code === 'MONITOR_AUTOMATION_CLEANUP_REQUIRED'));
+  assert.equal(((await api('/api/agent/v1/monitor/guard')).payload as any).ok, true);
+  remoteModule.setRemoteProcessRunnerForTests(null);
+});
+
+test('an explicit pre-scheduler rejection is traceable but does not consume the scientific retry budget', async () => {
+  const fixture = await createFixture('fixture-esub-reject');
+  const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-esub-reject-run' }) })).payload as any;
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+  fs.mkdirSync(path.join(fixture.taskRoot, 'jobs'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.taskRoot, 'jobs', 'run.lsf'), '#!/bin/sh\n#BSUB -q snode\n#BSUB -n 4\n#BSUB -W 00:10\necho run\n');
+
+  const remoteModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'remote.ts')).href);
+  remoteModule.setRemoteProcessRunnerForTests(async (command: string, args: string[]) => {
+    const remoteCommand = args.at(-1) ?? '';
+    if (command === 'ssh' && remoteCommand.includes('bsub -J')) return { code: 1, stdout: 'Submiting job\n', stderr: 'Request aborted by esub. Job not submitted.\n' };
+    return { code: 0, stdout: '', stderr: '' };
+  });
+
+  const createSubmission = (key: string, retryOfActionId?: string) => api(`/api/agent/v1/runs/${draft.id}/executable-actions`, { method: 'POST', body: JSON.stringify({
+    stageId: fixture.stages[1], capability: 'job.submit',
+    spec: { method: 'oneshot-dft-dmft', softwareStack: 'QE+Wannier90+TRIQS', remoteWorkdir: `jobs/${key}`, localScriptPath: 'jobs/run.lsf', remoteScriptPath: 'run.lsf', submissionKey: key },
+    idempotencyKey: `action-${key}`, retryOfActionId,
+  }) });
+  const rejectedAction = await createSubmission('rejected');
+  assert.equal(rejectedAction.response.status, 201);
+  const rejected = await api(`/api/agent/v1/actions/${(rejectedAction.payload as any).id}/execute`, { method: 'POST', body: '{}' });
+  assert.equal(rejected.response.status, 200);
+  assert.equal((rejected.payload as any).status, 'waiting_codex');
+  const context = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+  const rejectedJob = context.recentJobs.find((item: any) => item.action_id === (rejectedAction.payload as any).id);
+  assert.equal(rejectedJob.status, 'preparation_failed');
+  assert.equal(rejectedJob.job_id, null);
+  assert.ok(context.pendingItems.some((item: any) => item.kind === 'submission_rejected'));
+
+  const retry = await createSubmission('corrected', (rejectedAction.payload as any).id);
+  assert.equal(retry.response.status, 201);
+  assert.equal((retry.payload as any).retry_attempt, 0);
   remoteModule.setRemoteProcessRunnerForTests(null);
 });
 

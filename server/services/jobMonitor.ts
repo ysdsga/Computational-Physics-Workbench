@@ -1,7 +1,7 @@
 import db from '../db.js';
 import { AgentCoreError, getRun, now } from './agentCore.js';
 import { reconcileJob } from './remote.js';
-import { getRunMonitor, recordMonitorFailure, refreshRunMonitor, TERMINAL_JOB_STATUSES } from './monitorStore.js';
+import { getMonitorAutomationDirective, getRunMonitor, recordMonitorFailure, refreshRunMonitor, TERMINAL_JOB_STATUSES } from './monitorStore.js';
 
 export async function tickRunMonitor(runId: string) {
   getRun(runId);
@@ -26,5 +26,5 @@ export async function tickRunMonitor(runId: string) {
   const updated = refreshRunMonitor(runId);
   const activeJobs = (db.prepare('SELECT status FROM remote_jobs WHERE run_id = ?').all(runId) as Array<{ status: string }>)
     .filter(item => !TERMINAL_JOB_STATUSES.has(item.status.toLowerCase())).length;
-  return { runId, checkedAt: timestamp, checkedJobs: due.length, activeJobs, stateChanges: results, monitor: updated };
+  return { runId, checkedAt: timestamp, checkedJobs: due.length, activeJobs, stateChanges: results, monitor: updated, automation: getMonitorAutomationDirective(runId) };
 }

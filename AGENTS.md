@@ -62,7 +62,7 @@ npm run build
 - SPA fallback 使用普通中间件，不使用 Express 5 不兼容的 `app.get('*', ...)`。
 - 前端路由保持 `HashRouter`，Vite 保持 `base: './'` 与 `vite-plugin-singlefile`，以兼容本地部署。
 - 工作流运行时数据以数据库为准；`src/data/workflows.ts` 只负责内置默认、首次播种和重置回退。相关修改要同时检查数据库 API、Context、模板编辑器和任务目录创建逻辑。
-- 工作流模板和任务工作流只保留稳定的核心骨架：跑通计算所必需的物理阶段、软件转换、关键检查点与完成证据。试跑命令、重试、上传下载、参数扫描批次和临时诊断记录为 action/event，不新增工作流节点；材料参数、收敛阈值、对照矩阵和不确定度设计放在研究方案中。
+- 工作流模板和任务工作流只保留稳定的核心骨架：跑通计算所必需的物理阶段、软件转换、关键检查点与完成证据。试跑命令、连接尝试、上传下载和临时诊断只记 event；科学重试、参数扫描批次和提交作业可记为里程碑 Action，但不新增工作流节点；材料参数、收敛阈值、对照矩阵和不确定度设计放在研究方案中。
 - SQLite schema 变更必须对现有数据库向后兼容。新增字段使用可重复启动的安全迁移；不要假设数据库是空的。
 - Windows 的 `.bat` 启动脚本保持 ASCII/英文，避免系统代码页导致中文命令乱码。
 - 文件 API 必须把访问限制在 Project 的 `working_dir` 内。处理路径时使用解析后的规范路径，并覆盖同名路径前缀、`..`、绝对路径等逃逸场景。
@@ -95,12 +95,13 @@ npm run build
 ## Codex Agent 执行边界
 
 - Agent 本体是本项目中的 Codex 对话，不是 Web 页面、Express 后台 worker 或数据库进程。Agent 运行、评价、证据和远程作业的 Web 页面只能展示已记录状态，不得成为启动、授权、提交、取消或对账入口。
-- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill，并把 `workbench` CLI 作为唯一机器入口。禁止为 Agent 执行直接读写 SQLite、直接调用 Agent 写 API，或绕过 Workbench capability 使用通用 `ssh`/`sftp`/`scp`/`bsub`/`bjobs`/`bpeek`/`bkill`。
-- 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和 `workbench context --task <id> --allow-blocked --pretty`，检查 Confirmed Envelope、Working Plan、待沟通事项、active/uncertain Job、Action、Artifact 和 evidence；提交响应不确定时只能按已记录作业身份对账，不能重提。
-- 首次出现非终态远程 Job 后，必须为该 Run 创建或复用一个绑定当前 Codex 任务的 heartbeat Scheduled Task，并用 `workbench monitor attach` 记录真实 reference。Scheduled Task 负责唤醒，Workbench 保存 `next_check_at` 和 Job 状态，Stop Hook 只检查绑定是否存在；三者都不得成为第二个 Agent 或 Web 执行入口。所有 Job 终态后停止 Scheduled Task。
+- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill。`workbench` 负责状态、边界、自动日志、传输、作业和监控，不是逐命令审批门；Codex 可在本地 Task 根直接使用终端，并可通过 `workbench remote exec` 在已确认远程边界内执行任意诊断和任务命令。禁止直接读写 SQLite、直接调用 Agent 写 API，或绕过记录通道提交/取消作业。
+- `workbench remote exec/upload/download` 是透明的 SSH/SFTP 会话封装：自动推导 host/root 并写入事件日志，不创建 Action。封装自身故障时，Codex 可用直接 `ssh`/`sftp` 诊断或修复同一已登记 Task 边界并补记 event，但不得由此直接 `bsub`/`bkill`。远程写入仍只允许 Task 写根；用户根和项目根只读。
+- 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和默认紧凑的 `workbench context --task <id> --allow-blocked --pretty`，只检查 Envelope 哈希/边界、Working Plan 当前阶段、待沟通事项和 active/uncertain Job。仅在明确需要某字段时用 `--full`；不要反复读取项目架构、完整工作流、全部历史 Action/证据/经验。提交响应不确定时只能按已记录作业身份对账，不能重提。
+- 每个 `job.submit` 规格必须由 Codex 根据计算规模、阶段、历史耗时、资源和 wall-time 写入本 Job 的预计耗时、首次检查、RUN/PEND 检查间隔与依据；不得用全局固定轮询表代替 Agent 判断。首次出现非终态 Job 后，Codex 按 `workbench monitor directive` 创建或复用当前任务 heartbeat，确认其真实为 ACTIVE 后再 attach。Workbench 保存 `next_check_at`、实际 cadence 和 heartbeat lease；Stop Hook 同时阻止未监控、心跳过期和终态未删除自动化。所有 Job 终态且无后续 Job 时必须删除自动化，并用 `workbench monitor close` 回写删除成功。
 - 首次进入执行前，必须在 Codex 对话中向研究者说明 Research Plan、核心 Workflow、Task Spec 的科学承诺、资源、研究者关口和完成证据，展示精确 Confirmed Envelope 及哈希并获得一次明确确认。不得把沉默、历史上的宽泛目标、Web 状态或 Agent 自己的建议当作授权。
-- 确认后，Codex 可以在 Envelope 内自主修改 Working Plan、安排 Task 根下目录树、创建和执行带哈希的 Action、排错、重试、监控、下载分析，以及取消自己在当前 Run 中创建的错误或已替代 Job；不再逐 Action 请求研究者确认。扩展科学承诺、方法/软件栈、资源、权限或保护路径时，必须创建 researcher 待沟通事项并重新确认 Envelope。
-- 自动重试必须创建新 Action 并显式绑定 `retry_of_action_id`；禁止重试分叉或超过 Confirmed Envelope 的 `maxAutomaticRetries`。`submission_uncertain` 只能对账，不能作为重试提交依据。
+- 确认后，Codex 可以在 Envelope 内自主修改 Working Plan、安排 Task 根下目录树、直接执行本地工作和已记录的远程会话命令、排错、传输、监控、下载分析，以及取消自己在当前 Run 中创建的错误或已替代 Job；不再逐命令或逐 Action 请求研究者确认。Action 只保留为提交/取消、多 Job 批次、证据验证等需要持久溯源的科学里程碑，不是普通命令的许可票据。扩展科学承诺、方法/软件栈、资源、权限或保护路径时，才创建 researcher 待沟通事项并重新确认 Envelope。
+- 连接、认证、超时、建目录、检查和传输失败只写 event，不消耗科学重试额度。替换失败的科学 Job/Action 时必须显式绑定 `retry_of_action_id`；禁止科学重试分叉或超过 Confirmed Envelope 的 `maxAutomaticRetries`。`submission_uncertain` 只能对账，不能作为重试提交依据。
 - Research Plan 和核心 Workflow 允许纠错。先评估受影响阶段和产物；边界内最小重算，边界外再沟通；相关 Artifact 必须标记为 `valid`、`suspect`、`invalid` 或 `superseded`，不得静默覆盖来源。
 - 执行层只提供材料无关的 capability 接口与安全边界；材料名、Task ID、固定 workflow step、科学脚本路径和软件专属参数不得硬编码进执行器、路由或 CLI。由 Codex 根据采用的研究方案和工作流自主生成每次 action spec；材料专属内容只能作为项目数据或测试 fixture。
 - 用户决定默认只保存摘要、哈希、时间和可选 Codex task reference，不保存完整聊天。事实、推断和决定分开写入；研究者未明确陈述或确认时，Codex 不得记录 researcher conclusion。

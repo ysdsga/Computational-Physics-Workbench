@@ -15,7 +15,7 @@
                  │ HTTP
                  ▼
 ┌──────────────── Workbench API ────────────────┐
-│ Run / Task Spec │ Action executor │ SSH/LSF   │
+│ Run / Task Spec │ Event / Action  │ SSH/LSF   │
 │ Pending items   │ Artifact/Evidence│ Experience│
 └──────────────────────┬─────────────────────────┘
                        ▼
@@ -43,8 +43,8 @@ Task Spec 以 `research_runs` 为唯一机器来源；CLI 与 Web 都从数据�
 - `server/services/agentActions.ts`：Action、Artifact validity、Evidence 与证据库查询。
 - `server/services/actionExecutor.ts`：材料无关 capability、输入快照、Action spec、回执与执行恢复。
 - `server/services/hpcConfig.ts`：验证连接 profile 和 Task 目录映射，派生用户读根/项目根/Task 写根。
-- `server/services/remote.ts`：固定 OpenSSH/SFTP/LSF 原语、提交身份、提交后 sanity check 与对账。
-- `server/services/jobMonitor.ts`、`monitorStore.ts`：持久化一个 Run monitor、到期 Job 检查、等待退避与 Stop Hook guard。
+- `server/services/remote.ts`：Task 会话式 OpenSSH/SFTP、自动 Event、提交身份、提交后 sanity check 与对账。
+- `server/services/jobMonitor.ts`、`monitorStore.ts`、`monitorPolicy.ts`：持久化一个 Run monitor、按 Job 规格自适应检查、自动化生命周期指令、heartbeat lease 与 Stop Hook guard。
 - `server/routes/*.ts`：HTTP 契约；Agent 写接口供 CLI 使用，Web 调用方只读取 Agent 记录。
 
 执行器不得包含材料名、Task ID、固定 Workflow step、科学脚本路径或软件专属参数。新增材料/路线由 Codex 生成新的 Research Plan、Workflow、Task Spec 和 Action spec，不注册产品 adapter。
@@ -55,9 +55,11 @@ Task Spec 以 `research_runs` 为唯一机器来源；CLI 与 Web 都从数据�
 
 Workbench 只创建稳定 Task 根，不创建 Stage 子目录。Codex 可在 Task 根内设计任意树；路径解析阻止 `..`、绝对路径、同名前缀和符号链接逃逸。Workflow 删除节点不会删除历史文件。
 
-## Action 与远程作业
+## Task 会话、Action 与远程作业
 
-可执行 Action 在创建时规范化并哈希；本地/提交输入还保存文件快照。确认 Envelope 后无需逐 Action 授权，但每次执行仍在服务端检查：
+确认 Envelope 后，CLI 默认返回紧凑恢复 Context。`remote session` 只展示服务派生的 host 和用户读根/项目读根/Task 写根；`remote exec/upload/download` 在该边界内直接工作并自动追加 Event，不需要 prepare/execute Action。普通连接或文件操作失败不会消耗科学重试预算。任意 shell 命令仍不得通过此通道直接提交或取消调度器 Job。
+
+Action 保留给提交/取消、多 Job 批次和证据验证等科学里程碑。可执行 Action 在创建时规范化并哈希；提交输入保存文件快照。确认 Envelope 后无需逐 Action 授权，但科学里程碑执行仍检查：
 
 - capability、Stage、method/software 是否在 Envelope；
 - Task/HPC binding 是否仍匹配；
@@ -68,9 +70,9 @@ Workbench 只创建稳定 Task 根，不创建 Stage 子目录。Codex 可在 Ta
 
 `job.submit` 先插入 Job 再调用 `bsub`。成功返回后用 `bjobs` 核对 ID/name；丢响应或核对失败写为 `submission_uncertain`。恢复按唯一 `job_name` 查 `bjobs/bhist`，从不通过重提判断状态。
 
-首次出现非终态 Job 时，Run monitor 进入 `required`。Codex 在当前任务中创建或复用一条 heartbeat Scheduled Task，并把其真实 reference 绑定为 `scheduled`。Scheduled Task 负责跨回合唤醒 Codex；`next_check_at` 决定本次唤醒是否真的访问 HPC；项目 Stop Hook 只检查活跃 Job 是否已绑定 monitor。PEND 按 10/30/60 分钟退避，RUN 约 15 分钟检查，终态清空下次检查。Hook 和 Web 都不是后台 Agent。
+首次出现非终态 Job 时，Run monitor 进入 `required`。每个提交规格保存 Codex 对该 Job 的预计运行时间、首次检查、RUN/PEND 检查间隔和依据；Workbench 从当前活跃 Jobs 计算推荐 heartbeat cadence，而不是使用全局 10/15/30 分钟表。Codex 创建、恢复或更新当前任务 heartbeat，确认自动化真实为 ACTIVE 后把 reference、cadence 绑定为 `scheduled`。`next_check_at` 决定一次唤醒是否访问 HPC；heartbeat lease 检出“账本已绑定但自动化没有继续唤醒”。最后一个 Job 终止后 monitor 保留 reference 并返回 `delete`，直到 Codex 删除自动化并提交 `monitor close` 回执才完成闭环。Stop Hook 会阻止未监控、lease 过期和待删除状态；Hook 和 Web 都不是后台 Agent。
 
-重试 Action 必须通过 `retry_of_action_id` 形成单链，`retry_attempt` 由服务计算，并硬性受 Confirmed Envelope 的 `maxAutomaticRetries` 限制。
+替换失败科学 Job 的重试 Action 必须通过 `retry_of_action_id` 形成单链，`retry_attempt` 由服务计算，并硬性受 Confirmed Envelope 的 `maxAutomaticRetries` 限制。
 
 Codex 可取消当前 Run 自己创建的错误/已替代 Job，前提是 Envelope 允许 `job.cancel`。外部调度器与远程文件系统是真实状态源；数据库保存最近观察与可恢复身份。
 
@@ -87,6 +89,6 @@ Codex 可取消当前 Run 自己创建的错误/已替代 Job，前提是 Envelo
 
 ## 远程与数据安全
 
-服务默认绑定 `127.0.0.1`，CORS 默认只允许本机 Vite 源。远程执行还要求环境开关、严格 host key、BatchMode、无 agent forwarding、超时和输出上限；Workbench 不保存密码或私钥。
+服务默认绑定 `127.0.0.1`，CORS 默认只允许本机 Vite 源。已确认 Envelope 与 Task binding 是执行授权；远程通道默认可用，可用 `WORKBENCH_REMOTE_DISABLED=1` 或 `WORKBENCH_REMOTE_SUBMIT_DISABLED=1` 紧急停用。连接使用严格 host key、BatchMode、无 agent forwarding、超时和输出上限；Workbench 不保存密码或私钥。
 
 数据库迁移前创建 `*.before-essential-v3.db`，v6 再创建 `*.before-job-monitor-v6.db`。正式库迁移必须先停用旧服务；自动化测试通过 `WORKBENCH_DB_PATH` 使用临时库。Project、Task、Plan 有 Run 历史后只能归档，Event 和科学来源链不提供破坏性清理接口。

@@ -7,6 +7,7 @@ import type { ExecutableCapability, RunAction } from '../../src/types/index.js';
 import { activeRun, AgentCoreError, createPendingItem, runtimeTask } from './agentCore.js';
 import { createAction, getActionForExecution, registerArtifact, registerEvidenceCheck, transitionAction } from './agentActions.js';
 import { normalizeHpcConfig, resolveRemoteTaskBinding } from './hpcConfig.js';
+import { normalizeJobMonitorPolicy, type JobMonitorPolicy } from './monitorPolicy.js';
 import { resolveWithinRoot } from './pathSafety.js';
 import {
   cancelJob,
@@ -49,7 +50,7 @@ interface ExecutionSpec extends Record<string, unknown> {
   submission?: {
     method: string; softwareStack: string; remoteWorkdir: string; remoteScriptPath: string;
     script: FileDescriptor; remoteInputs: Array<{ localPath: string; remotePath: string; size: number; sha256: string }>;
-    inputSnapshot: InputSnapshot; resources: ReturnType<typeof parseLsfResources>; submissionKey: string;
+    inputSnapshot: InputSnapshot; resources: ReturnType<typeof parseLsfResources>; monitoring: JobMonitorPolicy; submissionKey: string;
   };
   targetJob?: { remoteJobId: string; schedulerJobId: string };
 }
@@ -207,7 +208,9 @@ function buildRemoteSpec(runId: string, stageId: string, capability: Exclude<Exe
     const remoteScriptPath = safeRelative(spec.remoteScriptPath ?? path.basename(localScriptPath), 'remoteScriptPath');
     const remoteWorkdir = safeRelative(spec.remoteWorkdir, 'remoteWorkdir');
     const snapshot = snapshotInputs(taskRoot, [localScriptPath, ...remoteInputs.map(item => item.localPath)]);
-    base.submission = { method, softwareStack, remoteWorkdir, remoteScriptPath, script, remoteInputs, inputSnapshot: snapshot, resources: parseLsfResources(fs.readFileSync(localScript, 'utf8')), submissionKey: safeKey(spec.submissionKey ?? key) };
+    const resources = parseLsfResources(fs.readFileSync(localScript, 'utf8'));
+    const monitoring = normalizeJobMonitorPolicy(spec.monitoring, resources.wallMinutes);
+    base.submission = { method, softwareStack, remoteWorkdir, remoteScriptPath, script, remoteInputs, inputSnapshot: snapshot, resources, monitoring, submissionKey: safeKey(spec.submissionKey ?? key) };
     base.executionPreview = { transport: 'ssh', commands: [`cd ${displayQuote(`${binding.taskWriteRoot}/${remoteWorkdir}`)} && verify input hashes`, `bsub -J <workbench-token> < ${displayQuote(remoteScriptPath)}`, 'bjobs <returned-id> # post-submit sanity'], note: '每次提交先落库再调用 bsub；响应不确定时只按唯一作业名对账，绝不重提。' };
   }
   return base;
@@ -299,8 +302,8 @@ async function executeRemote(action: RunAction, spec: ExecutionSpec) {
   const current = transitionAction(action.id, { status: 'executing' });
   if (spec.capability === 'job.submit') {
     const submission = spec.submission!;
-    const job = await submitAuthorizedLsfAction(current, { taskId: task.id, host: spec.remote!.host, remoteRoot: spec.remote!.root, remoteWorkdir: submission.remoteWorkdir, remoteScriptPath: submission.remoteScriptPath, scriptSha256: submission.script.sha256, remoteInputs: submission.remoteInputs.map(item => ({ remotePath: item.remotePath, sha256: item.sha256 })), resources: submission.resources, idempotencyKey: submission.submissionKey });
-    return transitionAction(current.id, { status: job.status === 'submission_uncertain' ? 'waiting_codex' : 'waiting_remote', result: { remoteJobId: job.id, schedulerJobId: job.job_id, status: job.status } });
+    const job = await submitAuthorizedLsfAction(current, { taskId: task.id, host: spec.remote!.host, remoteRoot: spec.remote!.root, remoteWorkdir: submission.remoteWorkdir, remoteScriptPath: submission.remoteScriptPath, scriptSha256: submission.script.sha256, remoteInputs: submission.remoteInputs.map(item => ({ remotePath: item.remotePath, sha256: item.sha256 })), resources: submission.resources, monitoring: submission.monitoring, idempotencyKey: submission.submissionKey });
+    return transitionAction(current.id, { status: ['submission_uncertain', 'preparation_failed'].includes(job.status) ? 'waiting_codex' : 'waiting_remote', result: { remoteJobId: job.id, schedulerJobId: job.job_id, status: job.status } });
   }
   const receipt = await withReceipt(taskRoot, current, spec, async () => {
     if (spec.capability === 'remote.inspect') return { remote: await inspectRemote(task.id, spec.remote!.host, spec.remote!.root) };
@@ -333,7 +336,7 @@ export async function executeAction(actionId: string) {
   catch (error) {
     const item = error as AgentCoreError;
     const current = db.prepare('SELECT status FROM run_actions WHERE id = ?').get(action.id) as { status: string } | undefined;
-    if (current && ['ready', 'executing', 'waiting_remote'].includes(current.status)) transitionAction(action.id, { status: 'waiting_codex', error: { code: item.code ?? 'ACTION_EXECUTION_FAILED', message: item.message } });
+    if (current && ['executing', 'waiting_remote'].includes(current.status)) transitionAction(action.id, { status: 'waiting_codex', error: { code: item.code ?? 'ACTION_EXECUTION_FAILED', message: item.message } });
     codexFailure(action, item.code ?? 'ACTION_EXECUTION_FAILED', item.message);
     throw error;
   } finally { activeExecutions.delete(actionId); }
@@ -341,12 +344,13 @@ export async function executeAction(actionId: string) {
 
 export function describeExecutionContract() {
   return {
-    schemaVersion: 3,
-    model: 'One researcher confirmation freezes the Task Spec Envelope. Codex may create and execute immutable, hashed Actions inside it without per-Action approval.',
+    schemaVersion: 4,
+    model: 'One researcher confirmation opens a bounded Task session. Routine local work and remote shell/transfer operations execute directly and append events; Actions are durable scientific milestones, not micro-operation permission tokens.',
     capabilities: [...EXECUTABLE_CAPABILITIES],
     binding: ['runId', 'stageId', 'capability', 'specSha256', 'inputHashes', 'paths', 'resources'],
-    recovery: 'Receipts make repeat reads idempotent. Submission rows exist before bsub; uncertain responses are reconciled by unique job name and never resubmitted. Active Jobs require one persisted current-chat monitor; retries have explicit lineage and an enforced Envelope budget.',
+    routineRemoteSession: { commandFreedom: 'arbitrary shell inside the selected registered root', automaticLog: 'run_events', createsAction: false, schedulerMutation: 'dedicated recorded Job path only' },
+    recovery: 'Routine transport/configuration failures are logged and do not consume the scientific retry budget. Submission rows exist before bsub; uncertain responses are reconciled by unique job name and never resubmitted. Active Jobs require one persisted current-chat monitor.',
     local: { environmentSwitch: 'WORKBENCH_LOCAL_EXEC_ENABLED=1', executableAllowlist: [...allowedLocalExecutables()].sort(), shell: false, maxTimeoutMs: MAX_LOCAL_TIMEOUT_MS, maxOutputBytes: MAX_LOCAL_OUTPUT_BYTES },
-    remote: { environmentSwitch: 'WORKBENCH_REMOTE_ENABLED=1', lsfEnvironmentSwitch: 'WORKBENCH_ALLOW_REMOTE_LSF=1', boundarySource: 'confirmed Envelope + registered Task binding' },
+    remote: { enabledByDefault: true, emergencyDisableSwitch: 'WORKBENCH_REMOTE_DISABLED=1', submissionDisableSwitch: 'WORKBENCH_REMOTE_SUBMIT_DISABLED=1', boundarySource: 'confirmed Envelope + registered Task binding' },
   };
 }

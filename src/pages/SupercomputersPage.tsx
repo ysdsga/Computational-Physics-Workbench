@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Save, Server, ShieldCheck, Trash2, X } from 'lucide-react';
 import { agentApi, projectsApi, tasksApi } from '../api/client';
-import type { AgentContext, HpcConfig, HpcProfile, HpcTaskBinding, Project, Task } from '../types';
+import type { AgentContext, HpcConfig, HpcProfile, HpcTaskBinding, Project, RunEvent, Task } from '../types';
+import { formatLocalDateTime } from '../utils/dateTime';
 
 const EMPTY_PROFILE: HpcProfile = { id: '', name: '', sshAlias: '', userRoot: '', projectRoot: '', scheduler: 'LSF', notes: '' };
 
@@ -32,6 +33,11 @@ function commandPreview(action: AgentContext['recentActions'][number]) {
   return Array.isArray(commands) ? commands.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function eventText(event: RunEvent, key: string) {
+  const value = event.payload[key];
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
 export default function SupercomputersPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -39,6 +45,7 @@ export default function SupercomputersPage() {
   const [taskId, setTaskId] = useState('');
   const [config, setConfig] = useState<HpcConfig>({ schemaVersion: 2, profiles: [], taskBindings: [] });
   const [context, setContext] = useState<AgentContext | null>(null);
+  const [events, setEvents] = useState<RunEvent[]>([]);
   const [draft, setDraft] = useState<HpcProfile | null>(null);
   const [bindingProfileId, setBindingProfileId] = useState('');
   const [taskRootDraft, setTaskRootDraft] = useState('');
@@ -58,6 +65,7 @@ export default function SupercomputersPage() {
     setConfig(parseConfig(project));
     setDraft(null);
     setContext(null);
+    setEvents([]);
     if (!projectId) { setTasks([]); setTaskId(''); return; }
     tasksApi.list(projectId).then(next => {
       setTasks(next);
@@ -66,8 +74,11 @@ export default function SupercomputersPage() {
   }, [project, projectId]);
 
   useEffect(() => {
-    if (!taskId) { setContext(null); return; }
-    agentApi.context(taskId).then(setContext).catch(error => setMessage((error as Error).message));
+    if (!taskId) { setContext(null); setEvents([]); return; }
+    agentApi.context(taskId).then(async next => {
+      setContext(next);
+      setEvents(next.run ? await agentApi.events(next.run.id) : []);
+    }).catch(error => setMessage((error as Error).message));
   }, [taskId]);
 
   useEffect(() => {
@@ -122,7 +133,9 @@ export default function SupercomputersPage() {
     void saveConfig(config.profiles ?? [], [...bindings, binding]);
   };
 
-  const transfers = useMemo(() => context?.recentActions.filter(action => action.action_type === 'files.upload' || action.action_type === 'files.download') ?? [], [context]);
+  const legacyTransfers = useMemo(() => context?.recentActions.filter(action => action.action_type === 'files.upload' || action.action_type === 'files.download') ?? [], [context]);
+  const transferEvents = useMemo(() => events.filter(event => event.event_type === 'remote.file_uploaded' || event.event_type === 'remote.file_downloaded').reverse(), [events]);
+  const sessionEvents = useMemo(() => events.filter(event => event.event_type.startsWith('remote.command_') || event.event_type === 'remote.task_root_ready').reverse().slice(0, 20), [events]);
   const envelope = context?.run?.confirmed_envelope;
   const bindingProfile = config.profiles?.find(item => item.id === bindingProfileId);
   const selectedBinding = config.taskBindings?.find(item => item.taskId === taskId && item.profileId === bindingProfileId);
@@ -132,7 +145,7 @@ export default function SupercomputersPage() {
     <header className="border-b border-[#2a3433] pb-5">
       <p className="font-mono text-[10px] uppercase tracking-[.28em] text-[#92cfe7]">Remote infrastructure / governed</p>
       <h1 className="mt-1 text-2xl font-semibold">超算管理</h1>
-      <p className="mt-2 max-w-4xl text-sm leading-6 text-[#94a39f]">统一维护 OpenSSH 连接、用户只读根、项目目录和任务写目录，并观察传输与作业。这里不保存密码或私钥，也不直接创建目录、上传、下载、提交或取消；实际动作由 Codex 在已确认 Task Spec 边界内执行。</p>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-[#94a39f]">统一维护 OpenSSH 连接、用户只读根、项目目录和任务写目录，并观察 Task 会话命令、传输与作业。这里不保存密码或私钥，也不直接执行；实际动作由 Codex 在已确认 Task Spec 边界内完成并自动写入日志。</p>
     </header>
 
     <section className="mt-5 grid gap-3 border border-[#293534] bg-[#131a1c] p-4 md:grid-cols-2">
@@ -168,7 +181,7 @@ export default function SupercomputersPage() {
         {taskId && !envelope && <p className="mt-4 text-sm text-[#dfb26a]">该任务尚无已确认 Task Spec；目录映射只描述可去哪里，不会单独启动执行。</p>}
         {envelope && <div className="mt-4 space-y-4">
           <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-xs"><dt className="text-[#657570]">采用连接</dt><dd className="font-mono">{envelope.hpcProfileId ?? 'local only'}</dd><dt className="text-[#657570]">允许能力</dt><dd>{envelope.allowedCapabilities.join(', ')}</dd><dt className="text-[#657570]">保护路径</dt><dd className="font-mono">{envelope.protectedRelativePaths.join(', ') || 'none'}</dd><dt className="text-[#657570]">资源上限</dt><dd>{envelope.resourceLimits.maxCoresPerJob} 核/作业 · {envelope.resourceLimits.maxWallMinutes} 分钟 · {envelope.resourceLimits.maxConcurrentJobs} 并发 · {envelope.resourceLimits.maxAutomaticRetries} 自动重试</dd></dl>
-          <div className="border border-[#2d4842] bg-[#13201d] p-3 text-xs leading-5 text-[#a9d5ca]">连接配置固定远程主机与 Task 写根；Task Spec 固定能力和资源边界；Codex 在边界内自主安排目录、Action 和作业。</div>
+          <div className="border border-[#2d4842] bg-[#13201d] p-3 text-xs leading-5 text-[#a9d5ca]">连接配置固定远程主机与 Task 写根；Task Spec 固定科学和资源边界；Codex 在一次确认后的 Task 会话内自主执行。普通命令写 Event，只有科学里程碑和作业使用 Action。</div>
         </div>}
       </section>
     </div>
@@ -182,9 +195,11 @@ export default function SupercomputersPage() {
       <label className="text-xs text-[#91a19d] md:col-span-2">说明与登录边界<textarea value={draft.notes} onChange={event => setDraft({ ...draft, notes: event.target.value })} rows={3} placeholder="登录节点用途、传输约定、队列说明；不要填写密码或私钥。" className="mt-1.5 w-full resize-none border border-[#365363] bg-[#0d1214] p-2.5 text-sm text-white"/></label>
     </div><button onClick={submitDraft} disabled={saving} className="mt-4 inline-flex items-center gap-2 bg-[#2a718b] px-4 py-2 text-sm text-white disabled:opacity-40"><Save size={14}/>{saving ? '保存中…' : '保存连接元数据'}</button></section>}
 
+    <section className="mt-5 border border-[#293534] bg-[#131a1c] p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="flex items-center gap-2 font-medium"><Activity size={17} className="text-[#92cfe7]"/>Task 会话记录</h2><p className="mt-1 text-xs text-[#657570]">显示 Codex 已在超算执行的持久化命令记录；不是实时终端，也不提供输入框。</p></div><span className="font-mono text-[9px] uppercase tracking-wider text-[#657570]">event log · latest 20 · local time</span></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[820px] text-left text-xs"><thead className="font-mono text-[9px] uppercase text-[#657570]"><tr>{['时间', '状态', 'Scope / Access', 'Host / CWD', 'Command'].map(label => <th key={label} className="border-b border-[#354341] px-3 py-2">{label}</th>)}</tr></thead><tbody>{sessionEvents.map(event => <tr key={event.id} className="border-b border-[#24302f] align-top"><td className="whitespace-nowrap px-3 py-3 font-mono text-[9px] text-[#657570]">{formatLocalDateTime(event.occurred_at)}</td><td className={`px-3 py-3 font-mono text-[10px] ${event.event_type.includes('failed') ? 'text-[#e9a29c]' : 'text-[#9ee0d1]'}`}>{event.event_type === 'remote.task_root_ready' ? 'ROOT READY' : event.event_type.replace('remote.command_', '').toUpperCase()}</td><td className="px-3 py-3 font-mono text-[10px] text-[#92cfe7]">{eventText(event, 'scope') || 'task'} / {eventText(event, 'access') || '—'}</td><td className="max-w-64 break-all px-3 py-3 font-mono text-[10px] text-[#81908c]">{eventText(event, 'host')}<br/>{eventText(event, 'cwd') || eventText(event, 'taskRoot')}</td><td className="max-w-xl px-3 py-3"><pre className="max-h-24 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-[#c4d0cc]">{eventText(event, 'command') || '—'}</pre></td></tr>)}</tbody></table>{sessionEvents.length === 0 && <div className="border border-dashed border-[#354341] p-8 text-center text-sm text-[#657570]">当前 Run 尚无远程会话命令。</div>}</div></section>
+
     <div className="mt-5 grid gap-5 xl:grid-cols-2">
-      <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><Activity size={17} className="text-[#92cfe7]"/>上传与下载记录</h2><p className="mt-1 text-xs text-[#657570]">显示 Codex 已登记的传输 action，不提供 Web 传输按钮。</p><div className="mt-4 space-y-2">{transfers.map(action => <article key={action.id} className="border border-[#293534] bg-[#0f1618] p-3 text-xs"><div className="flex justify-between gap-3"><span className="flex items-center gap-2 text-[#d7e1de]">{action.action_type === 'files.upload' ? <ArrowUpFromLine size={14} className="text-[#92cfe7]"/> : <ArrowDownToLine size={14} className="text-[#67c9b5]"/>}{action.action_type}</span><span className="font-mono uppercase text-[#dfb26a]">{action.status}</span></div>{commandPreview(action).map((command, index) => <pre key={index} className="mt-2 overflow-x-auto bg-black/20 p-2 font-mono text-[10px] text-[#9ca9a5]">{command}</pre>)}</article>)}{transfers.length === 0 && <div className="border border-dashed border-[#354341] p-8 text-center text-sm text-[#657570]">所选任务没有传输记录。</div>}</div></section>
-      <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><Server size={17} className="text-[#dfb26a]"/>远程作业记录</h2><p className="mt-1 text-xs text-[#657570]">状态由当前 Codex 任务的 Scheduled Task 定时唤醒后对账；Web 只显示账本。</p>{context?.monitor && <div className="mt-3 border border-[#315b70] bg-[#12212a] p-3 font-mono text-[10px] text-[#92cfe7]">monitor {context.monitor.status} · next {context.monitor.next_check_at ?? 'terminal'} · automation {context.monitor.automation_ref ?? '未绑定'}</div>}<div className="mt-4 space-y-2">{context?.recentJobs.map(job => <article key={job.id} className="border border-[#293534] bg-[#0f1618] p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-mono text-[#d7e1de]">{job.job_name}</span><span className="font-mono uppercase text-[#dfb26a]">{job.status}</span></div><div className="mt-2 grid grid-cols-[6rem_1fr] gap-y-1 text-[#81908c]"><span>Host</span><span className="font-mono">{job.host}</span><span>Scheduler ID</span><span className="font-mono">{job.job_id ?? 'unconfirmed'}</span><span>Queue reason</span><span>{job.queue_reason || '—'}</span><span>Last progress</span><span className="font-mono">{job.last_progress_at ?? '—'}</span><span>Next check</span><span className="font-mono">{job.next_check_at ?? 'terminal'}</span></div></article>)}{(!context || context.recentJobs.length === 0) && <div className="border border-dashed border-[#354341] p-8 text-center text-sm text-[#657570]">所选任务没有远程作业记录。</div>}</div></section>
+      <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><Activity size={17} className="text-[#92cfe7]"/>上传与下载记录</h2><p className="mt-1 text-xs text-[#657570]">新会话传输直接记 Event；旧 Run 的 Action 记录继续兼容显示。</p><div className="mt-4 space-y-2">{transferEvents.map(event => { const upload = event.event_type === 'remote.file_uploaded'; return <article key={event.id} className="border border-[#293534] bg-[#0f1618] p-3 text-xs"><div className="flex justify-between gap-3"><span className="flex items-center gap-2 text-[#d7e1de]">{upload ? <ArrowUpFromLine size={14} className="text-[#92cfe7]"/> : <ArrowDownToLine size={14} className="text-[#67c9b5]"/>}{upload ? '上传' : '下载'}</span><span className="font-mono text-[9px] text-[#657570]">{formatLocalDateTime(event.occurred_at)}</span></div><div className="mt-2 break-all font-mono text-[10px] text-[#9ca9a5]">{eventText(event, 'localPath')} ↔ {eventText(event, 'remotePath')}</div></article>; })}{legacyTransfers.map(action => <article key={action.id} className="border border-[#293534] bg-[#0f1618] p-3 text-xs"><div className="flex justify-between gap-3"><span className="flex items-center gap-2 text-[#d7e1de]">{action.action_type === 'files.upload' ? <ArrowUpFromLine size={14} className="text-[#92cfe7]"/> : <ArrowDownToLine size={14} className="text-[#67c9b5]"/>}{action.action_type} · legacy Action</span><span className="font-mono uppercase text-[#dfb26a]">{action.status}</span></div>{commandPreview(action).map((command, index) => <pre key={index} className="mt-2 overflow-x-auto bg-black/20 p-2 font-mono text-[10px] text-[#9ca9a5]">{command}</pre>)}</article>)}{transferEvents.length === 0 && legacyTransfers.length === 0 && <div className="border border-dashed border-[#354341] p-8 text-center text-sm text-[#657570]">当前 Run 没有传输记录。</div>}</div></section>
+      <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><Server size={17} className="text-[#dfb26a]"/>远程作业记录</h2><p className="mt-1 text-xs text-[#657570]">Codex 根据每个 Job 的规模与阶段选择检查节拍；最后一个 Job 终止后删除本 Run 自动化。Web 只显示账本。</p>{context?.monitor && <div className="mt-3 border border-[#315b70] bg-[#12212a] p-3 font-mono text-[10px] text-[#92cfe7]">monitor {context.monitor.status} · 最早可对账 {formatLocalDateTime(context.monitor.next_check_at, '已结束')} · 建议 {context.monitor.recommended_cadence_minutes ?? '—'} min · heartbeat {context.monitor.heartbeat_fresh === false ? 'stale' : 'ok'} · automation {context.monitor.automation_ref ?? '已清理'}</div>}<div className="mt-4 space-y-2">{context?.recentJobs.map(job => <article key={job.id} className="border border-[#293534] bg-[#0f1618] p-3 text-xs"><div className="flex justify-between gap-3"><span className="font-mono text-[#d7e1de]">{job.job_name}</span><span className="font-mono uppercase text-[#dfb26a]">{job.status}</span></div><div className="mt-2 grid grid-cols-[6rem_1fr] gap-y-1 text-[#81908c]"><span>Host</span><span className="font-mono">{job.host}</span><span>Scheduler ID</span><span className="font-mono">{job.job_id ?? 'unconfirmed'}</span><span>Queue reason</span><span>{job.queue_reason || '—'}</span><span>最近进展</span><span className="font-mono">{formatLocalDateTime(job.last_progress_at)}</span><span>最早可对账</span><span className="font-mono">{formatLocalDateTime(job.next_check_at, '已结束')}</span></div></article>)}{(!context || context.recentJobs.length === 0) && <div className="border border-dashed border-[#354341] p-8 text-center text-sm text-[#657570]">所选任务没有远程作业记录。</div>}</div></section>
     </div>
   </div>;
 }

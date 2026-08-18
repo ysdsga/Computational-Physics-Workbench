@@ -29,7 +29,7 @@ import {
 } from '../services/agentActions.js';
 import { describeExecutionContract, executeAction, proposeExecutableAction } from '../services/actionExecutor.js';
 import { tickRunMonitor } from '../services/jobMonitor.js';
-import { attachRunMonitor, getRunMonitor, monitorGuard, pauseRunMonitor } from '../services/monitorStore.js';
+import { attachRunMonitor, closeRunMonitor, getMonitorAutomationDirective, getRunMonitor, monitorGuard, pauseRunMonitor, syncRunMonitorAutomation } from '../services/monitorStore.js';
 
 const router = Router();
 
@@ -38,8 +38,11 @@ router.get('/execution-contract', (_req, res) => res.json(describeExecutionContr
 router.get('/monitor/guard', (_req, res) => res.json(monitorGuard()));
 router.get('/runs/:runId', (req, res) => res.json(getRun(req.params.runId)));
 router.get('/runs/:runId/monitor', (req, res) => res.json(getRunMonitor(req.params.runId)));
-router.post('/runs/:runId/monitor/attach', (req, res) => res.json(attachRunMonitor(req.params.runId, req.body?.automationRef, req.body?.cadenceMinutes)));
-router.post('/runs/:runId/monitor/pause', (req, res) => res.json(pauseRunMonitor(req.params.runId)));
+router.get('/runs/:runId/monitor/directive', (req, res) => res.json(getMonitorAutomationDirective(req.params.runId)));
+router.post('/runs/:runId/monitor/attach', (req, res) => res.json(attachRunMonitor(req.params.runId, req.body?.automationRef, req.body?.cadenceMinutes, req.body?.automationState)));
+router.post('/runs/:runId/monitor/automation', (req, res) => res.json(syncRunMonitorAutomation(req.params.runId, req.body?.automationRef, req.body?.automationState, req.body?.cadenceMinutes)));
+router.post('/runs/:runId/monitor/pause', (req, res) => res.json(pauseRunMonitor(req.params.runId, req.body?.automationRef, req.body?.automationState)));
+router.post('/runs/:runId/monitor/close', (req, res) => res.json(closeRunMonitor(req.params.runId, req.body?.automationRef, req.body?.automationState)));
 router.post('/runs/:runId/monitor/tick', async (req, res) => res.json(await tickRunMonitor(req.params.runId)));
 
 router.post('/runs', (req, res) => {
@@ -62,7 +65,7 @@ router.post('/runs/:runId/complete', (req, res) => res.json(completeRun(
 )));
 
 router.get('/runs/:runId/events', (req, res) => {
-  res.json(listEvents(req.params.runId, Number(req.query.after ?? 0), Number(req.query.limit ?? 100)));
+  res.json(listEvents(req.params.runId, Number(req.query.after ?? 0), req.query.limit === undefined ? undefined : Number(req.query.limit)));
 });
 router.post('/runs/:runId/events', (req, res) => {
   const { category, eventType, actorType, payload, idempotencyKey, source, conversationRef } = req.body ?? {};
@@ -81,17 +84,17 @@ router.get('/runs/:runId/pending-items', (req, res) => res.json(listPendingItems
 router.post('/runs/:runId/pending-items', (req, res) => res.status(201).json(createPendingItem(req.params.runId, req.body ?? {})));
 router.post('/pending-items/:itemId/resolve', (req, res) => res.json(resolvePendingItem(req.params.itemId, req.body ?? {})));
 
-router.get('/runs/:runId/actions', (req, res) => res.json(listActions(req.params.runId, Number(req.query.limit ?? 100))));
+router.get('/runs/:runId/actions', (req, res) => res.json(listActions(req.params.runId, req.query.limit === undefined ? undefined : Number(req.query.limit))));
 router.post('/runs/:runId/actions', (req, res) => res.status(201).json(createAction(req.params.runId, req.body ?? {})));
 router.post('/runs/:runId/executable-actions', (req, res) => res.status(201).json(proposeExecutableAction(req.params.runId, req.body ?? {})));
 router.get('/actions/:actionId', (req, res) => res.json(getAction(req.params.actionId)));
 router.post('/actions/:actionId/status', (req, res) => res.json(transitionAction(req.params.actionId, req.body ?? {})));
 router.post('/actions/:actionId/execute', async (req, res) => res.json(await executeAction(req.params.actionId)));
 
-router.get('/runs/:runId/artifacts', (req, res) => res.json(listArtifacts(req.params.runId, Number(req.query.limit ?? 100))));
+router.get('/runs/:runId/artifacts', (req, res) => res.json(listArtifacts(req.params.runId, req.query.limit === undefined ? undefined : Number(req.query.limit))));
 router.post('/actions/:actionId/artifacts', (req, res) => res.status(201).json(registerArtifact(req.params.actionId, req.body ?? {})));
 router.post('/artifacts/:artifactId/validity', (req, res) => res.json(updateArtifactValidity(req.params.artifactId, req.body ?? {})));
-router.get('/runs/:runId/evidence-checks', (req, res) => res.json(listEvidenceChecks(req.params.runId, Number(req.query.limit ?? 100))));
+router.get('/runs/:runId/evidence-checks', (req, res) => res.json(listEvidenceChecks(req.params.runId, req.query.limit === undefined ? undefined : Number(req.query.limit))));
 router.post('/actions/:actionId/evidence-checks', (req, res) => res.status(201).json(registerEvidenceCheck(req.params.actionId, req.body ?? {})));
 router.get('/evidence-library', (req, res) => res.json(listEvidenceLibrary({
   projectId: req.query.projectId ? String(req.query.projectId) : undefined,

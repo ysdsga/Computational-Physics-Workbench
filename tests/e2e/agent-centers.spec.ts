@@ -35,7 +35,7 @@ test('Agent run and review centers expose recoverable empty states', async ({ pa
   await expect(page.getByRole('heading', { name: '研究方案', exact: true })).toBeVisible();
   await page.getByRole('link', { name: '超算管理' }).click();
   await expect(page.getByRole('heading', { name: '超算管理' })).toBeVisible();
-  await expect(page.getByText('不直接创建目录、上传、下载、提交或取消', { exact: false })).toBeVisible();
+  await expect(page.getByText('实际动作由 Codex 在已确认 Task Spec 边界内完成', { exact: false })).toBeVisible();
   await page.getByRole('link', { name: '证据库' }).click();
   await expect(page.getByRole('heading', { name: '证据库' })).toBeVisible();
   await page.getByRole('link', { name: '经验库' }).click();
@@ -107,6 +107,10 @@ test('Web observes a confirmed Task Spec and pending item without issuing Agent 
   await expect(page.getByText('待沟通').locator('..').getByText('1', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '读取最新记录' })).toBeVisible();
   await expect(page.getByRole('button', { name: /启动|批准|提交|取消|对账/ })).toHaveCount(0);
+  await expect(page.getByLabel('科学里程碑记录列表')).toHaveCSS('overflow-y', 'auto');
+  await expect(page.getByLabel('远程作业记录列表')).toHaveCSS('overflow-y', 'auto');
+  await expect(page.getByLabel('证据检查记录列表')).toHaveCSS('overflow-y', 'auto');
+  await expect(page.getByLabel('执行时间线记录列表')).toHaveCSS('overflow-y', 'auto');
 
   await page.goto('/#/reviews');
   await expect(page.getByText('是否确认 UI 验收结论？')).toBeVisible();

@@ -66,6 +66,12 @@ function actionRow(actionId: string): any {
   return row;
 }
 
+function retryConsumesScientificBudget(actionType: string, actionId: string): boolean {
+  if (actionType !== 'job.submit') return true;
+  const jobs = db.prepare('SELECT job_id, status FROM remote_jobs WHERE action_id = ?').all(actionId) as Array<{ job_id: string | null; status: string }>;
+  return !(jobs.length > 0 && jobs.every(job => !job.job_id && job.status === 'preparation_failed'));
+}
+
 function stageBlocked(runId: string, stageId: string): boolean {
   const rows = db.prepare("SELECT stage_id, detail_json FROM pending_items WHERE run_id = ? AND audience = 'researcher' AND status = 'open'").all(runId) as Array<{ stage_id: string | null; detail_json: string }>;
   return rows.some(row => {
@@ -119,7 +125,7 @@ export function createAction(runId: string, input: {
     if (db.prepare('SELECT 1 FROM run_actions WHERE retry_of_action_id = ?').get(retryOfActionId)) {
       throw new AgentCoreError(409, 'ACTION_RETRY_ALREADY_CREATED', 'This Action already has a retry successor');
     }
-    retryAttempt = Number(previous.retry_attempt ?? 0) + 1;
+    retryAttempt = Number(previous.retry_attempt ?? 0) + (retryConsumesScientificBudget(actionType, retryOfActionId) ? 1 : 0);
     if (retryAttempt > run.confirmed_envelope.resourceLimits.maxAutomaticRetries) {
       throw new AgentCoreError(409, 'ACTION_RETRY_LIMIT_REACHED', 'Confirmed automatic retry limit reached', {
         retryAttempt,
@@ -187,8 +193,8 @@ export function getAction(actionId: string) {
   const action = serializeAction(actionRow(actionId));
   return {
     ...action,
-    artifacts: listArtifacts(action.run_id, 500).filter(item => item.action_id === actionId),
-    evidenceChecks: listEvidenceChecks(action.run_id, 500).filter(item => item.action_id === actionId),
+    artifacts: listArtifacts(action.run_id).filter(item => item.action_id === actionId),
+    evidenceChecks: listEvidenceChecks(action.run_id).filter(item => item.action_id === actionId),
     remoteJobs: (db.prepare('SELECT * FROM remote_jobs WHERE action_id = ? ORDER BY created_at').all(actionId) as any[]).map(row => ({
       ...row,
       submission_spec: JSON.parse(row.submission_spec_json),
@@ -198,9 +204,18 @@ export function getAction(actionId: string) {
   };
 }
 
-export function listActions(runId: string, limit = 100): RunAction[] {
+function listLimit(limit: number | undefined): number | undefined {
+  if (limit === undefined) return undefined;
+  if (!Number.isSafeInteger(limit) || limit <= 0) throw new AgentCoreError(400, 'LIST_LIMIT_INVALID', 'limit must be a positive integer');
+  return limit;
+}
+
+export function listActions(runId: string, limit?: number): RunAction[] {
   getRun(runId);
-  return (db.prepare('SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC LIMIT ?').all(runId, Math.min(Math.max(limit, 1), 500)) as any[]).map(serializeAction);
+  const normalized = listLimit(limit);
+  const sql = `SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC${normalized === undefined ? '' : ' LIMIT ?'}`;
+  const rows = normalized === undefined ? db.prepare(sql).all(runId) : db.prepare(sql).all(runId, normalized);
+  return (rows as any[]).map(serializeAction);
 }
 
 export function getActionForExecution(actionId: string, statuses: RunActionStatus[] = ['ready']): RunAction {
@@ -281,9 +296,12 @@ export function updateArtifactValidity(artifactId: string, input: { validity: un
   return serializeArtifact(db.prepare('SELECT * FROM run_artifacts WHERE id = ?').get(artifactId));
 }
 
-export function listArtifacts(runId: string, limit = 100): RunArtifact[] {
+export function listArtifacts(runId: string, limit?: number): RunArtifact[] {
   getRun(runId);
-  return (db.prepare('SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT ?').all(runId, Math.min(Math.max(limit, 1), 500)) as any[]).map(serializeArtifact);
+  const normalized = listLimit(limit);
+  const sql = `SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC${normalized === undefined ? '' : ' LIMIT ?'}`;
+  const rows = normalized === undefined ? db.prepare(sql).all(runId) : db.prepare(sql).all(runId, normalized);
+  return (rows as any[]).map(serializeArtifact);
 }
 
 export function registerEvidenceCheck(actionId: string, input: {
@@ -314,9 +332,12 @@ export function registerEvidenceCheck(actionId: string, input: {
   return serializeEvidence(db.prepare('SELECT * FROM evidence_checks WHERE id = ?').get(id));
 }
 
-export function listEvidenceChecks(runId: string, limit = 100): EvidenceCheck[] {
+export function listEvidenceChecks(runId: string, limit?: number): EvidenceCheck[] {
   getRun(runId);
-  return (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC LIMIT ?').all(runId, Math.min(Math.max(limit, 1), 500)) as any[]).map(serializeEvidence);
+  const normalized = listLimit(limit);
+  const sql = `SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC${normalized === undefined ? '' : ' LIMIT ?'}`;
+  const rows = normalized === undefined ? db.prepare(sql).all(runId) : db.prepare(sql).all(runId, normalized);
+  return (rows as any[]).map(serializeEvidence);
 }
 
 export function listEvidenceLibrary(filters: { projectId?: string; taskId?: string; location?: string; checkStatus?: string; validity?: string; search?: string } = {}) {
@@ -346,7 +367,7 @@ export function listEvidenceLibrary(filters: { projectId?: string; taskId?: stri
     JOIN run_actions ON run_actions.id = run_artifacts.action_id
     LEFT JOIN remote_jobs ON remote_jobs.id = run_artifacts.remote_job_id
     ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
-    ORDER BY run_artifacts.created_at DESC LIMIT 500`).all(...params) as any[];
+    ORDER BY run_artifacts.created_at DESC`).all(...params) as any[];
   const checks = db.prepare('SELECT * FROM evidence_checks WHERE artifact_id = ? ORDER BY created_at DESC');
   return rows.map(row => {
     const task = runtimeTask(row.task_id);

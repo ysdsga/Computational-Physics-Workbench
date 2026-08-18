@@ -16,17 +16,15 @@ import type {
 } from '../../src/types/index.js';
 import { resolveWithinRoot } from './pathSafety.js';
 import { normalizeTaskRootRel } from './taskRoots.js';
+import { AgentCoreError } from './agentError.js';
+import {
+  heartbeatLeaseForMonitor,
+  normalizeJobMonitorPolicy,
+  recommendedCadenceForStatus,
+  TERMINAL_JOB_STATUSES,
+} from './monitorPolicy.js';
 
-export class AgentCoreError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly details?: Record<string, unknown>,
-  ) {
-    super(message);
-  }
-}
+export { AgentCoreError } from './agentError.js';
 
 export const now = () => new Date().toISOString();
 export const newId = (prefix: string) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -471,8 +469,11 @@ export function completeRun(runId: string, summary: string, source: string, conv
   return getRun(run.id);
 }
 
-export function listEvents(runId: string, after = 0, limit = 100) {
-  return (db.prepare('SELECT * FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?').all(runId, after, Math.min(Math.max(limit, 1), 500)) as any[]).map(serializeEvent);
+export function listEvents(runId: string, after = 0, limit?: number) {
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0)) throw new AgentCoreError(400, 'LIST_LIMIT_INVALID', 'limit must be a positive integer');
+  const sql = `SELECT * FROM run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence${limit === undefined ? '' : ' LIMIT ?'}`;
+  const rows = limit === undefined ? db.prepare(sql).all(runId, after) : db.prepare(sql).all(runId, after, limit);
+  return (rows as any[]).map(serializeEvent);
 }
 
 export function listPendingItems(filters: { runId?: string; projectId?: string; taskId?: string; audience?: string; status?: string } = {}) {
@@ -509,19 +510,35 @@ export function buildAgentContext(taskId: string): AgentContext {
   else if (run.status === 'draft') blockers.push({ code: 'ENVELOPE_NOT_CONFIRMED', message: 'Task Spec envelope is awaiting the one-time researcher confirmation' });
   const pending = run ? listPendingItems({ runId: run.id, status: 'open' }) : [];
   if (pending.some(item => item.audience === 'researcher' && item.detail.blocksRun === true)) blockers.push({ code: 'RESEARCHER_INPUT_REQUIRED', message: 'A material correction or boundary change is waiting for researcher input' });
-  const actions = run ? (db.prepare('SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
+  const actions = run ? (db.prepare('SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ spec_json, result_json, error_json, ...action }) => ({ ...action, spec: JSON.parse(spec_json), result: JSON.parse(result_json), error: JSON.parse(error_json) })) : [];
-  const jobs = run ? (db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
+  const jobs = run ? (db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ submission_spec_json, resources_json, last_observation_json, ...job }) => ({ ...job, submission_spec: JSON.parse(submission_spec_json), resources: JSON.parse(resources_json), last_observation: JSON.parse(last_observation_json) })) : [];
   if (jobs.some(job => job.status === 'submission_uncertain')) blockers.push({ code: 'SUBMISSION_UNCERTAIN', message: 'A recorded submission has an uncertain response and must be reconciled before another submission' });
   const monitorRow = run ? db.prepare('SELECT * FROM run_monitors WHERE run_id = ?').get(run.id) as any : null;
-  const activeJobCount = jobs.filter(job => !['done', 'exit', 'zombi', 'unkwn', 'preparation_failed', 'cancelled'].includes(String(job.status).toLowerCase())).length;
-  const dueJobCount = jobs.filter(job => job.next_check_at && job.next_check_at <= now() && !['done', 'exit', 'zombi', 'unkwn', 'preparation_failed', 'cancelled'].includes(String(job.status).toLowerCase())).length;
-  const monitor = monitorRow ? { ...monitorRow, active_job_count: activeJobCount, due_job_count: dueJobCount } : null;
-  if (activeJobCount > 0 && (!monitor || monitor.status !== 'scheduled' || !monitor.automation_ref)) blockers.push({ code: 'ACTIVE_JOBS_UNMONITORED', message: 'Active remote Jobs require one current-chat Scheduled Task monitor before Codex stops' });
-  const artifacts = run ? (db.prepare('SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
+  const activeJobs = jobs.filter(job => !TERMINAL_JOB_STATUSES.has(String(job.status).toLowerCase()));
+  const activeJobCount = activeJobs.length;
+  const dueJobCount = activeJobs.filter(job => job.next_check_at && job.next_check_at <= now()).length;
+  const recommendedCadences = activeJobs.map(job => {
+    const policy = normalizeJobMonitorPolicy(job.submission_spec?.monitoring, Number(job.resources?.wallMinutes ?? 60));
+    return recommendedCadenceForStatus(String(job.status), policy);
+  }).filter((value): value is number => value !== null);
+  const monitor = monitorRow ? {
+    ...monitorRow,
+    active_job_count: activeJobCount,
+    due_job_count: dueJobCount,
+    recommended_cadence_minutes: recommendedCadences.length ? Math.min(...recommendedCadences) : null,
+    ...heartbeatLeaseForMonitor(monitorRow),
+  } : null;
+  if (activeJobCount > 0 && (!monitor || monitor.status !== 'scheduled' || !monitor.automation_ref || monitor.heartbeat_fresh === false)) {
+    blockers.push({ code: 'ACTIVE_JOBS_UNMONITORED', message: 'Active remote Jobs require a verified ACTIVE Scheduled Task monitor with a fresh heartbeat lease before Codex stops' });
+  }
+  if (activeJobCount === 0 && monitor?.automation_ref) {
+    blockers.push({ code: 'MONITOR_AUTOMATION_CLEANUP_REQUIRED', message: 'All remote Jobs are terminal; delete the bound Scheduled Task automation and acknowledge monitor closure' });
+  }
+  const artifacts = run ? (db.prepare('SELECT * FROM run_artifacts WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ metadata_json, ...artifact }) => ({ ...artifact, metadata: JSON.parse(metadata_json) })) : [];
-  const evidenceChecks = run ? (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC LIMIT 100').all(run.id) as any[])
+  const evidenceChecks = run ? (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ result_json, ...check }) => ({ ...check, result: JSON.parse(result_json) })) : [];
   const eventCursor = run ? Number((db.prepare('SELECT MAX(sequence) AS value FROM run_events WHERE run_id = ?').get(run.id) as any)?.value ?? 0) : 0;
   const evidenceIndex = run ? (db.prepare("SELECT id, event_type, occurred_at FROM run_events WHERE run_id = ? AND category = 'fact' ORDER BY sequence DESC LIMIT 20").all(run.id) as any[])

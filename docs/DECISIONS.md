@@ -4,15 +4,15 @@
 
 ## 1. Codex 是 Agent，Web 是观察面
 
-研究沟通、规划、执行和纠错发生在项目 Codex 对话。WebUI 负责显示记录、筛选和管理普通元数据，不成为启动、授权、提交、取消或对账入口。真实任务只经 `workbench-agent` skill 和 `workbench` CLI。
+研究沟通、规划、执行和纠错发生在项目 Codex 对话。WebUI 负责显示记录、筛选和管理普通元数据，不成为启动、授权、提交、取消或对账入口。真实任务使用 `workbench-agent` skill；`workbench` 提供状态、边界、自动日志和调度器一致性，不充当逐命令审批门。
 
 ## 2. Task 不是 Job
 
-采用 `Project → complex Task → Research Run → Stage → Action → Job`。一个 Stage 有多个 Action，一个 Action可有零个、一个或多个 Job。Job 必须绑定 originating Action、Run 与 Stage。
+采用 `Project → complex Task → Research Run → Stage → routine Event / milestone Action → Job`。普通命令只写 Event；少量科学里程碑使用 Action。一个 Action 可有零个、一个或多个 Job；Job 必须绑定 originating Action、Run 与 Stage。
 
 ## 3. Workflow 只保留骨架
 
-Workflow 保存不可缺少的科学/软件阶段、关键转换、检查点和完成证据。传输、重试、诊断、扫描、临时命令和目录安排属于 Working Plan 与 Action，避免把研究执行变成僵硬状态机。
+Workflow 保存不可缺少的科学/软件阶段、关键转换、检查点和完成证据。连接、传输、诊断和临时命令只写 Event；科学重试、扫描和提交批次可成为里程碑 Action，避免把研究执行变成僵硬状态机。
 
 ## 4. Task Spec 取代 Contract/Policy/多套控制文件
 
@@ -45,9 +45,9 @@ Workbench 只固定 Project 工作根与 Task 写根，不自动创建 Stage 目
 
 执行器只提供材料无关 capability 与边界校验。材料名、Task ID、固定 step、脚本路径、U/J、投影窗口、网格和求解器参数只能出现在项目数据或 Codex 单次 Action spec 中。新增材料/软件路线不修改产品执行代码。
 
-## 10. Action spec 不可变，但不是第二次授权
+## 10. Task 会话负责日常执行，Action 只记录科学里程碑
 
-每条 Action 保存规范化 spec、SHA-256、Stage、幂等键与可选 parent。可执行 Action 同时保存输入/脚本快照和命令预览。输入改变时创建新 Action；spec 哈希用于复现和 drift 检测，不再要求研究者逐哈希批准。
+Envelope 确认后，`remote exec/upload/download` 自动派生 host/root，在登记边界内直接执行并追加 Event，不创建 Action。直接本地处理也不需要 Action。提交/取消、多 Job 批次或证据验证等科学里程碑才保存规范化 spec、SHA-256、Stage、幂等键与输入快照；Action 是溯源记录，不是微操作许可。
 
 ## 11. 远程提交必须可恢复
 
@@ -67,8 +67,8 @@ Workbench 对自身入口强制 Task 根、HPC binding、capability、资源、�
 
 ## 15. Scheduled Task 唤醒，Stop Hook 守门
 
-长作业不能依赖一次 Codex 回合持续运行。每个有非终态 Job 的 Run 绑定一个当前任务 heartbeat Scheduled Task，由它按时唤醒同一 Codex 任务。Workbench 只持久化 monitor 与 `next_check_at`；Stop Hook 只在明确发现活跃 Job 未绑定 monitor 时阻止结束一次，不轮询、不执行、不创建第二个 Agent。服务不可用时 Hook fail open 并提示下次先运行 doctor。
+长作业不能依赖一次 Codex 回合持续运行。每个 Job 的检查策略由提交它的 Codex 根据真实计算规模判断并固化在 Action spec；Workbench 只计算下一次到期时间与建议 heartbeat cadence。每个有非终态 Job 的 Run 绑定一个当前任务 heartbeat，且只有 Codex 自动化接口确认 ACTIVE 后才能记为 `scheduled`。heartbeat lease 用于发现已暂停或失联的假绑定。最后一个 Job 终止后，Workbench 返回删除指令并保留 reference；Codex 删除自动化、回写 `monitor close` 后才完成。Stop Hook 守住缺失、过期与待清理三种状态，但不轮询、不执行、不创建第二个 Agent。服务不可用时 Hook fail open 并提示下次先运行 doctor。
 
 ## 16. 自动重试必须有谱系和预算
 
-重试是新的不可变 Action，不覆盖失败 Action。它必须带 `retry_of_action_id`，每个 Action 最多一个 retry successor；服务计算 `retry_attempt` 并拒绝超过 Envelope `maxAutomaticRetries` 的尝试。`submission_uncertain` 不是失败重试条件，只允许对账。
+替换失败科学 Job 的重试是新的不可变 Action，不覆盖失败 Action。它必须带 `retry_of_action_id`，每个 Action 最多一个 retry successor；服务计算 `retry_attempt` 并拒绝超过 Envelope `maxAutomaticRetries` 的尝试。连接、认证、超时、建目录、检查和传输失败只写 Event，不消耗该预算；`submission_uncertain` 只允许对账。

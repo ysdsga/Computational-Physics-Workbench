@@ -403,6 +403,9 @@ export interface RunMonitor {
   updated_at: string;
   active_job_count?: number;
   due_job_count?: number;
+  recommended_cadence_minutes?: number | null;
+  heartbeat_fresh?: boolean;
+  heartbeat_lease_expires_at?: string | null;
 }
 
 export interface RemoteCapabilityReport {

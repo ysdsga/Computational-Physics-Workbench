@@ -9,17 +9,27 @@ export function decideStopHook(input, guard, failureMessage = '') {
       systemMessage: `Workbench monitor guard could not be checked: ${failureMessage}. Run workbench doctor before the next real research action.`,
     };
   }
-  if (guard?.ok !== false || !Array.isArray(guard.unattendedRuns) || guard.unattendedRuns.length === 0) return { continue: true };
-  const runs = guard.unattendedRuns.map(item => item.run_id).filter(Boolean).join(', ');
+  const unattended = Array.isArray(guard?.unattendedRuns) ? guard.unattendedRuns : [];
+  const cleanup = Array.isArray(guard?.cleanupRequired) ? guard.cleanupRequired : [];
+  if (guard?.ok !== false || unattended.length === 0 && cleanup.length === 0) return { continue: true };
+  const unattendedRuns = unattended.map(item => item.run_id).filter(Boolean).join(', ');
+  const cleanupRuns = cleanup.map(item => item.run_id).filter(Boolean).join(', ');
   if (input?.stop_hook_active === true) {
     return {
       continue: true,
-      systemMessage: `Active Workbench Run(s) are still missing a current-chat Scheduled Task monitor: ${runs}.`,
+      systemMessage: [
+        unattendedRuns ? `Active Workbench Run(s) still have an absent, paused, or stale Scheduled Task monitor: ${unattendedRuns}.` : '',
+        cleanupRuns ? `Terminal Workbench Run(s) still require automation deletion acknowledgement: ${cleanupRuns}.` : '',
+      ].filter(Boolean).join(' '),
     };
   }
+  if (cleanupRuns) return {
+    decision: 'block',
+    reason: `Workbench Run(s) ${cleanupRuns} have no active remote Jobs but still reference a Codex automation. Delete each returned automation through the Codex automation API, confirm success, then run workbench monitor close with the matching reference and automation-state deleted.`,
+  };
   return {
     decision: 'block',
-    reason: `Active Workbench Run(s) ${runs} have remote Jobs but no attached current-chat Scheduled Task. Create or update exactly one heartbeat Scheduled Task per Run, attach its returned reference with workbench monitor attach, then rerun workbench monitor guard. The Hook does not poll HPC itself.`,
+    reason: `Active Workbench Run(s) ${unattendedRuns} have remote Jobs but their current-chat Scheduled Task is absent, paused, or outside its heartbeat lease. Create, resume, or update exactly one heartbeat per Run, confirm it is ACTIVE, attach/sync its reference and cadence, then rerun workbench monitor guard. The Hook does not poll HPC itself.`,
   };
 }
 

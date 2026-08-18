@@ -6,13 +6,18 @@ import db from '../db.js';
 import type { ConfirmedEnvelope, RemoteCapabilityReport, RemoteJob, RunAction } from '../../src/types/index.js';
 import { activeRun, AgentCoreError, appendEvent, createPendingItem, getRun, newId, normalizeRemoteRoot, now, runtimeTask, stableJson } from './agentCore.js';
 import { transitionAction } from './agentActions.js';
-import { isRemotePathWithin, resolveRemoteTaskBinding, type ResolvedRemoteTaskBinding } from './hpcConfig.js';
+import { isRemotePathWithin, normalizeHpcConfig, resolveRemoteTaskBinding, type ResolvedRemoteTaskBinding } from './hpcConfig.js';
 import { resolveWithinRoot } from './pathSafety.js';
 import { normalizeTaskRootRel } from './taskRoots.js';
 import { recordJobObservation, scheduleNewJob } from './monitorStore.js';
+import type { JobMonitorPolicy } from './monitorPolicy.js';
+import { parseFormattedSchedulerObservation, parseHistoryJobMatches, parseLegacyBhistObservation } from './lsfOutput.js';
 
 const MAX_OUTPUT = 1024 * 1024;
-const SSH_TIMEOUT_MS = 20_000;
+// HPC login and network filesystems can take longer than the TCP handshake.
+// Keep the OpenSSH ConnectTimeout at 10 seconds, but allow an authenticated,
+// bounded operation enough time to return its receipt.
+const SSH_TIMEOUT_MS = 60_000;
 
 interface ProcessResult { code: number; stdout: string; stderr: string }
 export type RemoteProcessRunner = (command: string, args: string[], options: { input?: string; timeoutMs?: number }) => Promise<ProcessResult>;
@@ -103,7 +108,7 @@ export function smokeBudgetAllowsOneCoreMinute(boundary: { limits?: { maxCoresPe
 }
 
 export function authorizeRemoteOperation(taskId: string, hostInput: unknown, rootInput: unknown, operation: string, smoke = false, requireEnvironment = true): RemoteAccess {
-  if (requireEnvironment && process.env.WORKBENCH_REMOTE_ENABLED !== '1') throw new AgentCoreError(403, 'REMOTE_ENV_DISABLED', 'Set WORKBENCH_REMOTE_ENABLED=1 to enable remote actions');
+  if (requireEnvironment && process.env.WORKBENCH_REMOTE_DISABLED === '1') throw new AgentCoreError(403, 'REMOTE_ENV_DISABLED', 'Remote execution is disabled by WORKBENCH_REMOTE_DISABLED=1');
   const task = runtimeTask(taskId);
   if (!task.task_root_rel) throw new AgentCoreError(409, 'TASK_ROOT_UNRESOLVED', 'Task root is unresolved');
   const run = activeRun((db.prepare("SELECT id FROM research_runs WHERE task_id = ? AND status IN ('active','waiting_researcher') ORDER BY created_at DESC LIMIT 1").get(taskId) as { id: string } | undefined)?.id ?? '');
@@ -122,6 +127,118 @@ export function authorizeRemoteOperation(taskId: string, hostInput: unknown, roo
   if (smoke && process.env.WORKBENCH_ALLOW_REMOTE_SMOKE !== '1') throw new AgentCoreError(403, 'REMOTE_SMOKE_ENV_DISABLED', 'Set WORKBENCH_ALLOW_REMOTE_SMOKE=1 to enable smoke submission');
   const taskRoot = resolveWithinRoot(task.working_dir, normalizeTaskRootRel(task.task_root_rel), { mustExist: true, allowRoot: false, label: 'task root' });
   return { task, run, envelope, host, remoteRoot, taskRoot, binding };
+}
+
+function sessionBinding(taskId: string): { task: ReturnType<typeof runtimeTask>; run: ReturnType<typeof activeRun>; binding: ResolvedRemoteTaskBinding } {
+  const task = runtimeTask(taskId);
+  const runId = (db.prepare("SELECT id FROM research_runs WHERE task_id = ? AND status IN ('active','waiting_researcher') ORDER BY created_at DESC LIMIT 1").get(taskId) as { id: string } | undefined)?.id ?? '';
+  const run = activeRun(runId);
+  const profileId = run.confirmed_envelope.hpcProfileId;
+  if (!profileId) throw new AgentCoreError(409, 'TASK_SPEC_HPC_REQUIRED', 'Task Spec has no HPC profile');
+  const config = normalizeHpcConfig(task.hpc_config);
+  const profile = config.profiles?.find(item => item.id === profileId);
+  if (!profile) throw new AgentCoreError(409, 'HPC_PROFILE_ENVELOPE_MISMATCH', 'Confirmed HPC profile is no longer registered for the project');
+  return { task, run, binding: resolveRemoteTaskBinding(task.hpc_config, taskId, profile.sshAlias) };
+}
+
+export function describeRemoteSession(taskId: string) {
+  const { run, binding } = sessionBinding(taskId);
+  return {
+    taskId,
+    runId: run.id,
+    envelopeSha256: run.confirmed_envelope_sha256,
+    host: binding.host,
+    scheduler: binding.scheduler,
+    roots: { userRead: binding.userReadRoot, projectRead: binding.projectRoot, taskWrite: binding.taskWriteRoot },
+    model: 'confirmed-envelope-session',
+    routineOperationsCreateActions: false,
+  };
+}
+
+export async function initializeRemoteTaskRoot(taskId: string) {
+  const { binding } = sessionBinding(taskId);
+  return createRemoteTaskRoot(taskId, { host: binding.host, remoteRoot: binding.taskWriteRoot });
+}
+
+type RemoteSessionScope = 'user' | 'project' | 'task';
+type RemoteSessionAccess = 'read' | 'write';
+
+function sessionRoot(binding: ResolvedRemoteTaskBinding, scope: RemoteSessionScope): string {
+  if (scope === 'user') return binding.userReadRoot;
+  if (scope === 'project') return binding.projectRoot;
+  return binding.taskWriteRoot;
+}
+
+function routineCommand(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) throw new AgentCoreError(400, 'REMOTE_COMMAND_REQUIRED', 'command is required');
+  const command = value.trim();
+  if (Buffer.byteLength(command, 'utf8') > 64 * 1024 || command.includes('\0')) throw new AgentCoreError(400, 'REMOTE_COMMAND_INVALID', 'command is too large or contains NUL');
+  // Scheduler mutation has exactly-once and reconciliation semantics and therefore
+  // stays on the dedicated Job path. Inspection commands such as bjobs/bpeek remain free.
+  if (/(^|[;&|()\s])(bsub|bkill|qsub|qdel|sbatch|scancel)(?=$|[;&|()\s])/i.test(command)) {
+    throw new AgentCoreError(403, 'REMOTE_SCHEDULER_MUTATION_REQUIRES_JOB_API', 'Submit and cancel through the recorded Job command, not the routine remote session');
+  }
+  return command;
+}
+
+function outputPreview(value: string): string {
+  return value.length <= 8_000 ? value : `${value.slice(0, 8_000)}\n...[truncated in event log]`;
+}
+
+export async function executeRemoteSessionCommand(taskId: string, input: { command?: unknown; access?: unknown; scope?: unknown; cwd?: unknown; timeoutSeconds?: unknown }) {
+  const { binding } = sessionBinding(taskId);
+  const accessMode = input.access === undefined ? 'read' : String(input.access) as RemoteSessionAccess;
+  const scope = input.scope === undefined ? 'task' : String(input.scope) as RemoteSessionScope;
+  if (!['read', 'write'].includes(accessMode)) throw new AgentCoreError(400, 'REMOTE_ACCESS_INVALID', 'access must be read or write');
+  if (!['user', 'project', 'task'].includes(scope)) throw new AgentCoreError(400, 'REMOTE_SCOPE_INVALID', 'scope must be user, project or task');
+  if (accessMode === 'write' && scope !== 'task') throw new AgentCoreError(403, 'REMOTE_WRITE_ROOT_DENIED', 'Session writes are limited to the registered Task root');
+  const root = sessionRoot(binding, scope);
+  const operation = accessMode === 'read' ? 'remote.inspect' : 'files.upload';
+  const access = authorizeRemoteOperation(taskId, binding.host, root, operation);
+  const command = routineCommand(input.command);
+  const cwd = input.cwd === undefined || input.cwd === '' || input.cwd === '.' ? root : remoteRelative(root, input.cwd);
+  const timeoutSeconds = input.timeoutSeconds === undefined ? 60 : Number(input.timeoutSeconds);
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 3_600) throw new AgentCoreError(400, 'REMOTE_TIMEOUT_INVALID', 'timeoutSeconds must be between 1 and 3600');
+  const operationId = newId('rop');
+  const started = Date.now();
+  const commandSha256 = crypto.createHash('sha256').update(command).digest('hex');
+  const guard = [
+    'set -eu',
+    `boundary=$(cd ${shellQuote(root)} && pwd -P)`,
+    `requested=${shellQuote(cwd)}`,
+    'actual=$(cd "$requested" && pwd -P)',
+    'case "$actual" in "$boundary"|"$boundary"/*) ;; *) exit 73;; esac',
+    'cd "$actual"',
+    `export WORKBENCH_TASK_ROOT=${shellQuote(binding.taskWriteRoot)}`,
+    `bash -lc ${shellQuote(command)}`,
+  ].join('; ');
+  try {
+    const result = await runProcess('ssh', sshArgs(access.host, guard), { timeoutMs: Math.round(timeoutSeconds * 1000) });
+    const payload = {
+      operationId, taskId, host: access.host, scope, access: accessMode, cwd, command, commandSha256,
+      exitCode: result.code, durationMs: Date.now() - started,
+      stdout: outputPreview(result.stdout), stderr: outputPreview(result.stderr),
+      stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr),
+    };
+    appendEvent(access.run.id, { category: 'fact', eventType: result.code === 0 ? 'remote.command_completed' : 'remote.command_failed', actorType: 'agent', payload });
+    return { ok: result.code === 0, ...payload };
+  } catch (error) {
+    const item = error as AgentCoreError;
+    appendEvent(access.run.id, { category: 'fact', eventType: 'remote.command_transport_failed', actorType: 'agent', payload: { operationId, taskId, host: access.host, scope, access: accessMode, cwd, command, commandSha256, durationMs: Date.now() - started, code: item.code ?? 'REMOTE_TRANSPORT_FAILED', message: item.message } });
+    throw error;
+  }
+}
+
+export async function uploadForRemoteSession(taskId: string, input: { localPath?: unknown; remotePath?: unknown; overwrite?: boolean }) {
+  const { binding } = sessionBinding(taskId);
+  return upload(taskId, { host: binding.host, remoteRoot: binding.taskWriteRoot, localPath: input.localPath, remotePath: input.remotePath, overwrite: input.overwrite });
+}
+
+export async function downloadForRemoteSession(taskId: string, input: { localPath?: unknown; remotePath?: unknown; overwrite?: boolean; scope?: unknown }) {
+  const { binding } = sessionBinding(taskId);
+  const scope = input.scope === undefined ? 'task' : String(input.scope) as RemoteSessionScope;
+  if (!['user', 'project', 'task'].includes(scope)) throw new AgentCoreError(400, 'REMOTE_SCOPE_INVALID', 'scope must be user, project or task');
+  return download(taskId, { host: binding.host, remoteRoot: sessionRoot(binding, scope), localPath: input.localPath, remotePath: input.remotePath, overwrite: input.overwrite });
 }
 
 export async function createRemoteTaskRoot(taskId: string, input: { host: unknown; remoteRoot: unknown }) {
@@ -225,7 +342,7 @@ export function parseLsfResources(script: string): LsfResources {
 export interface LsfActionSubmission {
   taskId: string; host: string; remoteRoot: string; remoteWorkdir: string; remoteScriptPath: string;
   scriptSha256: string; remoteInputs: Array<{ remotePath: string; sha256: string }>;
-  resources: LsfResources; idempotencyKey?: string;
+  resources: LsfResources; monitoring?: JobMonitorPolicy; idempotencyKey?: string;
 }
 
 function serializeJob(row: any): RemoteJob {
@@ -234,10 +351,22 @@ function serializeJob(row: any): RemoteJob {
 }
 
 function parseJobId(output: string): string | null { return output.match(/Job\s+<([0-9]+)>/i)?.[1] ?? null; }
+function explicitlyNotSubmitted(output: string): boolean {
+  return /(?:job\s+not\s+submitted|request\s+aborted\s+by\s+esub)/i.test(output);
+}
 function loadJob(id: string): any {
   const row = db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id);
   if (!row) throw new AgentCoreError(404, 'REMOTE_JOB_NOT_FOUND', 'Remote job not found');
   return row;
+}
+
+function markSubmissionRejected(action: RunAction, jobId: string, detail: Record<string, unknown>) {
+  const observedAt = now();
+  db.prepare("UPDATE remote_jobs SET status = 'preparation_failed', last_observation_json = ?, reconciled_at = ? WHERE id = ?")
+    .run(stableJson({ ...detail, classification: 'explicitly_not_submitted', observedAt }), observedAt, jobId);
+  scheduleNewJob(action.run_id, jobId, 'preparation_failed', observedAt);
+  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: 'submission_rejected', title: '调度器在接收作业前拒绝提交，等待 Codex 修正后重试', detail: { ...detail, blocksRun: false, consumesScientificRetry: false }, idempotencyKey: `submission-rejected:${jobId}`, source: 'workbench' });
+  appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_not_submitted', actorType: 'system', payload: { remoteJobId: jobId, actionId: action.id, ...detail } });
 }
 
 function markSubmissionUncertain(action: RunAction, jobId: string, detail: Record<string, unknown>) {
@@ -248,7 +377,7 @@ function markSubmissionUncertain(action: RunAction, jobId: string, detail: Recor
 }
 
 export async function submitAuthorizedLsfAction(action: RunAction, input: LsfActionSubmission): Promise<RemoteJob> {
-  if (process.env.WORKBENCH_ALLOW_REMOTE_LSF !== '1') throw new AgentCoreError(403, 'REMOTE_LSF_ENV_DISABLED', 'Set WORKBENCH_ALLOW_REMOTE_LSF=1 to enable scientific LSF submission');
+  if (process.env.WORKBENCH_REMOTE_SUBMIT_DISABLED === '1') throw new AgentCoreError(403, 'REMOTE_LSF_ENV_DISABLED', 'Remote submission is disabled by WORKBENCH_REMOTE_SUBMIT_DISABLED=1');
   const access = authorizeRemoteOperation(input.taskId, input.host, input.remoteRoot, 'job.submit');
   if (access.run.id !== action.run_id || action.stage_id !== access.run.current_stage_id && !access.envelope.coreStageIds.includes(action.stage_id)) throw new AgentCoreError(409, 'REMOTE_ACTION_RUN_MISMATCH', 'Action is outside the active Run');
   if (input.resources.cores > access.envelope.resourceLimits.maxCoresPerJob) throw new AgentCoreError(403, 'REMOTE_CORES_DENIED', 'LSF cores exceed the confirmed Task Spec');
@@ -291,10 +420,14 @@ export async function submitAuthorizedLsfAction(action: RunAction, input: LsfAct
   const schedulerJobId = parseJobId(`${submitted.stdout}\n${submitted.stderr}`);
   db.prepare('UPDATE remote_jobs SET submit_stdout = ?, submit_stderr = ? WHERE id = ?').run(submitted.stdout, submitted.stderr, id);
   if (submitted.code !== 0 || !schedulerJobId) {
+    if (explicitlyNotSubmitted(`${submitted.stdout}\n${submitted.stderr}`)) {
+      markSubmissionRejected(action, id, { jobName, stdout: submitted.stdout, stderr: submitted.stderr });
+      return serializeJob(loadJob(id));
+    }
     markSubmissionUncertain(action, id, { jobName, stdout: submitted.stdout, stderr: submitted.stderr });
     return serializeJob(loadJob(id));
   }
-  const sanity = await runProcess('ssh', sshArgs(access.host, `bjobs -a ${shellQuote(schedulerJobId)} -noheader -o 'jobid stat job_name'`));
+  const sanity = await runProcess('ssh', sshArgs(access.host, `bjobs -a -noheader -o 'jobid stat job_name' ${shellQuote(schedulerJobId)}`));
   const fields = sanity.stdout.trim().split(/\s+/);
   if (sanity.code !== 0 || fields[0] !== schedulerJobId || fields[2] !== jobName) {
     db.prepare('UPDATE remote_jobs SET job_id = ? WHERE id = ?').run(schedulerJobId, id);
@@ -306,7 +439,7 @@ export async function submitAuthorizedLsfAction(action: RunAction, input: LsfAct
   db.prepare('UPDATE remote_jobs SET job_id = ?, status = ?, submitted_at = ?, reconciled_at = ?, last_observation_json = ? WHERE id = ?')
     .run(schedulerJobId, schedulerStatus, observedAt, observedAt, stableJson({ source: 'post-submit-sanity', jobId: schedulerJobId, status: fields[1], jobName, observedAt }), id);
   scheduleNewJob(action.run_id, id, schedulerStatus, observedAt);
-  appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_submitted', actorType: 'system', payload: { remoteJobId: id, actionId: action.id, jobId: schedulerJobId, jobName, remoteWorkdir, resources: input.resources } });
+  appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_submitted', actorType: 'system', payload: { remoteJobId: id, actionId: action.id, jobId: schedulerJobId, jobName, remoteWorkdir, resources: input.resources, monitoring: input.monitoring } });
   return serializeJob(loadJob(id));
 }
 
@@ -315,11 +448,6 @@ function recordedJobAccess(row: any, operation: string) {
   const task = runtimeTask(run.task_id);
   const binding = resolveRemoteTaskBinding(task.hpc_config, task.id, row.host);
   return authorizeRemoteOperation(task.id, row.host, binding.taskWriteRoot, operation);
-}
-
-function schedulerObservation(output: string) {
-  const fields = output.trim().split(/\s+/);
-  return { jobId: fields[0] || null, status: (fields[1] || 'UNKWN').toUpperCase(), jobName: fields[2] || null };
 }
 
 function queueReasonFromLongOutput(output: string): string {
@@ -332,10 +460,19 @@ function queueReasonFromLongOutput(output: string): string {
 
 async function observeJob(row: any) {
   if (!row.job_id) throw new AgentCoreError(409, 'REMOTE_JOB_ID_MISSING', 'Remote job has no scheduler job ID');
-  let source = 'bjobs'; let result = await runProcess('ssh', sshArgs(row.host, `bjobs -a ${shellQuote(row.job_id)} -noheader -o 'jobid stat job_name'`));
-  if (result.code !== 0 || !result.stdout.trim()) { source = 'bhist'; result = await runProcess('ssh', sshArgs(row.host, `bhist -a ${shellQuote(row.job_id)} -noheader -o 'jobid stat job_name'`)); }
+  let source = 'bjobs'; let result = await runProcess('ssh', sshArgs(row.host, `bjobs -a -noheader -o 'jobid stat job_name' ${shellQuote(row.job_id)}`));
+  let parsed = parseFormattedSchedulerObservation(result.stdout);
+  if (result.code !== 0 || !result.stdout.trim()) {
+    source = 'bhist';
+    // Older LSF releases do not support the bjobs-style -noheader/-o flags on
+    // bhist. Search recent event logs explicitly and parse the long record.
+    result = await runProcess('ssh', sshArgs(row.host, `bhist -n 20 -l ${shellQuote(row.job_id)}`));
+    parsed = parseLegacyBhistObservation(result.stdout);
+  }
   if (result.code !== 0 || !result.stdout.trim()) explainFailure(result);
-  const parsed = schedulerObservation(result.stdout);
+  if ((source === 'bhist' && parsed.jobId !== String(row.job_id)) || parsed.status === 'UNKWN') {
+    throw new AgentCoreError(502, 'REMOTE_JOB_HISTORY_UNRECOGNIZED', `Could not determine terminal LSF state for Job ${row.job_id}`);
+  }
   const observedAt = now();
   let queueReason = '';
   if (parsed.status === 'PEND') {
@@ -361,13 +498,19 @@ async function observeJob(row: any) {
 }
 
 async function identifyUncertainJob(row: any) {
-  const query = async (command: 'bjobs' | 'bhist') => runProcess('ssh', sshArgs(row.host, `${command} -a -J ${shellQuote(row.job_name)} -noheader -o 'jobid stat job_name'`));
-  let result = await query('bjobs'); if (result.code !== 0 || !result.stdout.trim()) result = await query('bhist');
-  const matches = result.stdout.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts => parts.length >= 3 && parts[2] === row.job_name && /^\d+$/.test(parts[0]));
-  const ids = [...new Set(matches.map(parts => parts[0]))];
+  let result = await runProcess('ssh', sshArgs(row.host, `bjobs -a -noheader -o 'jobid stat job_name' -J ${shellQuote(row.job_name)}`));
+  if (result.code !== 0 || !result.stdout.trim()) {
+    result = await runProcess('ssh', sshArgs(row.host, `bhist -n 20 -a -w -J ${shellQuote(row.job_name)}`));
+  }
+  const ids = parseHistoryJobMatches(result.stdout, row.job_name);
   if (ids.length === 1) {
     db.prepare("UPDATE remote_jobs SET job_id = ?, status = 'recovered', reconciled_at = ? WHERE id = ?").run(ids[0], now(), row.id);
     return observeJob(loadJob(row.id));
+  }
+  if (ids.length === 0 && explicitlyNotSubmitted(`${row.submit_stdout ?? ''}\n${row.submit_stderr ?? ''}`)) {
+    const action = db.prepare('SELECT * FROM run_actions WHERE id = ?').get(row.action_id) as any;
+    if (action) markSubmissionRejected(action as RunAction, row.id, { jobName: row.job_name, candidates: ids, stdout: row.submit_stdout, stderr: row.submit_stderr, reconciliationRaw: result.stdout });
+    return serializeJob(loadJob(row.id));
   }
   db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ candidates: ids, raw: result.stdout, observedAt: now() }), now(), row.id);
   return serializeJob(loadJob(row.id));
@@ -379,9 +522,16 @@ export async function reconcileJob(id: string) { const row = loadJob(id); record
 export async function jobLogs(id: string) {
   const row = loadJob(id); recordedJobAccess(row, 'job.logs');
   if (!row.job_id) throw new AgentCoreError(409, 'REMOTE_JOB_ID_MISSING', 'Remote job has no scheduler job ID');
-  const result = await runProcess('ssh', sshArgs(row.host, `bpeek ${shellQuote(row.job_id)}`));
+  let result = await runProcess('ssh', sshArgs(row.host, `bpeek ${shellQuote(row.job_id)}`));
+  let source = 'bpeek';
+  if (result.code !== 0) {
+    source = 'scheduler-files';
+    const stdoutPath = `${row.remote_workdir}/${row.job_id}.out`;
+    const stderrPath = `${row.remote_workdir}/${row.job_id}.err`;
+    result = await runProcess('ssh', sshArgs(row.host, `if test -f ${shellQuote(stdoutPath)} || test -f ${shellQuote(stderrPath)}; then test ! -f ${shellQuote(stdoutPath)} || cat ${shellQuote(stdoutPath)}; test ! -f ${shellQuote(stderrPath)} || cat ${shellQuote(stderrPath)} >&2; else exit 1; fi`));
+  }
   if (result.code !== 0) explainFailure(result);
-  return { remoteJobId: id, jobId: row.job_id, source: 'bpeek', stdout: result.stdout, stderr: result.stderr, observedAt: now() };
+  return { remoteJobId: id, jobId: row.job_id, source, stdout: result.stdout, stderr: result.stderr, observedAt: now() };
 }
 
 export async function cancelJob(id: string) {

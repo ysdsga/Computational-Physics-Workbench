@@ -23,7 +23,7 @@ function usage(message, code = EXIT.usage) {
   if (message) process.stderr.write(`${message}\n`);
   process.stderr.write(`workbench — Codex-driven DFT+DMFT research environment\n\nCommands:
   doctor
-  context --task <id> [--allow-blocked] [--pretty]
+  context --task <id> [--allow-blocked] [--full] [--pretty]
   hpc show --project <id>
   hpc configure --project <id> --file <json>
   plan list [--project <id>] [--task <id>] [--status <status>] [--query <text>]
@@ -61,10 +61,17 @@ function usage(message, code = EXIT.usage) {
 
   experience search [--query <text>] [--project <id>] [--task <id>] [--status <manual|candidate|confirmed>]
   experience capture --run <id> [--stage <id>] --title <text> --content-file <path> --applicable-scope <text> --idempotency-key <key> [--category <name>] [--artifacts <id,id>] [--tags <tag,tag>]
+  remote session|init --task <id>
+  remote exec --task <id> (--command <text>|--command-file <path>) [--access <read|write>] [--scope <user|project|task>] [--cwd <relative>] [--timeout-seconds <n>]
+  remote upload --task <id> --local <task-relative> --remote <task-relative> [--overwrite]
+  remote download --task <id> --remote <relative> --local <task-relative> [--scope <user|project|task>] [--overwrite]
   remote status|logs|reconcile --job <remote-job-id>
   monitor guard
-  monitor show|tick|pause --run <id>
-  monitor attach --run <id> --automation-ref <id> --cadence-minutes <minutes>
+  monitor show|tick|directive --run <id>
+  monitor attach --run <id> --automation-ref <id> --automation-state active --cadence-minutes <minutes>
+  monitor sync --run <id> --automation-ref <id> --automation-state <active|paused|missing> [--cadence-minutes <minutes>]
+  monitor pause --run <id> --automation-ref <id> --automation-state paused
+  monitor close --run <id> --automation-ref <id> --automation-state <deleted|missing>
 
 JSON is the default output. Web pages are observation/metadata surfaces and never authorize or launch Agent work.\n`);
   process.exit(code);
@@ -102,6 +109,58 @@ function queryPath(base, values) {
   return `${base}${query.size ? `?${query}` : ''}`;
 }
 
+function compactContext(context) {
+  const actions = Array.isArray(context.recentActions) ? context.recentActions : [];
+  const jobs = Array.isArray(context.recentJobs) ? context.recentJobs : [];
+  const activeJobs = jobs.filter(item => !['done', 'exit', 'zombi', 'unkwn', 'preparation_failed', 'cancelled'].includes(String(item.status).toLowerCase()));
+  const recentTerminalJobs = jobs.filter(item => !activeJobs.includes(item)).slice(0, 5);
+  const run = context.run ? {
+    id: context.run.id,
+    status: context.run.status,
+    currentStageId: context.run.current_stage_id,
+    researchPlanId: context.run.research_plan_id,
+    envelopeRevision: context.run.envelope_revision,
+    envelopeSha256: context.run.confirmed_envelope_sha256,
+    workingPlan: {
+      currentStageId: context.run.working_plan?.currentStageId,
+      summary: context.run.working_plan?.summary,
+      nextActions: context.run.working_plan?.nextActions,
+    },
+    boundary: {
+      hpcProfileId: context.run.confirmed_envelope?.hpcProfileId,
+      coreStageIds: context.run.confirmed_envelope?.coreStageIds,
+      resourceLimits: context.run.confirmed_envelope?.resourceLimits,
+      protectedRelativePaths: context.run.confirmed_envelope?.protectedRelativePaths,
+    },
+  } : null;
+  return {
+    schemaVersion: context.schemaVersion,
+    view: 'compact',
+    project: context.project ? { id: context.project.id, name: context.project.name, material: context.project.material, workingDir: context.project.working_dir } : null,
+    task: context.task ? { id: context.task.id, name: context.task.name, status: context.task.status, workflowId: context.task.workflow_id, taskRootRel: context.task.task_root_rel } : null,
+    taskRoot: context.taskRoot,
+    run,
+    research: context.research,
+    workflow: context.workflow ? { id: context.workflow.id, name: context.workflow.name, stages: context.workflow.stages?.map(stage => ({ id: stage.id, name: stage.name })) } : null,
+    operations: {
+      activeOrWaitingActions: actions.filter(item => !['succeeded', 'failed', 'cancelled'].includes(item.status)).map(item => ({ id: item.id, stageId: item.stage_id, type: item.action_type, status: item.status, retryAttempt: item.retry_attempt })),
+      recentActions: actions.slice(0, 5).map(item => ({ id: item.id, stageId: item.stage_id, type: item.action_type, status: item.status, retryAttempt: item.retry_attempt })),
+      jobs: [...activeJobs, ...recentTerminalJobs].map(item => ({ id: item.id, jobId: item.job_id, stageId: item.stage_id, status: item.status, host: item.host, remoteWorkdir: item.remote_workdir, nextCheckAt: item.next_check_at })),
+      counts: { actions: actions.length, jobs: jobs.length, artifacts: context.recentArtifacts?.length ?? 0, evidenceChecks: context.recentEvidenceChecks?.length ?? 0 },
+    },
+    monitor: context.monitor,
+    pendingItems: context.pendingItems,
+    eventCursor: context.eventCursor,
+    blockers: context.blockers,
+  };
+}
+
+function commandInput() {
+  if (typeof flags.command === 'string' && flags.command.trim()) return flags.command;
+  if (typeof flags['command-file'] === 'string') return fs.readFileSync(flags['command-file'], 'utf8');
+  usage('Missing --command or --command-file');
+}
+
 async function main() {
   const [group, action] = positionals;
   if (!group && (flags.help || flags.h)) usage(undefined, EXIT.ok);
@@ -113,7 +172,7 @@ async function main() {
   if (group === 'context') {
     const result = await request('GET', `/api/agent/v1/context/tasks/${encodeURIComponent(required('task'))}`);
     if (Array.isArray(result.blockers) && result.blockers.length && flags['allow-blocked'] !== true) { const item = new Error('Context contains blockers'); item.payload = result; item.exitCode = EXIT.blocked; throw item; }
-    return result;
+    return flags.full === true ? result : compactContext(result);
   }
   if (group === 'hpc') {
     const project = encodeURIComponent(required('project'));
@@ -168,14 +227,27 @@ async function main() {
   if (group === 'event' && action === 'append') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/events`, { category: required('category'), eventType: required('type'), actorType: required('actor'), payload: flags['payload-file'] ? readJson('payload-file') : {}, idempotencyKey: flags['idempotency-key'], source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
   if (group === 'experience' && action === 'search') return request('GET', queryPath('/api/experiences', { search: flags.query, projectId: flags.project, taskId: flags.task, status: flags.status }));
   if (group === 'experience' && action === 'capture') return request('POST', '/api/experiences/codex-capture', { runId: required('run'), stageId: flags.stage, title: required('title'), content: readText('content-file'), tags: csvOptional('tags'), category: flags.category, applicableScope: required('applicable-scope'), sourceArtifactIds: csvOptional('artifacts'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
-  if (group === 'remote' && ['status', 'logs', 'reconcile'].includes(action)) return request('POST', `/api/agent/v1/remote/jobs/${encodeURIComponent(required('job'))}/${action}`, {});
+  if (group === 'remote') {
+    if (['session', 'init', 'exec', 'upload', 'download'].includes(action)) {
+      const task = encodeURIComponent(required('task'));
+      if (action === 'session') return request('GET', `/api/agent/v1/remote/tasks/${task}/session`);
+      if (action === 'init') return request('POST', `/api/agent/v1/remote/tasks/${task}/init`, {});
+      if (action === 'exec') return request('POST', `/api/agent/v1/remote/tasks/${task}/exec`, { command: commandInput(), access: flags.access, scope: flags.scope, cwd: flags.cwd, timeoutSeconds: flags['timeout-seconds'] === undefined ? undefined : Number(flags['timeout-seconds']) });
+      if (action === 'upload') return request('POST', `/api/agent/v1/remote/tasks/${task}/upload`, { localPath: required('local'), remotePath: required('remote'), overwrite: flags.overwrite === true });
+      if (action === 'download') return request('POST', `/api/agent/v1/remote/tasks/${task}/download`, { remotePath: required('remote'), localPath: required('local'), scope: flags.scope, overwrite: flags.overwrite === true });
+    }
+    if (['status', 'logs', 'reconcile'].includes(action)) return request('POST', `/api/agent/v1/remote/jobs/${encodeURIComponent(required('job'))}/${action}`, {});
+  }
   if (group === 'monitor') {
     if (action === 'guard') return request('GET', '/api/agent/v1/monitor/guard');
     const run = encodeURIComponent(required('run'));
     if (action === 'show') return request('GET', `/api/agent/v1/runs/${run}/monitor`);
+    if (action === 'directive') return request('GET', `/api/agent/v1/runs/${run}/monitor/directive`);
     if (action === 'tick') return request('POST', `/api/agent/v1/runs/${run}/monitor/tick`, {});
-    if (action === 'pause') return request('POST', `/api/agent/v1/runs/${run}/monitor/pause`, {});
-    if (action === 'attach') return request('POST', `/api/agent/v1/runs/${run}/monitor/attach`, { automationRef: required('automation-ref'), cadenceMinutes: Number(required('cadence-minutes')) });
+    if (action === 'attach') return request('POST', `/api/agent/v1/runs/${run}/monitor/attach`, { automationRef: required('automation-ref'), automationState: required('automation-state'), cadenceMinutes: Number(required('cadence-minutes')) });
+    if (action === 'sync') return request('POST', `/api/agent/v1/runs/${run}/monitor/automation`, { automationRef: required('automation-ref'), automationState: required('automation-state'), cadenceMinutes: flags['cadence-minutes'] === undefined ? undefined : Number(flags['cadence-minutes']) });
+    if (action === 'pause') return request('POST', `/api/agent/v1/runs/${run}/monitor/pause`, { automationRef: required('automation-ref'), automationState: required('automation-state') });
+    if (action === 'close') return request('POST', `/api/agent/v1/runs/${run}/monitor/close`, { automationRef: required('automation-ref'), automationState: required('automation-state') });
   }
   usage(`Unknown command: ${positionals.join(' ')}`);
 }

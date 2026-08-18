@@ -186,7 +186,7 @@ function StepNode({
       )}
       {observation && (observation.actions > 0 || observation.jobs > 0 || observation.evidence > 0) && (
         <text x={x + 14} y={y + 61} fill="#8bcaba" fontSize={8.5} style={{ userSelect: 'none' }}>
-          CODEX  A{observation.actions} · J{observation.jobs} · E{observation.evidence}
+          CODEX  M{observation.actions} · J{observation.jobs} · E{observation.evidence}
         </text>
       )}
     </g>

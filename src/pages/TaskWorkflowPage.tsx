@@ -75,8 +75,8 @@ export default function TaskWorkflowPage() {
           </button>
         </div>
         {task.description && <p className="text-xs text-[#6b6b80] mt-1">{task.description}</p>}
-        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>STAGE {agentContext.run.current_stage_id ?? '—'}</span><span>{agentContext.recentActions.length} actions</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">只读记录；研究者决定回到 Codex 对话</span></div>}
-        <div className="mt-2 flex items-start gap-2 text-[10px] leading-5 text-[#85859c]"><Info size={12} className="mt-0.5 shrink-0 text-[#67c9b5]"/><p>这里是任务的核心科学骨架。具体命令、重试、传输、参数扫描和临时诊断保留在 Codex action / event 中；只有改变关键阶段、检查点或完成证据时才修改工作流。</p></div>
+        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>STAGE {agentContext.run.current_stage_id ?? '—'}</span><span>{agentContext.recentActions.length} milestones</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">普通会话命令见 Agent 时间线</span></div>}
+        <div className="mt-2 flex items-start gap-2 text-[10px] leading-5 text-[#85859c]"><Info size={12} className="mt-0.5 shrink-0 text-[#67c9b5]"/><p>这里是任务的核心科学骨架。普通命令、连接、传输和临时诊断只记 Event；提交、科学重试、批次和证据验证才作为里程碑 Action。只有改变关键阶段、检查点或完成证据时才修改工作流。</p></div>
       </div>
 
       {/* Progress bar */}
