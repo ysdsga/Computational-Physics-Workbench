@@ -12,6 +12,7 @@ import { normalizeTaskRootRel } from './taskRoots.js';
 import { recordJobObservation, scheduleNewJob } from './monitorStore.js';
 import type { JobMonitorPolicy } from './monitorPolicy.js';
 import { parseFormattedSchedulerObservation, parseHistoryJobMatches, parseLegacyBhistObservation } from './lsfOutput.js';
+import { canConcludeUncertainSubmissionWasNotAccepted, reconciliationObservation, uncertainNoMatchGraceMinutes } from './submissionReconciliation.js';
 
 const MAX_OUTPUT = 1024 * 1024;
 // HPC login and network filesystems can take longer than the TCP handshake.
@@ -354,6 +355,7 @@ function parseJobId(output: string): string | null { return output.match(/Job\s+
 function explicitlyNotSubmitted(output: string): boolean {
   return /(?:job\s+not\s+submitted|request\s+aborted\s+by\s+esub)/i.test(output);
 }
+
 function loadJob(id: string): any {
   const row = db.prepare('SELECT * FROM remote_jobs WHERE id = ?').get(id);
   if (!row) throw new AgentCoreError(404, 'REMOTE_JOB_NOT_FOUND', 'Remote job not found');
@@ -362,10 +364,12 @@ function loadJob(id: string): any {
 
 function markSubmissionRejected(action: RunAction, jobId: string, detail: Record<string, unknown>) {
   const observedAt = now();
+  const classification = typeof detail.classification === 'string' ? detail.classification : 'explicitly_not_submitted';
   db.prepare("UPDATE remote_jobs SET status = 'preparation_failed', last_observation_json = ?, reconciled_at = ? WHERE id = ?")
-    .run(stableJson({ ...detail, classification: 'explicitly_not_submitted', observedAt }), observedAt, jobId);
+    .run(stableJson({ ...detail, classification, observedAt }), observedAt, jobId);
   scheduleNewJob(action.run_id, jobId, 'preparation_failed', observedAt);
-  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: 'submission_rejected', title: '调度器在接收作业前拒绝提交，等待 Codex 修正后重试', detail: { ...detail, blocksRun: false, consumesScientificRetry: false }, idempotencyKey: `submission-rejected:${jobId}`, source: 'workbench' });
+  const reconciledAbsent = classification === 'reconciled_not_submitted';
+  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: reconciledAbsent ? 'submission_not_found' : 'submission_rejected', title: reconciledAbsent ? '提交超时经重复对账确认未进入调度器' : '调度器在接收作业前拒绝提交，等待 Codex 修正后重试', detail: { ...detail, classification, blocksRun: false, consumesScientificRetry: false }, idempotencyKey: `submission-rejected:${jobId}`, source: 'workbench' });
   appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_not_submitted', actorType: 'system', payload: { remoteJobId: jobId, actionId: action.id, ...detail } });
 }
 
@@ -512,7 +516,21 @@ async function identifyUncertainJob(row: any) {
     if (action) markSubmissionRejected(action as RunAction, row.id, { jobName: row.job_name, candidates: ids, stdout: row.submit_stdout, stderr: row.submit_stderr, reconciliationRaw: result.stdout });
     return serializeJob(loadJob(row.id));
   }
-  db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ candidates: ids, raw: result.stdout, observedAt: now() }), now(), row.id);
+  const observedAt = now();
+  if (ids.length === 0 && canConcludeUncertainSubmissionWasNotAccepted(row, ids, observedAt)) {
+    const action = db.prepare('SELECT * FROM run_actions WHERE id = ?').get(row.action_id) as any;
+    if (action) markSubmissionRejected(action as RunAction, row.id, {
+      classification: 'reconciled_not_submitted',
+      jobName: row.job_name,
+      candidates: ids,
+      reconciliationRaw: result.stdout,
+      previousObservation: reconciliationObservation(row.last_observation_json),
+      safetyGraceMinutes: uncertainNoMatchGraceMinutes(),
+    });
+    return serializeJob(loadJob(row.id));
+  }
+  db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ candidates: ids, raw: result.stdout, observedAt }), observedAt, row.id);
+  recordJobObservation(row.id, row.status, 'submission_uncertain', '', observedAt);
   return serializeJob(loadJob(row.id));
 }
 

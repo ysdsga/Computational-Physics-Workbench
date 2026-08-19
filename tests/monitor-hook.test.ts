@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decideStopHook } from '../.codex/hooks/workbench-monitor-stop.mjs';
 import { nextJobCheck, normalizeJobMonitorPolicy } from '../server/services/monitorPolicy.js';
+import { canConcludeUncertainSubmissionWasNotAccepted } from '../server/services/submissionReconciliation.js';
 import fs from 'node:fs';
 
 test('Stop Hook allows idle or monitored work and blocks an unattended active Run once', () => {
@@ -30,7 +31,23 @@ test('monitor timing follows the Agent-selected policy without busy polling', ()
   assert.equal(nextJobCheck('PEND', 1, base, policy), '2026-08-16T01:30:00.000Z');
   assert.equal(nextJobCheck('RUN', 4, base, policy), '2026-08-16T00:45:00.000Z');
   assert.equal(nextJobCheck('DONE', 1, base, policy), null);
-  assert.equal(nextJobCheck('submission_uncertain', 1, base, policy), base);
+  assert.equal(nextJobCheck('submission_uncertain', 0, base, policy), base);
+  assert.equal(nextJobCheck('submission_uncertain', 1, base, policy), '2026-08-16T00:01:00.000Z');
+});
+
+test('uncertain submission needs two empty reconciliations and a safety grace before it can be classified as not submitted', () => {
+  const observedAt = '2026-08-16T00:10:00.000Z';
+  const base = {
+    status: 'submission_uncertain',
+    job_id: null,
+    created_at: '2026-08-16T00:00:00.000Z',
+    submit_stderr: 'SSH_TIMEOUT: OpenSSH operation timed out',
+    last_observation_json: JSON.stringify({ candidates: [], observedAt: '2026-08-16T00:08:00.000Z' }),
+  };
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted(base, [], observedAt), true);
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted({ ...base, created_at: '2026-08-16T00:09:00.000Z' }, [], observedAt), false);
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted({ ...base, last_observation_json: JSON.stringify({ candidates: ['700'], observedAt: '2026-08-16T00:08:00.000Z' }) }, [], observedAt), false);
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted(base, ['700'], observedAt), false);
 });
 
 test('repo Stop Hook has a Windows command override and stays synchronous', () => {

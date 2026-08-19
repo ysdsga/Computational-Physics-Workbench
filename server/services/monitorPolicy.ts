@@ -88,7 +88,8 @@ export function heartbeatLeaseForMonitor(row: MonitorHeartbeatRow, currentMs = D
 export function nextJobCheck(statusInput: string, pollCount: number, timestamp: string, policy = derivedPolicy(60)): string | null {
   const status = statusInput.toLowerCase();
   if (TERMINAL_JOB_STATUSES.has(status)) return null;
-  if (status === 'submission_uncertain' || status === 'prepared' || status === 'recovered') return timestamp;
+  if (status === 'submission_uncertain') return pollCount <= 0 ? timestamp : afterMinutes(timestamp, 1);
+  if (status === 'prepared' || status === 'recovered') return timestamp;
   if (pollCount <= 0) return afterMinutes(timestamp, policy.firstCheckAfterMinutes);
   if (status === 'pend') return afterMinutes(timestamp, policy.pendingCheckEveryMinutes);
   return afterMinutes(timestamp, policy.runningCheckEveryMinutes);
