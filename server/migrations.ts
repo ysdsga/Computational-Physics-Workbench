@@ -10,6 +10,7 @@ const ESSENTIAL_WORKBENCH_SCHEMA_VERSION = 5;
 const JOB_MONITOR_SCHEMA_VERSION = 6;
 const THEORETICAL_EXPLORATION_SCHEMA_VERSION = 7;
 const THEORETICAL_STAGE_REFLECTION_SCHEMA_VERSION = 8;
+const THEORETICAL_IDEA_CLOSURE_SCHEMA_VERSION = 9;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -88,13 +89,25 @@ function backupBeforeTheoreticalStageReflection(db: Database.Database, dbPath: s
   db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
 }
 
+function backupBeforeTheoreticalIdeaClosure(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-theoretical-idea-closure-v9.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
 function tableCount(db: Database.Database, table: string): number {
   return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
 }
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= THEORETICAL_STAGE_REFLECTION_SCHEMA_VERSION) return;
+  if (currentVersion >= THEORETICAL_IDEA_CLOSURE_SCHEMA_VERSION) return;
 
   if (currentVersion < JOB_MONITOR_SCHEMA_VERSION) backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -743,6 +756,50 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
           .run(JSON.stringify(data), new Date().toISOString(), 'theoretical-research');
       }
       db.pragma(`user_version = ${THEORETICAL_STAGE_REFLECTION_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < THEORETICAL_IDEA_CLOSURE_SCHEMA_VERSION) {
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?')
+      .get('theoretical-research') as { data: string } | undefined;
+    if (stored) backupBeforeTheoreticalIdeaClosure(db, dbPath);
+    db.transaction(() => {
+      if (stored) {
+        let data: { steps?: Array<{ id: string; name?: string; description?: string }> };
+        try {
+          data = JSON.parse(stored.data) as typeof data;
+        } catch {
+          throw new Error('The theoretical-research workflow template is invalid JSON; database was left unchanged');
+        }
+        if (!Array.isArray(data.steps)) {
+          throw new Error('The theoretical-research workflow template is missing steps; database was left unchanged');
+        }
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === 'theoretical-research');
+        if (!builtIn) {
+          throw new Error('The built-in theoretical-research workflow is missing; database was left unchanged');
+        }
+        const previousReflectionDescription = '记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出探索、证伪、暂缓或转后续任务的处置。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。';
+        const previousInterpretationDescription = '完成本阶段记录与全局探索充分性审查。检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法；若有则回到最早受影响阶段，若无则把探索审查标记为通过并进入成果封装。';
+        let changed = false;
+        for (const step of data.steps) {
+          const builtInStep = builtIn.steps.find(item => item.id === step.id);
+          if (!builtInStep) continue;
+          const isPreviousReflection = step.id.endsWith('-reflection')
+            && step.name === '记录、反思与下一步判断'
+            && step.description === previousReflectionDescription;
+          const isPreviousInterpretation = step.id === 'theory-interpretation-04'
+            && step.name === '记录、反思与探索充分性审查'
+            && step.description === previousInterpretationDescription;
+          if (!isPreviousReflection && !isPreviousInterpretation) continue;
+          step.description = builtInStep.description;
+          changed = true;
+        }
+        if (changed) {
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(data), new Date().toISOString(), 'theoretical-research');
+        }
+      }
+      db.pragma(`user_version = ${THEORETICAL_IDEA_CLOSURE_SCHEMA_VERSION}`);
     })();
   }
 }

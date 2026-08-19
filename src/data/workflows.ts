@@ -600,7 +600,7 @@ const THEORETICAL_RESEARCH_STAGES = makeWorkflowStages([
 function theoreticalStageReflectionStep(stageId: string, order: number): WorkflowStep {
   return {
     id: `theory-${stageId}-reflection`, stageId, order, name: '记录、反思与下一步判断',
-    description: '记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出探索、证伪、暂缓或转后续任务的处置。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。',
+    description: '记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出处置。高价值想法只有在引用证据并标记为已解决或已证伪后才闭合；暂缓或转后续任务仍保持未决。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。',
     outputFiles: [`${stageId}_stage_reflection.md`],
   };
 }
@@ -699,7 +699,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   },
   {
     id: 'theory-interpretation-04', stageId: 'interpretation', order: 4, name: '记录、反思与探索充分性审查',
-    description: '完成本阶段记录与全局探索充分性审查。检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法；若有则回到最早受影响阶段，若无则把探索审查标记为通过并进入成果封装。',
+    description: '完成本阶段记录与全局探索充分性审查。检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法；暂缓或转后续任务不能解除阻塞，只有引用证据的已解决或已证伪结论才能闭合。仍有未决项则回到最早受影响阶段，否则把探索审查标记为通过并进入成果封装。',
     outputFiles: ['interpretation_stage_reflection.md', 'exploration_review.md'],
   },
   {

@@ -389,18 +389,31 @@ export function updateWorkingPlan(runId: string, input: { workingPlan: unknown; 
   return getRun(runId);
 }
 
+const STAGE_REFLECTION_IDEA_DISPOSITIONS = ['explore', 'resolved', 'falsified', 'deferred', 'follow_up'] as const;
+const CLOSING_IDEA_DISPOSITIONS = new Set<StageReflectionIdea['disposition']>(['resolved', 'falsified']);
+
 function validateStageReflectionIdeas(input: unknown): StageReflectionIdea[] {
   if (!Array.isArray(input)) throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', 'ideas must be an array');
   return input.map((item, index) => {
     const value = objectValue(item, `ideas[${index}]`);
-    if (!['explore', 'falsified', 'deferred', 'follow_up'].includes(String(value.disposition))) {
+    if (!STAGE_REFLECTION_IDEA_DISPOSITIONS.includes(value.disposition as typeof STAGE_REFLECTION_IDEA_DISPOSITIONS[number])) {
       throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', `ideas[${index}].disposition is invalid`);
+    }
+    const disposition = value.disposition as StageReflectionIdea['disposition'];
+    const evidenceRefs = orderedStringList(value.evidenceRefs ?? [], `ideas[${index}].evidenceRefs`);
+    if (CLOSING_IDEA_DISPOSITIONS.has(disposition) && evidenceRefs.length === 0) {
+      throw new AgentCoreError(
+        400,
+        'STAGE_REFLECTION_CLOSURE_EVIDENCE_REQUIRED',
+        `ideas[${index}] requires at least one evidence reference before it can be ${disposition}`,
+      );
     }
     return {
       idea: requiredText(value.idea, `ideas[${index}].idea`),
       significance: requiredText(value.significance, `ideas[${index}].significance`),
-      disposition: value.disposition as StageReflectionIdea['disposition'],
+      disposition,
       reason: requiredText(value.reason, `ideas[${index}].reason`),
+      evidenceRefs,
     };
   });
 }
@@ -418,11 +431,11 @@ function unresolvedExplorationIdeas(runId: string, currentIdeas: StageReflection
   const unresolved = new Map<string, string>();
   const applyIdeas = (ideas: StageReflectionIdea[]) => {
     for (const item of ideas) {
-      if (!item || typeof item.idea !== 'string' || !['explore', 'falsified', 'deferred', 'follow_up'].includes(String(item.disposition))) continue;
+      if (!item || typeof item.idea !== 'string' || !STAGE_REFLECTION_IDEA_DISPOSITIONS.includes(item.disposition)) continue;
       const key = item.idea.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
       if (!key) continue;
-      if (item.disposition === 'explore') unresolved.set(key, item.idea);
-      else unresolved.delete(key);
+      if (CLOSING_IDEA_DISPOSITIONS.has(item.disposition)) unresolved.delete(key);
+      else unresolved.set(key, item.idea);
     }
   };
   for (const row of rows) {
@@ -505,16 +518,16 @@ export function recordStageReflection(runId: string, input: {
   if (!targetStageId && nextActions.length > 0) {
     throw new AgentCoreError(400, 'STAGE_REFLECTION_NEXT_ACTION_INVALID', 'The final stage cannot retain next Actions when proceeding');
   }
-  const currentUnresolvedItems = ideas.filter(item => item.disposition === 'explore').map(item => item.idea);
+  const currentUnresolvedItems = ideas.filter(item => !CLOSING_IDEA_DISPOSITIONS.has(item.disposition)).map(item => item.idea);
   const unresolvedItems = unresolvedExplorationIdeas(runId, ideas);
   if (decision !== 'proceed' && currentUnresolvedItems.length === 0 && uncertainties.length === 0) {
-    throw new AgentCoreError(400, 'STAGE_REFLECTION_RATIONALE_REQUIRED', 'Stay or loop requires an uncertainty or an idea marked for exploration');
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_RATIONALE_REQUIRED', 'Stay or loop requires an uncertainty or an unresolved high-value idea');
   }
   if (stageId === 'interpretation' && decision === 'proceed' && unresolvedItems.length > 0) {
-    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'Interpretation cannot proceed while high-value ideas remain marked for exploration');
+    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'Interpretation cannot proceed while high-value ideas remain unresolved');
   }
   if (!targetStageId && unresolvedItems.length > 0) {
-    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'The final stage must stay or loop while high-value ideas remain marked for exploration');
+    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'The final stage must stay or loop while high-value ideas remain unresolved');
   }
 
   const reflection: StageReflection = {

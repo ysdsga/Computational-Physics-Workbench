@@ -57,14 +57,14 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v8 and CLI doctor start on disposable state', async () => {
+test('server, schema v9 and CLI doctor start on disposable state', async () => {
   const root = await fetch(`${base}/`);
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 8);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 9);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });
@@ -244,6 +244,13 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
       significance: 'It could overturn the claim of a genuinely dynamic effect',
       disposition: 'explore',
       reason: 'This is the earliest decisive discriminator',
+      evidenceRefs: [],
+    }, {
+      idea: 'Does the derived scaling survive the controlled limit?',
+      significance: 'It could materially extend or restrict the central prediction',
+      disposition: 'explore',
+      reason: 'The controlled limit is the cleanest test of the proposed scaling',
+      evidenceRefs: [],
     }],
     decision: 'loop',
     targetStageId: 'model',
@@ -252,6 +259,7 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
   assert.equal(looping.response.status, 201);
   assert.equal((looping.payload as any).run.current_stage_id, 'model');
   assert.equal((looping.payload as any).run.working_plan.explorationReview.status, 'continue');
+  assert.equal((looping.payload as any).run.working_plan.explorationReview.unresolvedHighValueItems.length, 2);
 
   const continuingCompletion = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
     method: 'POST',
@@ -271,12 +279,52 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
   const omittedIdea = await reflection('interpretation', {}, 'interpretation-omits-open-idea');
   assert.equal(omittedIdea.response.status, 409);
   assert.equal((omittedIdea.payload as any).code, 'EXPLORATION_REVIEW_UNRESOLVED');
+  const deferredIdea = await reflection('interpretation', {
+    ideas: [{
+      idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
+      significance: 'It could overturn the claim of a genuinely dynamic effect',
+      disposition: 'deferred',
+      reason: 'A later study could run a broader parameter scan',
+      evidenceRefs: [],
+    }],
+  }, 'interpretation-defers-open-idea');
+  assert.equal(deferredIdea.response.status, 409);
+  assert.equal((deferredIdea.payload as any).code, 'EXPLORATION_REVIEW_UNRESOLVED');
+  const followUpIdea = await reflection('interpretation', {
+    ideas: [{
+      idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
+      significance: 'It could overturn the claim of a genuinely dynamic effect',
+      disposition: 'follow_up',
+      reason: 'The Agent proposes a later follow-up task',
+      evidenceRefs: [],
+    }],
+  }, 'interpretation-transfers-open-idea');
+  assert.equal(followUpIdea.response.status, 409);
+  assert.equal((followUpIdea.payload as any).code, 'EXPLORATION_REVIEW_UNRESOLVED');
+  const unsupportedClosure = await reflection('interpretation', {
+    ideas: [{
+      idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
+      significance: 'It could overturn the claim of a genuinely dynamic effect',
+      disposition: 'falsified',
+      reason: 'The Agent asserts that the alternative fails',
+      evidenceRefs: [],
+    }],
+  }, 'interpretation-unsupported-closure');
+  assert.equal(unsupportedClosure.response.status, 400);
+  assert.equal((unsupportedClosure.payload as any).code, 'STAGE_REFLECTION_CLOSURE_EVIDENCE_REQUIRED');
   const resolvedIdea = await reflection('interpretation', {
     ideas: [{
       idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
       significance: 'It could overturn the claim of a genuinely dynamic effect',
       disposition: 'falsified',
       reason: 'The matched control fails the derived frequency discriminator',
+      evidenceRefs: ['analysis/static_control.md#frequency-discriminator'],
+    }, {
+      idea: 'Does the derived scaling survive the controlled limit?',
+      significance: 'It could materially extend or restrict the central prediction',
+      disposition: 'resolved',
+      reason: 'The controlled-limit derivation establishes the scaling domain',
+      evidenceRefs: ['analysis/controlled_limit.md#scaling-domain'],
     }],
   }, 'interpretation-resolves-open-idea');
   assert.equal(resolvedIdea.response.status, 201);
@@ -291,6 +339,8 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
   assert.equal(reflections.filter(event => event.payload.stageId === 'validation').length, 2, 'reflection history is append-only rather than one-per-stage');
   assert.ok(reflections.some(event => event.payload.ideas.some((idea: any) => idea.disposition === 'explore')));
   assert.ok(reflections.some(event => event.payload.ideas.some((idea: any) => idea.disposition === 'falsified')));
+  assert.ok(reflections.some(event => event.payload.ideas.some((idea: any) => idea.disposition === 'resolved')));
+  assert.ok(reflections.flatMap(event => event.payload.ideas).filter((idea: any) => ['resolved', 'falsified'].includes(idea.disposition)).every((idea: any) => idea.evidenceRefs.length > 0));
 
   const context = await api(`/api/agent/v1/context/tasks/${task.id}`);
   assert.equal((context.payload as any).schemaVersion, 4);

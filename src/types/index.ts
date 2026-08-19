@@ -222,8 +222,9 @@ export interface ExplorationReview {
 export interface StageReflectionIdea {
   idea: string;
   significance: string;
-  disposition: 'explore' | 'falsified' | 'deferred' | 'follow_up';
+  disposition: 'explore' | 'resolved' | 'falsified' | 'deferred' | 'follow_up';
   reason: string;
+  evidenceRefs: string[];
 }
 
 export interface StageReflection {

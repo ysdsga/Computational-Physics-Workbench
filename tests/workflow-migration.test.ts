@@ -9,7 +9,7 @@ import { runMigrations } from '../server/migrations.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('v8 adds every stage reflection to the stored template without rewriting existing Task snapshots', async () => {
+test('v8 and v9 add stage reflections without rewriting existing Task snapshots', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-workflow-v7-'));
   const dbPath = path.join(tempRoot, 'migration.db');
   const seed = new Database(dbPath);
@@ -60,7 +60,7 @@ test('v8 adds every stage reflection to the stored template without rewriting ex
   process.env.WORKBENCH_DB_PATH = dbPath;
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
   try {
-    assert.equal(dbModule.default.pragma('user_version', { simple: true }), 8);
+    assert.equal(dbModule.default.pragma('user_version', { simple: true }), 9);
     const row = dbModule.default.prepare('SELECT data FROM workflow_templates WHERE id = ?')
       .get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof oldWorkflow;
@@ -72,6 +72,7 @@ test('v8 adds every stage reflection to the stored template without rewriting ex
       .get('task-existing') as { workflow_snapshot: string };
     assert.deepEqual(JSON.parse(taskRow.workflow_snapshot), oldSnapshot, 'existing Task workflow snapshots must remain immutable');
     assert.ok(fs.existsSync(path.join(tempRoot, 'migration.before-theoretical-stage-reflection-v8.db')));
+    assert.ok(fs.existsSync(path.join(tempRoot, 'migration.before-theoretical-idea-closure-v9.db')));
   } finally {
     dbModule.closeDb();
     delete process.env.WORKBENCH_DB_PATH;
@@ -79,7 +80,7 @@ test('v8 adds every stage reflection to the stored template without rewriting ex
   }
 });
 
-test('v7 and v8 template migrations preserve intentionally removed theoretical stages', () => {
+test('v7 through v9 template migrations preserve intentionally removed theoretical stages', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-workflow-custom-'));
   const dbPath = path.join(tempRoot, 'migration.db');
   const seed = new Database(dbPath);
@@ -98,13 +99,52 @@ test('v7 and v8 template migrations preserve intentionally removed theoretical s
   seed.pragma('user_version = 6');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 8);
+    assert.equal(seed.pragma('user_version', { simple: true }), 9);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data);
     assert.deepEqual(migrated.stages, customWorkflow.stages);
     assert.ok(migrated.steps.some((step: { id: string }) => step.id === 'custom-question'));
     assert.ok(migrated.steps.some((step: { id: string }) => step.id === 'theory-question-reflection'));
     assert.ok(!migrated.steps.some((step: { stageId: string }) => step.stageId !== 'question'));
+  } finally {
+    seed.close();
+    try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
+  }
+});
+
+test('v9 updates only unchanged built-in reflection descriptions', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-workflow-v8-'));
+  const dbPath = path.join(tempRoot, 'migration.db');
+  const seed = new Database(dbPath);
+  seed.exec(`
+    CREATE TABLE workflow_templates (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
+      data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL
+    );
+  `);
+  const previousReflectionDescription = '记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出探索、证伪、暂缓或转后续任务的处置。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。';
+  const previousInterpretationDescription = '完成本阶段记录与全局探索充分性审查。检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法；若有则回到最早受影响阶段，若无则把探索审查标记为通过并进入成果封装。';
+  const customizedDescription = '研究者保留的自定义反思规则';
+  const workflow = {
+    stages: [{ id: 'question', name: '问题定义' }, { id: 'model', name: '模型与假设' }, { id: 'interpretation', name: '解释与预测' }],
+    steps: [
+      { id: 'theory-question-reflection', stageId: 'question', name: '记录、反思与下一步判断', description: previousReflectionDescription },
+      { id: 'theory-model-reflection', stageId: 'model', name: '记录、反思与下一步判断', description: customizedDescription },
+      { id: 'theory-interpretation-04', stageId: 'interpretation', name: '记录、反思与探索充分性审查', description: previousInterpretationDescription },
+    ],
+  };
+  seed.prepare('INSERT INTO workflow_templates (id, name, description, data, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run('theoretical-research', '理论研究', 'customized', JSON.stringify(workflow), new Date().toISOString());
+  seed.pragma('user_version = 8');
+  try {
+    runMigrations(seed, dbPath);
+    assert.equal(seed.pragma('user_version', { simple: true }), 9);
+    const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
+    const migrated = JSON.parse(row.data) as typeof workflow;
+    assert.match(migrated.steps.find(step => step.id === 'theory-question-reflection')?.description ?? '', /只有在引用证据/);
+    assert.match(migrated.steps.find(step => step.id === 'theory-interpretation-04')?.description ?? '', /暂缓或转后续任务不能解除阻塞/);
+    assert.equal(migrated.steps.find(step => step.id === 'theory-model-reflection')?.description, customizedDescription);
+    assert.ok(fs.existsSync(path.join(tempRoot, 'migration.before-theoretical-idea-closure-v9.db')));
   } finally {
     seed.close();
     try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
