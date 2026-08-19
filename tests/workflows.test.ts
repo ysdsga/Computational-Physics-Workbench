@@ -40,4 +40,7 @@ test('theoretical research is a complete non-computational built-in workflow', (
   assert.ok(workflow.steps.some(step => step.outputFiles?.includes('evidence_index.md')));
   assert.ok(workflow.steps.some(step => step.outputFiles?.includes('exploration_review.md')));
   assert.equal(workflow.steps.filter(step => step.name.includes('反思')).length, workflow.stages.length);
+  const reflectionSteps = workflow.steps.filter(step => step.name.includes('反思'));
+  assert.ok(reflectionSteps.every(step => step.description.includes('反例、竞争机制、可控极限和可检验预测')));
+  assert.ok(reflectionSteps.every(step => step.description.includes('不设数量指标，不为凑数制造想法')));
 });
