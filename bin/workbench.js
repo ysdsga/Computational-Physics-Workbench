@@ -58,6 +58,7 @@ function usage(message, code = EXIT.usage) {
   evidence check --action <id> --validator <name> --validator-version <version> --status <pass|warn|fail> --result-file <json> --idempotency-key <key> [--artifact <id>]
   evidence list --run <id>
   event append --run <id> --category <fact|inference|decision|conclusion> --type <name> --actor <agent|researcher|system> [--payload-file <json>] [--conversation-ref <ref>]
+  reflection record --run <id> --stage <id> --file <json> --idempotency-key <key> [--conversation-ref <ref>]
 
   experience search [--query <text>] [--project <id>] [--task <id>] [--status <manual|candidate|confirmed>]
   experience capture --run <id> [--stage <id>] --title <text> --content-file <path> --applicable-scope <text> --idempotency-key <key> [--category <name>] [--artifacts <id,id>] [--tags <tag,tag>]
@@ -91,6 +92,7 @@ const BLOCKED_CODES = new Set([
   'TASK_ROOT_UNRESOLVED', 'STAGE_WAITING_RESEARCHER', 'ACTION_NOT_EXECUTABLE',
   'EXECUTION_INPUT_DRIFT', 'EXECUTION_RECEIPT_CONFLICT', 'EXECUTION_RECOVERY_UNCERTAIN',
   'REMOTE_SUBMISSION_UNCERTAIN', 'REMOTE_CONCURRENCY_LIMIT', 'ACTION_RETRY_LIMIT_REACHED', 'ACTIVE_REMOTE_JOBS',
+  'STAGE_REFLECTIONS_REQUIRED', 'EXPLORATION_REVIEW_REQUIRED', 'EXPLORATION_REVIEW_UNRESOLVED',
 ]);
 
 async function request(method, pathname, body) {
@@ -151,6 +153,7 @@ function compactContext(context) {
     },
     monitor: context.monitor,
     pendingItems: context.pendingItems,
+    latestStageReflections: context.latestStageReflections,
     eventCursor: context.eventCursor,
     blockers: context.blockers,
   };
@@ -226,6 +229,7 @@ async function main() {
     if (action === 'list') return request('GET', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/evidence-checks`);
   }
   if (group === 'event' && action === 'append') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/events`, { category: required('category'), eventType: required('type'), actorType: required('actor'), payload: flags['payload-file'] ? readJson('payload-file') : {}, idempotencyKey: flags['idempotency-key'], source: 'codex_conversation', conversationRef: flags['conversation-ref'] });
+  if (group === 'reflection' && action === 'record') return request('POST', `/api/agent/v1/runs/${encodeURIComponent(required('run'))}/stage-reflections`, { ...readJson('file'), stageId: required('stage'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
   if (group === 'experience' && action === 'search') return request('GET', queryPath('/api/experiences', { search: flags.query, projectId: flags.project, taskId: flags.task, status: flags.status }));
   if (group === 'experience' && action === 'capture') return request('POST', '/api/experiences/codex-capture', { runId: required('run'), stageId: flags.stage, title: required('title'), content: readText('content-file'), tags: csvOptional('tags'), category: flags.category, applicableScope: required('applicable-scope'), sourceArtifactIds: csvOptional('artifacts'), idempotencyKey: required('idempotency-key'), conversationRef: flags['conversation-ref'] });
   if (group === 'remote') {

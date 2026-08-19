@@ -1,6 +1,6 @@
 # 架构说明
 
-当前版本为 Essential Workbench V3 / SQLite schema v6。Agent 本体是项目内的 Codex 对话；Express、SQLite 和 WebUI 是边界、记录与观察设施。
+当前版本为 Essential Workbench V3 / SQLite schema v8。Agent 本体是项目内的 Codex 对话；Express、SQLite 和 WebUI 是边界、记录与观察设施。
 
 ## 总体数据流
 
@@ -38,8 +38,8 @@ Task Spec 以 `research_runs` 为唯一机器来源；CLI 与 Web 都从数据�
 
 ## 后端职责
 
-- `server/migrations.ts`：可重复 schema 迁移和一致性备份。v5 精简运行模型；v6 增加 Run monitor、Job 检查状态与 Action retry lineage。
-- `server/services/agentCore.ts`：Task Spec 校验、Run、Envelope 确认/修订、Working Plan、Pending Item、Event 和统一 Context。
+- `server/migrations.ts`：可重复 schema 迁移和一致性备份。v5 精简运行模型；v6 增加 Run monitor；v7/v8 增加理论探索与逐阶段反思模板。
+- `server/services/agentCore.ts`：Task Spec 校验、Run、Envelope 确认/修订、Working Plan、阶段反思循环、Pending Item、Event 和统一 Context。
 - `server/services/agentActions.ts`：Action、Artifact validity、Evidence 与证据库查询。
 - `server/services/actionExecutor.ts`：材料无关 capability、输入快照、Action spec、回执与执行恢复。
 - `server/services/hpcConfig.ts`：验证连接 profile 和 Task 目录映射，派生用户读根/项目根/Task 写根。
@@ -91,4 +91,4 @@ Codex 可取消当前 Run 自己创建的错误/已替代 Job，前提是 Envelo
 
 服务默认绑定 `127.0.0.1`，CORS 默认只允许本机 Vite 源。已确认 Envelope 与 Task binding 是执行授权；远程通道默认可用，可用 `WORKBENCH_REMOTE_DISABLED=1` 或 `WORKBENCH_REMOTE_SUBMIT_DISABLED=1` 紧急停用。连接使用严格 host key、BatchMode、无 agent forwarding、超时和输出上限；Workbench 不保存密码或私钥。
 
-数据库迁移前创建 `*.before-essential-v3.db`，v6 再创建 `*.before-job-monitor-v6.db`。正式库迁移必须先停用旧服务；自动化测试通过 `WORKBENCH_DB_PATH` 使用临时库。Project、Task、Plan 有 Run 历史后只能归档，Event 和科学来源链不提供破坏性清理接口。
+数据库迁移前创建 `*.before-essential-v3.db`，v6 创建 `*.before-job-monitor-v6.db`，v7/v8 分别备份理论探索和阶段反思模板迁移前状态。正式库迁移必须先停用旧服务；自动化测试通过 `WORKBENCH_DB_PATH` 使用临时库。Project、Task、Plan 有 Run 历史后只能归档，Event 和科学来源链不提供破坏性清理接口。

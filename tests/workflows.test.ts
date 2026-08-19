@@ -25,12 +25,12 @@ test('theoretical research is a complete non-computational built-in workflow', (
   const stageIds = new Set(workflow.stages.map(stage => stage.id));
   assert.equal(stageIds.size, workflow.stages.length);
   assert.ok(workflow.stages.every(stage => stage.color && stage.colorBg && stage.colorBorder));
-  assert.equal(workflow.steps.length, 20);
+  assert.equal(workflow.steps.length, 27);
   assert.equal(new Set(workflow.steps.map(step => step.id)).size, workflow.steps.length);
   assert.ok(workflow.steps.every(step => stageIds.has(step.stageId)));
   assert.deepEqual(
     workflow.stages.map(stage => getStepsForStage(workflow.id, stage.id).length),
-    [2, 2, 3, 2, 3, 2, 4, 2],
+    [3, 3, 4, 3, 4, 3, 4, 3],
   );
   assert.equal(getTotalRequiredSteps(workflow.id), workflow.steps.length);
 
@@ -39,4 +39,5 @@ test('theoretical research is a complete non-computational built-in workflow', (
   assert.ok(workflow.steps.some(step => step.outputFiles?.includes('theory_report.md')));
   assert.ok(workflow.steps.some(step => step.outputFiles?.includes('evidence_index.md')));
   assert.ok(workflow.steps.some(step => step.outputFiles?.includes('exploration_review.md')));
+  assert.equal(workflow.steps.filter(step => step.name.includes('反思')).length, workflow.stages.length);
 });

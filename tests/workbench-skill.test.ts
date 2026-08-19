@@ -23,6 +23,7 @@ test('workbench-agent uses one Envelope confirmation and preserves Codex autonom
     'current-chat Scheduled Task monitor', 'workbench monitor guard', '--retry-of',
     'expectedRunMinutes', 'monitor directive', 'automation-state active', 'monitor close', 'heartbeat lease',
     'explorationReviewRequired', 'workingPlan.explorationReview', 'materially change, extend, or overturn',
+    'workbench reflection record', 'earliest confirmed stage affected', 'does not by itself modify the Research Plan',
     'Never access `data/workbench.db`', 'Never use a material-specific adapter',
   ]) assert.ok(skill.includes(required), `skill should include ${required}`);
   assert.doesNotMatch(skill, /action authorize|contract show|policy create|review decide/);
@@ -37,7 +38,7 @@ test('documented workbench-agent commands are exposed by the CLI', () => {
   assert.equal(help.status, 0, help.stderr);
   for (const command of [
     'context --task <id>', 'hpc show --project <id>', 'plan list', 'plan show --plan <id>', 'plan metadata',
-    'workflow show --task <id>', 'run draft', 'run confirm', 'run working-plan',
+    'workflow show --task <id>', 'run draft', 'run confirm', 'run working-plan', 'reflection record',
     'run revise-envelope', 'execution contract', 'action prepare', 'action record',
     'action execute', 'pending list', 'pending create', 'pending resolve',
     'artifact register', 'artifact validity', 'evidence check',

@@ -219,6 +219,24 @@ export interface ExplorationReview {
   unresolvedHighValueItems: string[];
 }
 
+export interface StageReflectionIdea {
+  idea: string;
+  significance: string;
+  disposition: 'explore' | 'falsified' | 'deferred' | 'follow_up';
+  reason: string;
+}
+
+export interface StageReflection {
+  stageId: string;
+  summary: string;
+  established: string[];
+  uncertainties: string[];
+  ideas: StageReflectionIdea[];
+  decision: 'proceed' | 'stay' | 'loop';
+  targetStageId: string | null;
+  nextActions: Array<Record<string, unknown>>;
+}
+
 export interface WorkingPlan extends Record<string, unknown> {
   currentStageId?: string | null;
   summary?: string;
@@ -267,6 +285,21 @@ export interface RunEvent {
   source: string;
   conversation_ref: string | null;
   occurred_at: string;
+}
+
+export interface StageReflectionResult {
+  reflection: RunEvent;
+  run: ResearchRun;
+}
+
+export interface StageReflectionSummary {
+  eventId: string;
+  sequence: number;
+  stageId: string;
+  decision: StageReflection['decision'];
+  targetStageId: string | null;
+  summary: string;
+  occurredAt: string;
 }
 
 export type RunActionStatus =
@@ -428,7 +461,7 @@ export interface RemoteCapabilityReport {
 }
 
 export interface AgentContext {
-  schemaVersion: 3;
+  schemaVersion: 4;
   project: Project;
   task: Task;
   taskRoot: { relative: string | null; absolute: string | null; resolved: boolean };
@@ -448,6 +481,7 @@ export interface AgentContext {
   recentEvidenceChecks: EvidenceCheck[];
   pendingItems: PendingItem[];
   eventCursor: number;
+  latestStageReflections: StageReflectionSummary[];
   evidenceIndex: Array<{ eventId: string; eventType: string; occurredAt: string }>;
   blockers: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
 }

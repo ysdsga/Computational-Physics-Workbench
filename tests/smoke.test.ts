@@ -57,14 +57,14 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v7 and CLI doctor start on disposable state', async () => {
+test('server, schema v8 and CLI doctor start on disposable state', async () => {
   const root = await fetch(`${base}/`);
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 7);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 8);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });
@@ -186,60 +186,133 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
   });
   assert.equal(confirmed.response.status, 200);
 
+  const forgedReflection = await api(`/api/agent/v1/runs/${draft.id}/events`, {
+    method: 'POST',
+    body: JSON.stringify({
+      category: 'decision',
+      eventType: 'stage.reflection',
+      actorType: 'agent',
+      payload: { stageId: 'question', decision: 'proceed' },
+    }),
+  });
+  assert.equal(forgedReflection.response.status, 409);
+  assert.equal((forgedReflection.payload as any).code, 'STAGE_REFLECTION_ENDPOINT_REQUIRED');
+
   const missingReview = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ summary: 'premature', source: 'codex_conversation' }),
   });
   assert.equal(missingReview.response.status, 409);
-  assert.equal((missingReview.payload as any).code, 'EXPLORATION_REVIEW_REQUIRED');
+  assert.equal((missingReview.payload as any).code, 'STAGE_REFLECTIONS_REQUIRED');
 
-  const continuingPlan = await api(`/api/agent/v1/runs/${draft.id}/working-plan`, {
-    method: 'PUT',
+  const reflection = (stageId: string, body: Record<string, unknown>, key: string) => api(`/api/agent/v1/runs/${draft.id}/stage-reflections`, {
+    method: 'POST',
     body: JSON.stringify({
-      workingPlan: {
-        currentStageId: 'derivation',
-        summary: 'Test the strongest new branch',
-        explorationReview: {
-          status: 'continue',
-          summary: 'One idea could still change the central conclusion',
-          unresolvedHighValueItems: ['Can the result be reproduced by the strongest alternative mechanism?'],
-        },
-      },
-      reason: 'Exploration review opened another focused cycle',
-      idempotencyKey: 'theory-review-continue',
+      stageId,
+      summary: `${stageId} reflection`,
+      established: [`${stageId} result`],
+      uncertainties: [],
+      ideas: [],
+      decision: 'proceed',
+      nextActions: stageId === 'release' ? [] : [{ objective: `continue after ${stageId}` }],
+      ...body,
+      idempotencyKey: key,
     }),
   });
-  assert.equal(continuingPlan.response.status, 200);
+
+  const staying = await reflection('question', {
+    summary: 'The question still has one unresolved discriminator',
+    established: ['The target observable is fixed'],
+    uncertainties: ['The decisive comparison has not yet been stated'],
+    decision: 'stay',
+    targetStageId: 'question',
+    nextActions: [{ objective: 'State the decisive comparison' }],
+  }, 'question-stay');
+  assert.equal(staying.response.status, 201);
+  assert.equal((staying.payload as any).run.current_stage_id, 'question');
+
+  for (const stageId of ['question', 'context', 'model', 'baseline', 'derivation']) {
+    const result = await reflection(stageId, {}, `initial-${stageId}`);
+    assert.equal(result.response.status, 201);
+  }
+  const looping = await reflection('validation', {
+    summary: 'A dynamic/static ambiguity requires the model to be revisited',
+    established: ['The first derivation is internally consistent'],
+    uncertainties: ['The strongest static alternative is not yet excluded'],
+    ideas: [{
+      idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
+      significance: 'It could overturn the claim of a genuinely dynamic effect',
+      disposition: 'explore',
+      reason: 'This is the earliest decisive discriminator',
+    }],
+    decision: 'loop',
+    targetStageId: 'model',
+    nextActions: [{ objective: 'Build and test the matched static control' }],
+  }, 'validation-loop-model');
+  assert.equal(looping.response.status, 201);
+  assert.equal((looping.payload as any).run.current_stage_id, 'model');
+  assert.equal((looping.payload as any).run.working_plan.explorationReview.status, 'continue');
+
   const continuingCompletion = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ summary: 'still premature', source: 'codex_conversation' }),
   });
   assert.equal(continuingCompletion.response.status, 409);
-  assert.equal((continuingCompletion.payload as any).code, 'EXPLORATION_REVIEW_REQUIRED');
+  assert.equal((continuingCompletion.payload as any).code, 'STAGE_REFLECTIONS_REQUIRED');
 
-  const passedPlan = await api(`/api/agent/v1/runs/${draft.id}/working-plan`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      workingPlan: {
-        currentStageId: 'release',
-        summary: 'The decisive branch is resolved',
-        explorationReview: {
-          status: 'passed',
-          summary: 'All high-value ideas were explored, falsified, or deferred with reasons',
-          unresolvedHighValueItems: [],
-        },
-      },
-      reason: 'Exploration review passed after the focused cycle',
-      idempotencyKey: 'theory-review-passed',
-    }),
-  });
-  assert.equal(passedPlan.response.status, 200);
+  const revisedModel = await reflection('model', {
+    summary: 'The matched static control is now explicit',
+  }, 'revised-model');
+  assert.equal(revisedModel.response.status, 201);
+  for (const stageId of ['baseline', 'derivation', 'validation']) {
+    const result = await reflection(stageId, {}, `revised-${stageId}`);
+    assert.equal(result.response.status, 201);
+  }
+  const omittedIdea = await reflection('interpretation', {}, 'interpretation-omits-open-idea');
+  assert.equal(omittedIdea.response.status, 409);
+  assert.equal((omittedIdea.payload as any).code, 'EXPLORATION_REVIEW_UNRESOLVED');
+  const resolvedIdea = await reflection('interpretation', {
+    ideas: [{
+      idea: 'Can the result be reproduced by the strongest static alternative mechanism?',
+      significance: 'It could overturn the claim of a genuinely dynamic effect',
+      disposition: 'falsified',
+      reason: 'The matched control fails the derived frequency discriminator',
+    }],
+  }, 'interpretation-resolves-open-idea');
+  assert.equal(resolvedIdea.response.status, 201);
+  const released = await reflection('release', {}, 'revised-release');
+  assert.equal(released.response.status, 201);
+
+  const events = await api(`/api/agent/v1/runs/${draft.id}/events`);
+  const reflections = (events.payload as any[]).filter(event => event.event_type === 'stage.reflection');
+  assert.equal(reflections.length, 13);
+  assert.equal(reflections.filter(event => event.payload.stageId === 'question').length, 2, 'stay permits another reflection in the same stage');
+  assert.equal(reflections.filter(event => event.payload.stageId === 'model').length, 2, 'a stage may accumulate multiple reflections after a loop');
+  assert.equal(reflections.filter(event => event.payload.stageId === 'validation').length, 2, 'reflection history is append-only rather than one-per-stage');
+  assert.ok(reflections.some(event => event.payload.ideas.some((idea: any) => idea.disposition === 'explore')));
+  assert.ok(reflections.some(event => event.payload.ideas.some((idea: any) => idea.disposition === 'falsified')));
+
+  const context = await api(`/api/agent/v1/context/tasks/${task.id}`);
+  assert.equal((context.payload as any).schemaVersion, 4);
+  assert.equal((context.payload as any).latestStageReflections.length, stages.length);
+  assert.equal((context.payload as any).latestStageReflections.find((item: any) => item.stageId === 'validation').decision, 'proceed');
+
+  const idempotentReplay = await reflection('question', {}, 'initial-question');
+  assert.equal(idempotentReplay.response.status, 201);
+  assert.equal((idempotentReplay.payload as any).run.current_stage_id, null, 'an idempotent retry must not replay the stage transition');
+
   const completed = await api(`/api/agent/v1/runs/${draft.id}/complete`, {
     method: 'POST',
     body: JSON.stringify({ summary: 'review passed', source: 'codex_conversation' }),
   });
   assert.equal(completed.response.status, 200);
   assert.equal((completed.payload as any).status, 'completed');
+
+  const completedContext = await api(`/api/agent/v1/context/tasks/${task.id}`);
+  assert.equal(completedContext.response.status, 200);
+  assert.equal((completedContext.payload as any).run.id, draft.id);
+  assert.equal((completedContext.payload as any).run.status, 'completed');
+  assert.ok(!(completedContext.payload as any).blockers.some((item: any) => item.code === 'RUN_NOT_STARTED'));
 });
 
 test('theoretical exploration completion guard is explicitly opt-out and does not become global', async () => {

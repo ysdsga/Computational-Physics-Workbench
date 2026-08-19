@@ -14,7 +14,7 @@
 - 经验库：人工记录、Codex 候选经验与证据确认经验分层管理
 - 超算管理：项目级 OpenSSH 连接、用户只读根、项目根、Task 写目录映射、传输记录和作业快照；不在 Web 执行
 - Task Spec = 一次确认的 Confirmed Envelope + Codex 可自主修改的 Working Plan
-- 理论研究在结束前审查仍可能改变、扩展或推翻中心结论的高价值问题与新想法；未处置时回到下一轮 Working Plan
+- 理论研究每个阶段可追加任意多条“记录与反思”；重要新想法逐项处置，必要时停留或回到最早受影响阶段，未闭环时不能结束 Run
 - Stage → Action → Job → Artifact/Evidence 追加式账本；Action spec 不可变但不逐动作授权
 - Agent 运行记录与待沟通事项：Web 只读展示命令预览、作业监控、证据和决定，并支持项目/任务/状态筛选
 - 材料无关 capability：Codex 自主选择脚本、输入和资源；Workbench 校验边界、快照、路径、哈希和资源
@@ -60,6 +60,7 @@ workbench run confirm --run <run-id> --summary <confirmed-summary> --conversatio
 workbench execution contract --pretty
 workbench action prepare --run <run-id> --stage <stage-id> --capability local.process --spec-file <spec.json> --idempotency-key <key>
 workbench action execute --action <action-id>
+workbench reflection record --run <run-id> --stage <stage-id> --file <reflection.json> --idempotency-key <key>
 workbench monitor guard
 workbench monitor attach --run <run-id> --automation-ref <ref> --cadence-minutes 10
 workbench monitor tick --run <run-id>

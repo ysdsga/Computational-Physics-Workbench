@@ -48,6 +48,17 @@ function eventPresentation(event: RunEvent) {
     return { label: upload ? '文件上传' : '文件下载', tone: upload ? 'bg-[#92cfe7]' : 'bg-[#67c9b5]', summary: `${eventText(event, 'localPath')} ↔ ${eventText(event, 'remotePath')}`, command: '' };
   }
   if (event.event_type === 'remote.task_root_ready') return { label: '远程 Task 根就绪', tone: 'bg-[#dfb26a]', summary: eventText(event, 'taskRoot'), command: '' };
+  if (event.event_type === 'stage.reflection') {
+    const stageId = eventText(event, 'stageId');
+    const decision = eventText(event, 'decision');
+    const targetStageId = eventText(event, 'targetStageId');
+    return {
+      label: '阶段记录与反思',
+      tone: decision === 'proceed' ? 'bg-[#67c9b5]' : 'bg-[#dfb26a]',
+      summary: [`${stageId} · ${decision}`, targetStageId ? `→ ${targetStageId}` : '', eventText(event, 'summary')].filter(Boolean).join(' · '),
+      command: '',
+    };
+  }
   return { label: event.event_type, tone: 'bg-[#657570]', summary: `${event.category} · ${event.actor_type}`, command: '' };
 }
 

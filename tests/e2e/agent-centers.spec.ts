@@ -162,6 +162,46 @@ test('Web observes a confirmed Task Spec and pending item without issuing Agent 
   expect(agentWrites).toEqual([]);
 });
 
+test('Agent run page keeps the latest completed Run visible', async ({ page, request }) => {
+  const workingDir = path.join(tempRoot, 'ui-completed-run-project');
+  fs.mkdirSync(workingDir, { recursive: true });
+  const project = await request.post('/api/projects', { data: { name: 'UI Completed Run Project', working_dir: workingDir } })
+    .then(response => response.json()) as { id: string };
+  const task = await request.post(`/api/projects/${project.id}/tasks`, { data: { name: 'UI Completed Run Task', workflow_id: 'dft-dmft-oneshot' } })
+    .then(response => response.json()) as { id: string; workflow: { stages: Array<{ id: string }> } };
+  const plan = await request.post('/api/research-plans', { data: { title: 'UI Completed Run Plan', project_id: project.id, content: '# Completed Run' } })
+    .then(response => response.json()) as { id: string };
+  const stageIds = task.workflow.stages.map(stage => stage.id);
+  const runResponse = await request.post('/api/agent/v1/runs', {
+    data: {
+      taskId: task.id, researchPlanId: plan.id, idempotencyKey: 'ui-completed-run',
+      taskSpec: {
+        schemaVersion: 1, objective: 'Keep completed history visible',
+        confirmedEnvelope: {
+          schemaVersion: 1, coreStageIds: stageIds, scientificCommitments: ['fixture'],
+          allowedCapabilities: ['local.process'], allowedMethods: [], allowedSoftwareStacks: [], hpcProfileId: null,
+          resourceLimits: { maxCoresPerJob: 1, maxWallMinutes: 10, maxConcurrentJobs: 1, maxAutomaticRetries: 0 },
+          protectedRelativePaths: [], completionEvidence: ['fixture'], researcherGates: [],
+          autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
+        },
+        workingPlan: { currentStageId: stageIds[0], summary: 'completed fixture' },
+      },
+    },
+  });
+  expect(runResponse.status()).toBe(201);
+  const run = await runResponse.json() as { id: string };
+  expect((await request.post(`/api/agent/v1/runs/${run.id}/confirm`, { data: { summary: 'confirmed', source: 'codex_conversation' } })).ok()).toBeTruthy();
+  expect((await request.post(`/api/agent/v1/runs/${run.id}/complete`, { data: { summary: 'completed', source: 'codex_conversation' } })).ok()).toBeTruthy();
+
+  await page.goto('/#/agent-runs');
+  await page.getByLabel('项目').selectOption(project.id);
+  await page.getByLabel('任务').selectOption(task.id);
+  await expect(page.getByText('completed', { exact: true })).toBeVisible();
+  await expect(page.getByText('Keep completed history visible', { exact: true })).toBeVisible();
+  await expect(page.getByText(/#\d+ run\.completed/)).toBeVisible();
+  await expect(page.getByText('尚未生成并确认 Task Spec。')).toHaveCount(0);
+});
+
 test('supercomputer view records user, project and Task roots without remote execution', async ({ page, request }) => {
   const workingDir = path.join(tempRoot, 'ui-hpc-project');
   fs.mkdirSync(workingDir, { recursive: true });

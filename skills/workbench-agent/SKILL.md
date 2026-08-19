@@ -33,6 +33,8 @@ The ledger—not chat memory—is the recovery source. Treat experience as a clu
 
 For the `theoretical-research` workflow, new Envelopes default `explorationReviewRequired` to `true`. Before completion, keep `workingPlan.explorationReview` explicit: use `continue` with the unresolved high-value questions or generative ideas that require another derivation/validation cycle; use `passed` only when none remain. Every candidate must be explored, falsified, or deferred with a reason. Do not treat every possible idea as blocking—only one that could materially change, extend, or overturn the central conclusion.
 
+During and at the end of every theoretical core stage, append a reflection with `workbench reflection record` whenever a finding materially changes the next decision; there is no per-stage count limit. State what was established, remaining uncertainties, every material new idea and its disposition (`explore`, `falsified`, `deferred`, or `follow_up`), and the next decision. When changing an earlier idea's disposition, repeat the same `idea` text so its lifecycle remains machine-trackable. `proceed` closes the current stage and advances to the next confirmed stage, `stay` keeps the current stage for another reflection, and `loop` returns to the earliest confirmed stage affected by the finding. The reflection atomically updates the Working Plan target and next Actions; do not separately overwrite or omit the durable reflection history. This stage-reflection mechanism does not by itself modify the Research Plan.
+
 Let Codex choose the directory tree below the Task root. Do not impose stage folders. The remote user root is read-only; the registered remote Task root is read/write.
 
 ## Obtain one execution confirmation
@@ -59,7 +61,7 @@ After confirmation:
 4. Create an Action only for a durable scientific milestone that needs provenance, especially scheduler submit/cancel, a multi-Job batch, or an evidence-producing validation. The Action is an automatically recorded unit of scientific work, not permission for every machine call. Do not request per-Action approval inside the Envelope.
 5. Monitor/reconcile Jobs through the Run monitor protocol and register only meaningful outputs and validator results as Artifacts/evidence.
 
-For a theoretical Run with exploration review enabled, do not call `run complete` until the review is `passed`. A `continue` review revises the Working Plan and returns to the smallest relevant derivation or validation stage; it does not add Workflow nodes or widen the Envelope by itself.
+For a theoretical Run with exploration review enabled, do not call `run complete` until every core stage has a current `proceed` reflection and the exploration review is `passed`. A later `stay` or `loop` invalidates the affected stage and all downstream stage closeouts until they are revisited. The interpretation reflection passes the global exploration review only when no high-value idea remains marked `explore`.
 
 One Workflow stage may contain many logged routine operations and a small number of milestone Actions; one Action may own zero, one, or many Jobs. Bind every scheduler Job to its originating Action and stage.
 
@@ -131,6 +133,7 @@ workbench workflow show --task <id>
 workbench run draft --task <id> --plan <id> --task-spec-file <json> --idempotency-key <key>
 workbench run confirm --run <id> --summary <text> --conversation-ref <ref>
 workbench run working-plan --run <id> --file <json> --reason <text> --idempotency-key <key>
+workbench reflection record --run <id> --stage <id> --file <json> --idempotency-key <key>
 workbench remote session|init --task <id>
 workbench remote exec --task <id> --command <text> [--access <read|write>] [--scope <user|project|task>] [--cwd <relative>]
 workbench remote upload --task <id> --local <task-relative> --remote <task-relative>

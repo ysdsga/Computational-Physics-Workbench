@@ -9,6 +9,9 @@ import type {
   PendingItem,
   ResearchRun,
   RunEvent,
+  StageReflection,
+  StageReflectionIdea,
+  StageReflectionResult,
   Task,
   TaskSpec,
   WorkingPlan,
@@ -386,6 +389,205 @@ export function updateWorkingPlan(runId: string, input: { workingPlan: unknown; 
   return getRun(runId);
 }
 
+function validateStageReflectionIdeas(input: unknown): StageReflectionIdea[] {
+  if (!Array.isArray(input)) throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', 'ideas must be an array');
+  return input.map((item, index) => {
+    const value = objectValue(item, `ideas[${index}]`);
+    if (!['explore', 'falsified', 'deferred', 'follow_up'].includes(String(value.disposition))) {
+      throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', `ideas[${index}].disposition is invalid`);
+    }
+    return {
+      idea: requiredText(value.idea, `ideas[${index}].idea`),
+      significance: requiredText(value.significance, `ideas[${index}].significance`),
+      disposition: value.disposition as StageReflectionIdea['disposition'],
+      reason: requiredText(value.reason, `ideas[${index}].reason`),
+    };
+  });
+}
+
+function validateNextActions(input: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(input) || input.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', 'nextActions must be an array of objects');
+  }
+  return input as Array<Record<string, unknown>>;
+}
+
+function unresolvedExplorationIdeas(runId: string, currentIdeas: StageReflectionIdea[] = []): string[] {
+  const rows = db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'stage.reflection' ORDER BY sequence")
+    .all(runId) as Array<{ payload_json: string }>;
+  const unresolved = new Map<string, string>();
+  const applyIdeas = (ideas: StageReflectionIdea[]) => {
+    for (const item of ideas) {
+      if (!item || typeof item.idea !== 'string' || !['explore', 'falsified', 'deferred', 'follow_up'].includes(String(item.disposition))) continue;
+      const key = item.idea.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+      if (!key) continue;
+      if (item.disposition === 'explore') unresolved.set(key, item.idea);
+      else unresolved.delete(key);
+    }
+  };
+  for (const row of rows) {
+    try {
+      const reflection = JSON.parse(row.payload_json) as Partial<StageReflection>;
+      if (Array.isArray(reflection.ideas)) applyIdeas(reflection.ideas);
+    } catch { /* Ignore malformed historical events while preserving valid entries. */ }
+  }
+  applyIdeas(currentIdeas);
+  return [...unresolved.values()];
+}
+
+export function recordStageReflection(runId: string, input: {
+  stageId: unknown;
+  summary: unknown;
+  established?: unknown;
+  uncertainties?: unknown;
+  ideas?: unknown;
+  decision: unknown;
+  targetStageId?: unknown;
+  nextActions?: unknown;
+  idempotencyKey: unknown;
+  conversationRef?: unknown;
+}): StageReflectionResult {
+  const run = activeRun(runId);
+  const task = runtimeTask(run.task_id);
+  if (task.workflow_id !== 'theoretical-research') {
+    throw new AgentCoreError(409, 'STAGE_REFLECTION_NOT_APPLICABLE', 'Stage reflection recording is currently defined only for theoretical research');
+  }
+  const stageId = requiredText(input.stageId, 'stageId');
+  assertStageInRun(run, stageId);
+  const key = requiredText(input.idempotencyKey, 'idempotencyKey');
+  const eventKey = `stage-reflection:${key}`;
+  const existing = db.prepare('SELECT * FROM run_events WHERE run_id = ? AND idempotency_key = ?').get(runId, eventKey);
+  if (existing) return { reflection: serializeEvent(existing), run: getRun(runId) };
+  if (run.working_plan.currentStageId !== stageId) {
+    throw new AgentCoreError(409, 'STAGE_REFLECTION_STAGE_MISMATCH', 'Reflect on the current Working Plan stage before moving elsewhere', {
+      currentStageId: run.working_plan.currentStageId ?? null,
+      requestedStageId: stageId,
+    });
+  }
+  const summary = requiredText(input.summary, 'summary');
+  const established = orderedStringList(input.established ?? [], 'established');
+  const uncertainties = orderedStringList(input.uncertainties ?? [], 'uncertainties');
+  const ideas = validateStageReflectionIdeas(input.ideas ?? []);
+  if (!['proceed', 'stay', 'loop'].includes(String(input.decision))) {
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_INVALID', 'decision must be proceed, stay or loop');
+  }
+  const decision = input.decision as StageReflection['decision'];
+  const coreStageIds = run.confirmed_envelope.coreStageIds;
+  const stageIndex = coreStageIds.indexOf(stageId);
+  const expectedNextStageId = coreStageIds[stageIndex + 1] ?? null;
+  const requestedTargetStageId = input.targetStageId === null || input.targetStageId === undefined || input.targetStageId === ''
+    ? null
+    : requiredText(input.targetStageId, 'targetStageId');
+  let targetStageId: string | null;
+  if (decision === 'proceed') {
+    targetStageId = expectedNextStageId;
+    if (requestedTargetStageId !== null && requestedTargetStageId !== targetStageId) {
+      throw new AgentCoreError(409, 'STAGE_REFLECTION_TARGET_INVALID', 'Proceed must move to the next confirmed core stage', { expectedTargetStageId: targetStageId });
+    }
+  } else if (decision === 'stay') {
+    targetStageId = stageId;
+    if (requestedTargetStageId !== null && requestedTargetStageId !== stageId) {
+      throw new AgentCoreError(409, 'STAGE_REFLECTION_TARGET_INVALID', 'Stay must keep the current stage', { expectedTargetStageId: stageId });
+    }
+  } else {
+    if (!requestedTargetStageId) throw new AgentCoreError(400, 'STAGE_REFLECTION_TARGET_REQUIRED', 'Loop requires targetStageId');
+    const targetIndex = coreStageIds.indexOf(requestedTargetStageId);
+    if (targetIndex < 0 || targetIndex > stageIndex) {
+      throw new AgentCoreError(409, 'STAGE_REFLECTION_TARGET_INVALID', 'Loop target must be the current or an earlier confirmed core stage');
+    }
+    targetStageId = requestedTargetStageId;
+  }
+
+  const nextActions = validateNextActions(input.nextActions ?? []);
+  if (targetStageId && nextActions.length === 0) {
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_NEXT_ACTION_REQUIRED', 'A reflection that continues research must define at least one next Action');
+  }
+  if (!targetStageId && nextActions.length > 0) {
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_NEXT_ACTION_INVALID', 'The final stage cannot retain next Actions when proceeding');
+  }
+  const currentUnresolvedItems = ideas.filter(item => item.disposition === 'explore').map(item => item.idea);
+  const unresolvedItems = unresolvedExplorationIdeas(runId, ideas);
+  if (decision !== 'proceed' && currentUnresolvedItems.length === 0 && uncertainties.length === 0) {
+    throw new AgentCoreError(400, 'STAGE_REFLECTION_RATIONALE_REQUIRED', 'Stay or loop requires an uncertainty or an idea marked for exploration');
+  }
+  if (stageId === 'interpretation' && decision === 'proceed' && unresolvedItems.length > 0) {
+    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'Interpretation cannot proceed while high-value ideas remain marked for exploration');
+  }
+  if (!targetStageId && unresolvedItems.length > 0) {
+    throw new AgentCoreError(409, 'EXPLORATION_REVIEW_UNRESOLVED', 'The final stage must stay or loop while high-value ideas remain marked for exploration');
+  }
+
+  const reflection: StageReflection = {
+    stageId,
+    summary,
+    established,
+    uncertainties,
+    ideas,
+    decision,
+    targetStageId,
+    nextActions,
+  };
+  let explorationReview: WorkingPlan['explorationReview'];
+  if (decision !== 'proceed' || unresolvedItems.length > 0) {
+    explorationReview = {
+      status: 'continue',
+      summary,
+      unresolvedHighValueItems: unresolvedItems.length > 0 ? unresolvedItems : uncertainties,
+    };
+  } else if (stageId === 'interpretation') {
+    explorationReview = { status: 'passed', summary, unresolvedHighValueItems: [] };
+  } else if (run.working_plan.explorationReview?.status === 'passed') {
+    explorationReview = run.working_plan.explorationReview;
+  }
+  const workingPlanBase = { ...run.working_plan };
+  delete workingPlanBase.explorationReview;
+  const workingPlan = validateWorkingPlan({
+    ...workingPlanBase,
+    currentStageId: targetStageId,
+    summary,
+    nextActions,
+    ...(explorationReview ? { explorationReview } : {}),
+  }, run.confirmed_envelope);
+
+  const ts = now();
+  let event!: RunEvent;
+  db.transaction(() => {
+    db.prepare('UPDATE research_runs SET working_plan_json = ?, current_stage_id = ?, updated_at = ? WHERE id = ?')
+      .run(stableJson(workingPlan), workingPlan.currentStageId ?? null, ts, runId);
+    event = appendEvent(runId, {
+      category: 'decision',
+      eventType: 'stage.reflection',
+      actorType: 'agent',
+      payload: reflection as unknown as Record<string, unknown>,
+      idempotencyKey: eventKey,
+      source: 'codex_conversation',
+      conversationRef: typeof input.conversationRef === 'string' ? input.conversationRef : null,
+    });
+  })();
+  return { reflection: event, run: getRun(runId) };
+}
+
+function incompleteStageReflections(runId: string, coreStageIds: string[]): string[] {
+  const rows = db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'stage.reflection' ORDER BY sequence")
+    .all(runId) as Array<{ payload_json: string }>;
+  const closed = new Set<string>();
+  for (const row of rows) {
+    let reflection: Partial<StageReflection>;
+    try { reflection = JSON.parse(row.payload_json) as Partial<StageReflection>; }
+    catch { continue; }
+    const stageIndex = reflection.stageId ? coreStageIds.indexOf(reflection.stageId) : -1;
+    if (stageIndex < 0) continue;
+    if (reflection.decision === 'proceed') {
+      closed.add(reflection.stageId!);
+      continue;
+    }
+    const targetIndex = reflection.targetStageId ? coreStageIds.indexOf(reflection.targetStageId) : stageIndex;
+    if (targetIndex < 0) continue;
+    for (let index = targetIndex; index < coreStageIds.length; index += 1) closed.delete(coreStageIds[index]);
+  }
+  return coreStageIds.filter(stageId => !closed.has(stageId));
+}
+
 function serializePending(row: any): PendingItem {
   const { detail_json, resolution_json, ...rest } = row;
   return { ...rest, detail: JSON.parse(detail_json), resolution: JSON.parse(resolution_json) } as PendingItem;
@@ -487,6 +689,15 @@ export function completeRun(runId: string, summary: string, source: string, conv
   const run = activeRun(runId);
   const task = runtimeTask(run.task_id);
   if (task.workflow_id === 'theoretical-research' && run.confirmed_envelope.explorationReviewRequired === true) {
+    const incompleteStages = incompleteStageReflections(runId, run.confirmed_envelope.coreStageIds);
+    if (incompleteStages.length > 0) {
+      throw new AgentCoreError(
+        409,
+        'STAGE_REFLECTIONS_REQUIRED',
+        'Every theoretical research stage must end with a current proceed reflection before completing the Run',
+        { incompleteStageIds: incompleteStages },
+      );
+    }
     const review = run.working_plan.explorationReview;
     if (!review || review.status !== 'passed' || review.unresolvedHighValueItems.length > 0) {
       throw new AgentCoreError(
@@ -537,7 +748,8 @@ export function listPendingItems(filters: { runId?: string; projectId?: string; 
 
 export function buildAgentContext(taskId: string): AgentContext {
   const row = runtimeTask(taskId);
-  const current = db.prepare("SELECT * FROM research_runs WHERE task_id = ? AND status IN ('draft','active','waiting_researcher') ORDER BY created_at DESC LIMIT 1").get(taskId) as any;
+  const current = db.prepare(`SELECT * FROM research_runs WHERE task_id = ?
+    ORDER BY CASE WHEN status IN ('draft','active','waiting_researcher') THEN 0 ELSE 1 END, created_at DESC LIMIT 1`).get(taskId) as any;
   const run = current ? serializeRun(current) : null;
   const blockers: AgentContext['blockers'] = [];
   let taskRootAbsolute: string | null = null;
@@ -579,6 +791,25 @@ export function buildAgentContext(taskId: string): AgentContext {
   const evidenceChecks = run ? (db.prepare('SELECT * FROM evidence_checks WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ result_json, ...check }) => ({ ...check, result: JSON.parse(result_json) })) : [];
   const eventCursor = run ? Number((db.prepare('SELECT MAX(sequence) AS value FROM run_events WHERE run_id = ?').get(run.id) as any)?.value ?? 0) : 0;
+  const stageReflectionRows = run ? db.prepare("SELECT id, sequence, payload_json, occurred_at FROM run_events WHERE run_id = ? AND event_type = 'stage.reflection' ORDER BY sequence")
+    .all(run.id) as Array<{ id: string; sequence: number; payload_json: string; occurred_at: string }> : [];
+  const latestReflectionByStage = new Map<string, AgentContext['latestStageReflections'][number]>();
+  for (const item of stageReflectionRows) {
+    let reflection: Partial<StageReflection>;
+    try { reflection = JSON.parse(item.payload_json) as Partial<StageReflection>; }
+    catch { continue; }
+    if (!reflection.stageId || !reflection.summary || !['proceed', 'stay', 'loop'].includes(String(reflection.decision))) continue;
+    latestReflectionByStage.set(reflection.stageId, {
+      eventId: item.id,
+      sequence: item.sequence,
+      stageId: reflection.stageId,
+      decision: reflection.decision as StageReflection['decision'],
+      targetStageId: reflection.targetStageId ?? null,
+      summary: reflection.summary,
+      occurredAt: item.occurred_at,
+    });
+  }
+  const latestStageReflections = [...latestReflectionByStage.values()].sort((left, right) => left.sequence - right.sequence);
   const evidenceIndex = run ? (db.prepare("SELECT id, event_type, occurred_at FROM run_events WHERE run_id = ? AND category = 'fact' ORDER BY sequence DESC LIMIT 20").all(run.id) as any[])
     .map(item => ({ eventId: item.id, eventType: item.event_type, occurredAt: item.occurred_at })) : [];
   const capabilityEvent = run ? db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'remote.capability_inspected' ORDER BY sequence DESC LIMIT 1").get(run.id) as any : null;
@@ -591,9 +822,9 @@ export function buildAgentContext(taskId: string): AgentContext {
   const project = { id: row.project_id, name: row.project_name, description: row.project_description, material: row.material, working_dir: row.working_dir, hpc_config: row.hpc_config ?? undefined, status: row.project_status as 'active' | 'archived', created_at: row.project_created_at, updated_at: row.project_updated_at };
   const task = { id: row.id, project_id: row.project_id, name: row.name, description: row.description, workflow_id: row.workflow_id, workflow: row.workflow, task_root_rel: row.task_root_rel, task_root_unresolved: !row.task_root_rel, status: row.status, created_at: row.created_at, updated_at: row.updated_at } as Task;
   return {
-    schemaVersion: 3, project, task, taskRoot: { relative: row.task_root_rel, absolute: taskRootAbsolute, resolved: Boolean(taskRootAbsolute) }, run,
+    schemaVersion: 4, project, task, taskRoot: { relative: row.task_root_rel, absolute: taskRootAbsolute, resolved: Boolean(taskRootAbsolute) }, run,
     research: { planId: plan?.id ?? null, planTitle: plan?.title ?? null, planStatus: plan?.status ?? null, planMissing }, workflow: row.workflow,
     remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null, recentActions: actions, recentJobs: jobs, monitor,
-    recentArtifacts: artifacts, recentEvidenceChecks: evidenceChecks, pendingItems: pending, eventCursor, evidenceIndex, blockers,
+    recentArtifacts: artifacts, recentEvidenceChecks: evidenceChecks, pendingItems: pending, eventCursor, latestStageReflections, evidenceIndex, blockers,
   };
 }

@@ -10,6 +10,7 @@ import {
   getRun,
   listEvents,
   listPendingItems,
+  recordStageReflection,
   resolvePendingItem,
   reviseEnvelope,
   terminateRun,
@@ -55,6 +56,7 @@ router.post('/runs', (req, res) => {
 
 router.post('/runs/:runId/confirm', (req, res) => res.json(confirmRun(req.params.runId, req.body ?? {})));
 router.put('/runs/:runId/working-plan', (req, res) => res.json(updateWorkingPlan(req.params.runId, req.body ?? {})));
+router.post('/runs/:runId/stage-reflections', (req, res) => res.status(201).json(recordStageReflection(req.params.runId, req.body ?? {})));
 router.post('/runs/:runId/envelope-revisions', (req, res) => res.json(reviseEnvelope(req.params.runId, req.body ?? {})));
 router.post('/runs/:runId/terminate', (req, res) => res.json(terminateRun(req.params.runId, String(req.body?.reason ?? ''))));
 router.post('/runs/:runId/complete', (req, res) => res.json(completeRun(
@@ -70,6 +72,9 @@ router.get('/runs/:runId/events', (req, res) => {
 router.post('/runs/:runId/events', (req, res) => {
   const { category, eventType, actorType, payload, idempotencyKey, source, conversationRef } = req.body ?? {};
   if (!category || !eventType || !actorType) return res.status(400).json({ error: 'category, eventType and actorType are required', code: 'INPUT_REQUIRED' });
+  if (eventType === 'stage.reflection') {
+    return res.status(409).json({ error: 'Use the stage reflection endpoint so the event and Working Plan transition remain atomic', code: 'STAGE_REFLECTION_ENDPOINT_REQUIRED' });
+  }
   res.status(201).json(appendEvent(req.params.runId, { category, eventType, actorType, payload, idempotencyKey, source, conversationRef }));
 });
 

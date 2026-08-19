@@ -72,3 +72,7 @@ Workbench 对自身入口强制 Task 根、HPC binding、capability、资源、�
 ## 16. 自动重试必须有谱系和预算
 
 替换失败科学 Job 的重试是新的不可变 Action，不覆盖失败 Action。它必须带 `retry_of_action_id`，每个 Action 最多一个 retry successor；服务计算 `retry_attempt` 并拒绝超过 Envelope `maxAutomaticRetries` 的尝试。连接、认证、超时、建目录、检查和传输失败只写 Event，不消耗该预算；`submission_uncertain` 只允许对账。
+
+## 17. 理论研究采用追加式阶段反思循环
+
+理论研究的每个核心阶段都执行记录、反思与下一步判断，同一阶段不限记录条数。`proceed` 前进，`stay` 留在当前阶段，`loop` 回到新发现所影响的最早阶段；回流后的下游完成状态必须重新建立。所有想法及处置保存在追加式 `stage.reflection` Event 中，Working Plan 只保存当前落点和下一批 Actions。该机制负责防止关键问题或启发性想法被静默遗漏，但不自动修改独立的 Research Plan。

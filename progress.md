@@ -1,7 +1,7 @@
 # DFT+DMFT Workbench 当前状态
 
-> 核对日期：2026-08-16
-> 当前实现：Essential Workbench V3 / SQLite schema v6。
+> 核对日期：2026-08-19
+> 当前实现：Essential Workbench V3 / SQLite schema v8。
 
 ## 权威入口
 
@@ -23,12 +23,13 @@
 - Agent 运行记录、待沟通事项、超算管理、证据库、经验库均已分离；Agent Web 面只观察，不执行。
 - Artifact 支持 valid/suspect/invalid/superseded；Experience 支持 manual/candidate/confirmed、适用边界与来源。
 - 唯一 `workbench-agent` skill 与 `workbench` CLI 已升级为 V3 恢复/纠错/自治协议。
+- 理论研究模板在每个阶段加入追加式记录与反思；支持不限次数的 `stay/loop/proceed`，并以完成守卫确保回流后的阶段重新闭环。
 
 ## 验证基线
 
 - `npm run typecheck` 通过。
-- `npm test` 通过：17 passed，1 个 Windows symlink 用例按环境跳过；Playwright E2E 3 passed。
-- 临时库覆盖 schema v6、新 Task 不创建 Stage 目录、一次 Envelope 确认、Working Plan、自主本地 Action、阶段级 Pending、Artifact 纠错、Experience candidate、LSF single-shot、monitor tick、Stop Hook 与 retry budget。
+- `npm test` 通过：30 passed，1 个 Windows symlink 用例按环境跳过；Playwright E2E 5 passed。
+- 临时库覆盖 schema v8、新 Task 不创建 Stage 目录、一次 Envelope 确认、Working Plan、追加式阶段反思与回流、自主本地 Action、阶段级 Pending、Artifact 纠错、Experience candidate、LSF single-shot、monitor tick、Stop Hook 与 retry budget。
 - 正式 HPC 科学作业仍需先为目标 Task 生成 Research Plan + Task Spec，并由研究者确认精确 Envelope；不得用 mock/smoke 冒充科学计算。
 
 ## 历史摘要

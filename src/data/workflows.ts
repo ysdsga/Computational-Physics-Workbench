@@ -597,6 +597,14 @@ const THEORETICAL_RESEARCH_STAGES = makeWorkflowStages([
   { id: 'release', name: '成果封装', description: '整理可审计的论证链、完成证据和研究报告' },
 ]);
 
+function theoreticalStageReflectionStep(stageId: string, order: number): WorkflowStep {
+  return {
+    id: `theory-${stageId}-reflection`, stageId, order, name: '记录、反思与下一步判断',
+    description: '记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出探索、证伪、暂缓或转后续任务的处置。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。',
+    outputFiles: [`${stageId}_stage_reflection.md`],
+  };
+}
+
 const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   {
     id: 'theory-question-01', stageId: 'question', order: 1, name: '明确科学问题与目标观测量',
@@ -608,6 +616,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '规定哪些结果构成问题得到回答、哪些结果否定当前设想，以及本次研究可以被接受的完成证据。',
     outputFiles: ['success_and_falsification_criteria.md'],
   },
+  theoreticalStageReflectionStep('question', 3),
   {
     id: 'theory-context-01', stageId: 'context', order: 1, name: '建立文献与基准事实',
     description: '整理严格结果、主流解释、已有解析或数值基准，以及当前理论必须满足的实验事实。',
@@ -618,6 +627,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '比较已有路线的覆盖范围与矛盾，明确尚未解决的问题，以及本研究准备增加的理论内容。',
     outputFiles: ['novelty_statement.md'],
   },
+  theoreticalStageReflectionStep('context', 3),
   {
     id: 'theory-model-01', stageId: 'model', order: 1, name: '定义自由度与理论结构',
     description: '给出研究对象的自由度、哈密顿量、拉格朗日量或作用量、相互作用结构，以及必要的初始和边界条件。',
@@ -633,6 +643,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '列出采用的近似、被忽略的自由度或相互作用、能标和参数范围，并说明理论在哪些条件下不再可靠。',
     outputFiles: ['assumptions_and_scope.md'],
   },
+  theoreticalStageReflectionStep('model', 4),
   {
     id: 'theory-baseline-01', stageId: 'baseline', order: 1, name: '检查已知解析极限',
     description: '研究非相互作用、弱强耦合、高低温、连续或热力学极限等可控情形，整理完整理论必须恢复的结果。',
@@ -643,6 +654,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '构造保留关键机制的最小模型或特殊可解点，用于检验直觉、符号和后续推导结果。',
     outputFiles: ['toy_model_benchmarks.md'],
   },
+  theoreticalStageReflectionStep('baseline', 3),
   {
     id: 'theory-derivation-01', stageId: 'derivation', order: 1, name: '确定推导策略',
     description: '根据研究方案选择解析方法、表示、展开参数和近似层级，说明该路线为何适用于目标问题。',
@@ -658,6 +670,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '标明每项主要结论依赖的假设、引理和近似，记录失败路线以及尚未闭合的逻辑缺口。',
     outputFiles: ['assumption_conclusion_map.md', 'derivation_gaps.md'],
   },
+  theoreticalStageReflectionStep('derivation', 4),
   {
     id: 'theory-validation-01', stageId: 'validation', order: 1, name: '执行强制一致性检查',
     description: '检查量纲、归一化、对称性、守恒律、因果性或正定性，并验证结果能够恢复研究方案要求的已知极限。',
@@ -668,6 +681,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '尽可能采用不同表示、替代推导、符号检查或小规模数值验证关键结论；无法交叉验证的部分必须明确记录。',
     outputFiles: ['cross_validation.md'],
   },
+  theoreticalStageReflectionStep('validation', 3),
   {
     id: 'theory-interpretation-01', stageId: 'interpretation', order: 1, name: '分析稳健性与不确定性',
     description: '评估结论对假设、近似和参数的敏感性，识别结论稳定成立的范围并说明主要不确定性。',
@@ -684,9 +698,9 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     outputFiles: ['predictions_and_limits.md'],
   },
   {
-    id: 'theory-interpretation-04', stageId: 'interpretation', order: 4, name: '审查关键问题与启发性想法',
-    description: '检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法。任务边界内的分支写入下一轮 Working Plan 并回到推导或验证；超出边界或价值不足的分支说明理由后转后续任务或暂缓。仅在没有高价值未处置分支时通过审查。',
-    outputFiles: ['exploration_review.md'],
+    id: 'theory-interpretation-04', stageId: 'interpretation', order: 4, name: '记录、反思与探索充分性审查',
+    description: '完成本阶段记录与全局探索充分性审查。检查是否仍有可能改变、扩展或推翻中心结论的高价值问题或新想法；若有则回到最早受影响阶段，若无则把探索审查标记为通过并进入成果封装。',
+    outputFiles: ['interpretation_stage_reflection.md', 'exploration_review.md'],
   },
   {
     id: 'theory-release-01', stageId: 'release', order: 1, name: '整理可审计论证链',
@@ -698,6 +712,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
     description: '形成最终理论报告或论文草稿，列出未解决问题、失败路线和后续可以检验或扩展的方向。',
     outputFiles: ['theory_report.md', 'open_questions.md'],
   },
+  theoreticalStageReflectionStep('release', 3),
 ];
 
 // === Workflow Registry ===

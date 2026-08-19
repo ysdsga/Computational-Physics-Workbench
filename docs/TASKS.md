@@ -1,6 +1,6 @@
 # 任务、工作流与研究运行
 
-本文记录 schema v6 的当前行为。Task 是 Project 内一次复杂研究任务，不等于单个调度器 Job。
+本文记录 schema v8 的当前行为。Task 是 Project 内一次复杂研究任务，不等于单个调度器 Job。
 
 ## Task 与目录边界
 
@@ -56,6 +56,8 @@ Confirmed Envelope 包含：
 研究者在 Codex 对话中确认精确 Envelope 一次后，Run 进入 `active`。Workbench 返回规范化 Envelope SHA-256，并只保存确认摘要、时间与可选 conversation reference。之后普通命令直接在 Task 会话内执行并记 Event；里程碑 Action 也不再单独请求研究者授权。
 
 Working Plan 保存当前阶段、目录布局、下一批 Action 和诊断策略。Codex 可以在 Envelope 内持续更新它；每次更新记录 decision Event 和幂等键，不增加 Envelope revision。
+
+`theoretical-research` 的每个核心阶段末尾都有“记录、反思与下一步判断”。同一阶段不限反思条数：`stay` 保持当前阶段，`loop` 回到发现所影响的最早阶段，`proceed` 才关闭阶段并前进。反思通过专用接口与 Working Plan 转移原子记录；回流会使目标及下游阶段的旧关闭状态失效。标记为 `explore` 的想法必须在后续事件中明确探索、证伪、暂缓或转后续任务，不能靠省略绕过完成判断。该循环不会自动修改 Research Plan；是否修订方案仍按现有 Plan/Envelope 纠错边界处理。
 
 ## Task 会话、Action、Job 与纠错
 
