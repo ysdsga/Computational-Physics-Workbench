@@ -20,6 +20,9 @@ import type {
 import { resolveWithinRoot } from './pathSafety.js';
 import { normalizeTaskRootRel } from './taskRoots.js';
 import { AgentCoreError } from './agentError.js';
+import { assertResearchEvidence, buildResearchMap, scientificGoalHash, validateGoalAssessment, validateGoalContinuity, validateRouteMemory, validateRouteSearch, validateScientificGoal } from './theoryResearch.js';
+
+export { buildResearchMap } from './theoryResearch.js';
 import {
   heartbeatLeaseForMonitor,
   normalizeJobMonitorPolicy,
@@ -200,6 +203,11 @@ export function validateEnvelope(input: unknown, task: ReturnType<typeof runtime
     throw new AgentCoreError(400, 'TASK_SPEC_INVALID', 'confirmedEnvelope.explorationReviewRequired must be a boolean');
   }
   const limits = objectValue(value.resourceLimits, 'confirmedEnvelope.resourceLimits');
+  if (value.scientificGoal !== undefined && task.workflow_id !== 'theoretical-research') {
+    throw new AgentCoreError(400, 'SCIENTIFIC_GOAL_NOT_APPLICABLE', 'Scientific goal exploration is scoped to theoretical research');
+  }
+  const scientificGoal = value.scientificGoal === undefined ? undefined : validateScientificGoal(value.scientificGoal);
+  const scientificGoalChange = value.scientificGoalChange === undefined ? undefined : objectValue(value.scientificGoalChange, 'scientificGoalChange');
   return {
     schemaVersion: 1,
     coreStageIds,
@@ -218,12 +226,15 @@ export function validateEnvelope(input: unknown, task: ReturnType<typeof runtime
     completionEvidence: orderedStringList(value.completionEvidence, 'confirmedEnvelope.completionEvidence', false),
     researcherGates: orderedStringList(value.researcherGates ?? [], 'confirmedEnvelope.researcherGates'),
     explorationReviewRequired: value.explorationReviewRequired ?? task.workflow_id === 'theoretical-research',
+    ...(scientificGoal ? { scientificGoal } : {}),
+    ...(scientificGoalChange ? { scientificGoalChange: { previousGoalSha256: requiredText(scientificGoalChange.previousGoalSha256, 'previousGoalSha256'), reason: requiredText(scientificGoalChange.reason, 'goal change reason') } } : {}),
     autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
   };
 }
 
 export function validateWorkingPlan(input: unknown, envelope: ConfirmedEnvelope): WorkingPlan {
   const value = objectValue(input ?? {}, 'workingPlan');
+  if (value.scientificGoal !== undefined) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_IMMUTABLE', 'The original scientific goal belongs to the confirmed Envelope, not the editable Working Plan');
   const currentStageId = value.currentStageId === null || value.currentStageId === undefined || value.currentStageId === ''
     ? null
     : requiredText(value.currentStageId, 'workingPlan.currentStageId');
@@ -274,9 +285,11 @@ export function validateTaskSpec(input: unknown, task: ReturnType<typeof runtime
 
 export function serializeRun(row: any): ResearchRun {
   const { confirmed_envelope_json, working_plan_json, ...rest } = row;
+  const envelope = JSON.parse(confirmed_envelope_json);
   return {
     ...rest,
-    confirmed_envelope: JSON.parse(confirmed_envelope_json),
+    confirmed_envelope: envelope,
+    ...(envelope.scientificGoal ? { scientific_goal_sha256: scientificGoalHash(envelope.scientificGoal) } : {}),
     confirmed_envelope_sha256: sha256(confirmed_envelope_json),
     working_plan: JSON.parse(working_plan_json),
     working_plan_sha256: sha256(working_plan_json),
@@ -338,6 +351,13 @@ export function createRunDraft(taskId: string, researchPlanId: string, taskSpecI
   const open = db.prepare("SELECT id FROM research_runs WHERE task_id = ? AND status IN ('draft','active','waiting_researcher')").get(taskId) as any;
   if (open) throw new AgentCoreError(409, 'RUN_ALREADY_OPEN', 'Task already has an open research run', { runId: open.id });
   const spec = validateTaskSpec(taskSpecInput, task);
+  if (task.workflow_id === 'theoretical-research' && spec.confirmedEnvelope.explorationReviewRequired) {
+    const goal = spec.confirmedEnvelope.scientificGoal;
+    if (!goal) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_REQUIRED', 'New theoretical Runs must name the original question, success criteria, insufficient outcomes and accepted answer types');
+    const change = validateGoalContinuity(taskId, goal, spec.confirmedEnvelope.scientificGoalChange);
+    if (change) spec.confirmedEnvelope.scientificGoalChange = change;
+    if (spec.workingPlan.goalAssessment) throw new AgentCoreError(409, 'GOAL_ASSESSMENT_REFLECTION_REQUIRED', 'Record scientific progress through stage reflections after confirmation');
+  }
   const id = newId('run');
   const ts = now();
   db.transaction(() => {
@@ -361,6 +381,7 @@ export function confirmRun(runId: string, input: { summary: unknown; source?: un
   const task = runtimeTask(row.task_id);
   if (!task.task_root_rel) throw new AgentCoreError(409, 'TASK_ROOT_UNRESOLVED', 'Task root must be resolved before confirming a Run');
   const envelope = JSON.parse(row.confirmed_envelope_json) as ConfirmedEnvelope;
+  if (envelope.scientificGoal) validateGoalContinuity(task.id, envelope.scientificGoal, envelope.scientificGoalChange);
   if (envelope.hpcProfileId) assertHpcBinding(task, envelope.hpcProfileId);
   const ts = now();
   db.transaction(() => {
@@ -379,6 +400,11 @@ export function updateWorkingPlan(runId: string, input: { workingPlan: unknown; 
   const key = requiredText(input.idempotencyKey, 'idempotencyKey');
   if (db.prepare('SELECT 1 FROM run_events WHERE run_id = ? AND idempotency_key = ?').get(runId, `working-plan:${key}`)) return getRun(runId);
   const workingPlan = validateWorkingPlan(input.workingPlan, run.confirmed_envelope);
+  if (run.confirmed_envelope.scientificGoal && run.confirmed_envelope.explorationReviewRequired) {
+    if (workingPlan.currentStageId !== run.working_plan.currentStageId || stableJson(workingPlan.goalAssessment ?? null) !== stableJson(run.working_plan.goalAssessment ?? null) || stableJson(workingPlan.explorationReview ?? null) !== stableJson(run.working_plan.explorationReview ?? null)) {
+      throw new AgentCoreError(409, 'GOAL_ASSESSMENT_REFLECTION_REQUIRED', 'Use a stage reflection to change the research stage, scientific assessment or exploration verdict');
+    }
+  }
   const reason = requiredText(input.reason, 'reason');
   const ts = now();
   db.transaction(() => {
@@ -409,6 +435,10 @@ function validateStageReflectionIdeas(input: unknown): StageReflectionIdea[] {
       );
     }
     return {
+      ...(value.id !== undefined ? { id: requiredText(value.id, `ideas[${index}].id`) } : {}),
+      ...(value.parentIdeaIds !== undefined ? { parentIdeaIds: orderedStringList(value.parentIdeaIds, 'parentIdeaIds') } : {}),
+      ...(value.learning !== undefined ? { learning: requiredText(value.learning, 'learning') } : {}),
+      ...(value.nextQuestion !== undefined ? { nextQuestion: requiredText(value.nextQuestion, 'nextQuestion') } : {}),
       idea: requiredText(value.idea, `ideas[${index}].idea`),
       significance: requiredText(value.significance, `ideas[${index}].significance`),
       disposition,
@@ -426,6 +456,12 @@ function validateNextActions(input: unknown): Array<Record<string, unknown>> {
 }
 
 function unresolvedExplorationIdeas(runId: string, currentIdeas: StageReflectionIdea[] = []): string[] {
+  const run = getRun(runId);
+  if (run.confirmed_envelope.scientificGoal && run.confirmed_envelope.explorationReviewRequired) {
+    const routes = new Map(buildResearchMap(run.task_id).routes.map(item => [item.id, item as StageReflectionIdea]));
+    for (const item of currentIdeas) routes.set(item.id!, item);
+    return [...routes.values()].filter(item => !CLOSING_IDEA_DISPOSITIONS.has(item.disposition)).map(item => item.idea);
+  }
   const rows = db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'stage.reflection' ORDER BY sequence")
     .all(runId) as Array<{ payload_json: string }>;
   const unresolved = new Map<string, string>();
@@ -457,6 +493,8 @@ export function recordStageReflection(runId: string, input: {
   decision: unknown;
   targetStageId?: unknown;
   nextActions?: unknown;
+  routeSearch?: unknown;
+  goalAssessment?: unknown;
   idempotencyKey: unknown;
   conversationRef?: unknown;
 }): StageReflectionResult {
@@ -520,7 +558,20 @@ export function recordStageReflection(runId: string, input: {
   }
   const currentUnresolvedItems = ideas.filter(item => !CLOSING_IDEA_DISPOSITIONS.has(item.disposition)).map(item => item.idea);
   const unresolvedItems = unresolvedExplorationIdeas(runId, ideas);
-  if (decision !== 'proceed' && currentUnresolvedItems.length === 0 && uncertainties.length === 0) {
+  const goal = run.confirmed_envelope.explorationReviewRequired ? run.confirmed_envelope.scientificGoal : undefined;
+  const routeSearch = input.routeSearch === undefined ? undefined : validateRouteSearch(input.routeSearch);
+  const goalAssessment = goal && input.goalAssessment !== undefined ? validateGoalAssessment(input.goalAssessment, goal) : undefined;
+  if (goal) {
+    validateRouteMemory(ideas, buildResearchMap(run.task_id));
+    const taskRoot = resolveWithinRoot(task.working_dir, normalizeTaskRootRel(task.task_root_rel!), { allowRoot: false, label: 'task root' });
+    assertResearchEvidence(ideas.flatMap(item => item.evidenceRefs), task.id, taskRoot);
+    if (goalAssessment) assertResearchEvidence(goalAssessment.criteria.flatMap(item => item.evidenceRefs), task.id, taskRoot);
+    if (stageId === 'context' && !routeSearch) throw new AgentCoreError(409, 'RESEARCH_ROUTE_SEARCH_REQUIRED', 'The research-map stage must record actual route exploration, including unsuccessful searches');
+    if (stageId === 'context' && decision === 'proceed' && unresolvedItems.length === 0) throw new AgentCoreError(409, 'RESEARCH_ROUTE_REQUIRED', 'No candidate is not completion: keep exploring routes or record a genuine resource/authority pause');
+    if ((stageId === 'interpretation' || !targetStageId) && !goalAssessment) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_ASSESSMENT_REQUIRED', 'Compare results with the original scientific question, not only the list of closed routes');
+    if ((stageId === 'interpretation' || !targetStageId) && decision === 'proceed' && goalAssessment?.status !== 'answered') throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_NOT_ANSWERED', 'Partial or conditional work must loop to route exploration/model/derivation; a resource pause is not successful completion');
+  }
+  if (decision !== 'proceed' && currentUnresolvedItems.length === 0 && uncertainties.length === 0 && !goalAssessment?.remainingGaps.length) {
     throw new AgentCoreError(400, 'STAGE_REFLECTION_RATIONALE_REQUIRED', 'Stay or loop requires an uncertainty or an unresolved high-value idea');
   }
   if (stageId === 'interpretation' && decision === 'proceed' && unresolvedItems.length > 0) {
@@ -539,13 +590,15 @@ export function recordStageReflection(runId: string, input: {
     decision,
     targetStageId,
     nextActions,
+    ...(routeSearch ? { routeSearch } : {}),
+    ...(goalAssessment ? { goalAssessment } : {}),
   };
   let explorationReview: WorkingPlan['explorationReview'];
   if (decision !== 'proceed' || unresolvedItems.length > 0) {
     explorationReview = {
       status: 'continue',
       summary,
-      unresolvedHighValueItems: unresolvedItems.length > 0 ? unresolvedItems : uncertainties,
+      unresolvedHighValueItems: unresolvedItems.length > 0 ? unresolvedItems : (goalAssessment?.remainingGaps.length ? goalAssessment.remainingGaps : uncertainties),
     };
   } else if (stageId === 'interpretation') {
     explorationReview = { status: 'passed', summary, unresolvedHighValueItems: [] };
@@ -554,12 +607,14 @@ export function recordStageReflection(runId: string, input: {
   }
   const workingPlanBase = { ...run.working_plan };
   delete workingPlanBase.explorationReview;
+  if (goal && decision !== 'proceed') delete workingPlanBase.goalAssessment;
   const workingPlan = validateWorkingPlan({
     ...workingPlanBase,
     currentStageId: targetStageId,
     summary,
     nextActions,
     ...(explorationReview ? { explorationReview } : {}),
+    ...(goalAssessment ? { goalAssessment } : {}),
   }, run.confirmed_envelope);
 
   const ts = now();
@@ -669,7 +724,18 @@ export function reviseEnvelope(runId: string, input: { confirmedEnvelope: unknow
   const pending = db.prepare("SELECT * FROM pending_items WHERE id = ? AND run_id = ? AND audience = 'researcher' AND status = 'open'").get(pendingItemId, runId);
   if (!pending) throw new AgentCoreError(409, 'ENVELOPE_PENDING_ITEM_REQUIRED', 'Envelope revision must resolve an open researcher pending item for this Run');
   const envelope = validateEnvelope(input.confirmedEnvelope, runtimeTask(run.task_id));
-  const workingPlan = validateWorkingPlan(run.working_plan, envelope);
+  if (run.confirmed_envelope.scientificGoal && !envelope.scientificGoal) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_IMMUTABLE', 'A goal revision must preserve an explicit scientific question');
+  if (envelope.scientificGoal) {
+    const change = validateGoalContinuity(run.task_id, envelope.scientificGoal, envelope.scientificGoalChange, run.confirmed_envelope.scientificGoal);
+    if (change) envelope.scientificGoalChange = change;
+  }
+  const revisedPlan = { ...run.working_plan };
+  if (envelope.scientificGoal) {
+    delete revisedPlan.goalAssessment;
+    revisedPlan.currentStageId = envelope.coreStageIds[0];
+    revisedPlan.explorationReview = { status: 'continue', summary: 'Reassess the scientific question after the confirmed boundary revision', unresolvedHighValueItems: [envelope.scientificGoal.question] };
+  }
+  const workingPlan = validateWorkingPlan(revisedPlan, envelope);
   const summary = requiredText(input.summary, 'summary');
   const revision = run.envelope_revision + 1;
   const ts = now();
@@ -720,13 +786,22 @@ export function completeRun(runId: string, summary: string, source: string, conv
         { workflowId: task.workflow_id, requiredStatus: 'passed' },
       );
     }
+    if (run.confirmed_envelope.scientificGoal) {
+      const latest = db.prepare("SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'stage.reflection' ORDER BY sequence DESC LIMIT 1").get(runId) as { payload_json: string } | undefined;
+      const reflection = latest ? JSON.parse(latest.payload_json) as StageReflection : undefined;
+      if (!reflection?.goalAssessment || reflection.decision !== 'proceed' || reflection.stageId !== run.confirmed_envelope.coreStageIds.at(-1) || run.working_plan.currentStageId !== null) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_ASSESSMENT_REQUIRED', 'The final reflection must assess the original scientific goal');
+      const assessment = validateGoalAssessment(reflection.goalAssessment, run.confirmed_envelope.scientificGoal);
+      if (assessment.status !== 'answered' || unresolvedExplorationIdeas(runId).length) throw new AgentCoreError(409, 'SCIENTIFIC_GOAL_NOT_ANSWERED', 'Closing routes is not answering the scientific question');
+      const taskRoot = resolveWithinRoot(task.working_dir, normalizeTaskRootRel(task.task_root_rel!), { allowRoot: false, label: 'task root' });
+      assertResearchEvidence(assessment.criteria.flatMap(item => item.evidenceRefs), task.id, taskRoot);
+    }
   }
   if (db.prepare("SELECT 1 FROM pending_items WHERE run_id = ? AND audience = 'researcher' AND status = 'open' LIMIT 1").get(runId)) throw new AgentCoreError(409, 'PENDING_RESEARCHER_ITEMS', 'Resolve researcher pending items before completing the Run');
   if (db.prepare("SELECT 1 FROM remote_jobs WHERE run_id = ? AND lower(status) NOT IN ('done','exit','zombi','unkwn','preparation_failed','cancelled') LIMIT 1").get(runId)) throw new AgentCoreError(409, 'ACTIVE_REMOTE_JOBS', 'All recorded remote Jobs must reach a terminal state before completing the Run');
   const ts = now();
   db.transaction(() => {
     db.prepare("UPDATE research_runs SET status = 'completed', ended_at = ?, updated_at = ? WHERE id = ?").run(ts, ts, runId);
-    appendEvent(runId, { category: 'decision', eventType: 'run.completed', actorType: 'researcher', payload: { summary }, source, conversationRef });
+    appendEvent(runId, { category: 'decision', eventType: 'run.completed', actorType: run.confirmed_envelope.scientificGoal ? 'agent' : 'researcher', payload: { summary }, source, conversationRef });
   })();
   return getRun(run.id);
 }
@@ -836,6 +911,7 @@ export function buildAgentContext(taskId: string): AgentContext {
   const task = { id: row.id, project_id: row.project_id, name: row.name, description: row.description, workflow_id: row.workflow_id, workflow: row.workflow, task_root_rel: row.task_root_rel, task_root_unresolved: !row.task_root_rel, status: row.status, created_at: row.created_at, updated_at: row.updated_at } as Task;
   return {
     schemaVersion: 4, project, task, taskRoot: { relative: row.task_root_rel, absolute: taskRootAbsolute, resolved: Boolean(taskRootAbsolute) }, run,
+    ...(row.workflow_id === 'theoretical-research' ? { researchMap: buildResearchMap(taskId) } : {}),
     research: { planId: plan?.id ?? null, planTitle: plan?.title ?? null, planStatus: plan?.status ?? null, planMissing }, workflow: row.workflow,
     remoteCapability: capabilityEvent ? JSON.parse(capabilityEvent.payload_json) : null, recentActions: actions, recentJobs: jobs, monitor,
     recentArtifacts: artifacts, recentEvidenceChecks: evidenceChecks, pendingItems: pending, eventCursor, latestStageReflections, evidenceIndex, blockers,

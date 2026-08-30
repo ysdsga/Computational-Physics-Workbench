@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { isDeepStrictEqual } from 'node:util';
 import type Database from 'better-sqlite3';
-import { WORKFLOWS } from '../src/data/workflows.js';
+import { WORKFLOWS, upgradeTheoreticalResearchSteps } from '../src/data/workflows.js';
+import type { WorkflowStep } from '../src/types/index.js';
 
 const AGENT_V1_SCHEMA_VERSION = 2;
 const WORKBENCH_V2_SCHEMA_VERSION = 3;
@@ -16,6 +17,7 @@ const THEORETICAL_ACTIVE_EXPLORATION_SCHEMA_VERSION = 10;
 const MODEL_DMFT_SOLVER_STEP_SCHEMA_VERSION = 11;
 const THEORETICAL_TOOL_VERIFICATION_SCHEMA_VERSION = 12;
 const THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION = 13;
+const THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION = 14;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -160,7 +162,7 @@ function tableCount(db: Database.Database, table: string): number {
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION) return;
+  if (currentVersion >= THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION) return;
 
   if (currentVersion < JOB_MONITOR_SCHEMA_VERSION) backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -1049,4 +1051,20 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
     })();
   }
 
+  if (currentVersion < THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION) {
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string } | undefined;
+    if (stored && dbPath !== ':memory:') {
+      const backupPath = path.join(path.dirname(dbPath), `${path.basename(dbPath, path.extname(dbPath))}.before-theoretical-research-loop-v14.db`);
+      if (!fs.existsSync(backupPath)) db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+    }
+    db.transaction(() => {
+      if (stored) {
+        const data = JSON.parse(stored.data) as { steps?: WorkflowStep[] };
+        if (!Array.isArray(data.steps)) throw new Error('The theoretical-research workflow template is missing steps; database was left unchanged');
+        const updated = { ...data, steps: upgradeTheoreticalResearchSteps(data.steps) };
+        if (!isDeepStrictEqual(data, updated)) db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(updated), new Date().toISOString(), 'theoretical-research');
+      }
+      db.pragma(`user_version = ${THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION}`);
+    })();
+  }
 }

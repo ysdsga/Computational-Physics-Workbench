@@ -57,14 +57,14 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v13 and CLI doctor start on disposable state', async () => {
+test('server, schema v14 and CLI doctor start on disposable state', async () => {
   const root = await fetch(`${base}/`);
   assert.equal(root.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 13);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 14);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });
@@ -131,7 +131,7 @@ test('Task Spec gets one confirmation while Working Plan and Actions remain auto
   assert.equal(actionResult.response.status, 201); assert.equal((actionResult.payload as any).status, 'ready'); assert.match((actionResult.payload as any).spec_sha256, /^[a-f0-9]{64}$/);
 });
 
-test('theoretical Runs loop on unresolved ideas and complete only after an enabled exploration review passes', async () => {
+test('legacy theoretical Runs retain their confirmed exploration contract without retroactive goal requirements', async () => {
   const workingDir = path.join(tmpRoot, 'theory-exploration');
   fs.mkdirSync(workingDir, { recursive: true });
   const projectResult = await api('/api/projects', {
@@ -168,6 +168,7 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
       resourceLimits: { maxCoresPerJob: 1, maxWallMinutes: 10, maxConcurrentJobs: 1, maxAutomaticRetries: 0 },
       protectedRelativePaths: [],
       completionEvidence: ['exploration review and final argument'],
+      scientificGoal: { question: 'Original question', successCriteria: ['Answer it'], insufficientOutcomes: ['Only a checklist'], acceptedAnswerTypes: ['explanation'] },
       researcherGates: [],
       autonomy: { allowWorkingPlanEdits: true, allowRetriesWithinLimits: true, allowOwnJobCancellation: true },
     },
@@ -180,6 +181,11 @@ test('theoretical Runs loop on unresolved ideas and complete only after an enabl
   assert.equal(draftResult.response.status, 201);
   const draft = draftResult.payload as any;
   assert.equal(draft.confirmed_envelope.explorationReviewRequired, true, 'new theoretical Runs default to an enabled review');
+  // Emulate a pre-upgrade persisted Envelope in this disposable database only.
+  const legacyEnvelope = { ...draft.confirmed_envelope };
+  delete legacyEnvelope.scientificGoal;
+  const legacyDb = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
+  legacyDb.default.prepare('UPDATE research_runs SET confirmed_envelope_json = ? WHERE id = ?').run(JSON.stringify(legacyEnvelope), draft.id);
   const confirmed = await api(`/api/agent/v1/runs/${draft.id}/confirm`, {
     method: 'POST',
     body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }),

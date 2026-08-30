@@ -715,6 +715,38 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   theoreticalStageReflectionStep('release', 3),
 ];
 
+const THEORY_RESEARCH_ADDITIONS: Record<string, string> = {
+  'theory-question-01': '原科学问题跨 Run 保持可追溯；研究者确认的目标与 Agent 可修改的候选机制、模型和路线分开。不得在探索失败后把解释或预言目标悄悄替换为诊断方法或条件清单。',
+  'theory-question-02': '在 Confirmed Envelope 的 scientificGoal 中明确原问题、成功标准、哪些结果仍不足以回答，以及接受的答案类型。允许有价值的否定结果；不承诺必然发表，也不以文件、验证或循环数量代替科学进展。',
+  'theory-context-01': '研究地图跨 Run 持续更新，保留已知结果、未解释现象、失败路线和证据来源；恢复时读取 workbench research-map show，不重复已经排除的方向。',
+  'theory-context-02': '主动纵向深挖未推导前提与可控极限，横向联系相邻体系和机制，并从矛盾、类比与失败中自主提出问题。没有 idea 时仍执行路线探索：记录实际尝试、所得认识和下一问题，不以候选清空判定研究结束。',
+  'theory-model-01': '把候选机制写成物理过程到可观测结果的论证链，选择能区分竞争解释的最小模型；失败时允许在已确认方法边界内重新建模，而不是预先把待解释现象放进假设。',
+  'theory-derivation-03': '区分推出的结果与尚未推出的前提；条件性结论不能自动替代原目标的解释。保留失败依赖哪条假设、实际排除了什么、尚未排除什么，以及由此产生的新问题。',
+  'theory-interpretation-02': '回到原科学问题解释为什么发生、交互机制是什么、与最近先行工作相比新增了什么；辨认现象的方法不能未经确认替代产生现象的物理解释。',
+  'theory-interpretation-04': '分别判断一条路线是否处理完和原科学问题是否回答。goalAssessment 必须逐项回应原始成功标准；只得到条件、缺少新增量、因果链尚缺环节或没有候选时继续找路并回流，不能标记目标达成。真正达到资源或授权边界则记录目标未达成的暂停，不伪装成成功。',
+  'theory-release-02': '只有原目标达成才成功结项；部分成果、条件分析和受限暂停须如实区分。失败和研究地图作为后续轮次的起点保留，不因本轮结束丢失。',
+};
+
+function withTheoryResearchLoop(step: WorkflowStep): WorkflowStep {
+  const additions = [THEORY_RESEARCH_ADDITIONS[step.id]];
+  if (step.id.endsWith('-reflection')) additions.push('反思必须记录这次学到了什么、失败由哪条假设导致、排除了什么而未排除什么，以及下一步怎样改模型或提出问题。路线使用稳定 id 和 parentIdeaIds 连接，关闭时保留 learning；路线关闭不代表原问题回答。');
+  return {
+    ...step,
+    name: step.id === 'theory-context-01' ? '建立研究地图与文献事实' : step.id === 'theory-context-02' ? '探索研究路线与提出问题' : step.name,
+    description: step.description + additions.filter(Boolean).join(''),
+    ...(step.id === 'theory-context-01' ? { outputFiles: [...(step.outputFiles ?? []), 'research_map.md'] } : {}),
+  };
+}
+
+/** Upgrade only unchanged built-in fields; never restore deleted stages/steps or rewrite Task snapshots. */
+export function upgradeTheoreticalResearchSteps(steps: WorkflowStep[]): WorkflowStep[] {
+  return steps.map(step => {
+    const previous = THEORETICAL_RESEARCH_STEPS.find(item => item.id === step.id);
+    if (!previous || previous.name !== step.name || previous.description !== step.description || JSON.stringify(previous.outputFiles) !== JSON.stringify(step.outputFiles)) return step;
+    return withTheoryResearchLoop(step);
+  });
+}
+
 // === Generic TRIQS model DMFT ===
 // The workflow defines stable scientific milestones only. Model choices,
 // numerical parameters, convergence thresholds, observables, and comparison
@@ -844,9 +876,9 @@ export const WORKFLOWS: WorkflowTemplate[] = [
   {
     id: 'theoretical-research',
     name: '理论研究',
-    description: '从问题定义、模型与推导到一致性验证、物理预测和成果封装',
+    description: '围绕原科学问题持续找路、建模、推导与验证，从失败中更新研究地图，目标达成后封装成果',
     stages: THEORETICAL_RESEARCH_STAGES,
-    steps: THEORETICAL_RESEARCH_STEPS,
+    steps: THEORETICAL_RESEARCH_STEPS.map(withTheoryResearchLoop),
   },
 ];
 

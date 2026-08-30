@@ -24,6 +24,7 @@ function usage(message, code = EXIT.usage) {
   process.stderr.write(`workbench — Codex-driven DFT+DMFT research environment\n\nCommands:
   doctor
   context --task <id> [--allow-blocked] [--full] [--pretty]
+  research-map show --task <id> [--pretty]
   hpc show --project <id>
   hpc configure --project <id> --file <json>
   plan list [--project <id>] [--task <id>] [--status <status>] [--query <text>]
@@ -93,6 +94,8 @@ const BLOCKED_CODES = new Set([
   'EXECUTION_INPUT_DRIFT', 'EXECUTION_RECEIPT_CONFLICT', 'EXECUTION_RECOVERY_UNCERTAIN',
   'REMOTE_SUBMISSION_UNCERTAIN', 'REMOTE_CONCURRENCY_LIMIT', 'ACTION_RETRY_LIMIT_REACHED', 'ACTIVE_REMOTE_JOBS',
   'STAGE_REFLECTIONS_REQUIRED', 'EXPLORATION_REVIEW_REQUIRED', 'EXPLORATION_REVIEW_UNRESOLVED',
+  'SCIENTIFIC_GOAL_REQUIRED', 'SCIENTIFIC_GOAL_NOT_ANSWERED', 'SCIENTIFIC_GOAL_ASSESSMENT_REQUIRED',
+  'SCIENTIFIC_ANSWER_TYPE_INSUFFICIENT', 'RESEARCH_ROUTE_SEARCH_REQUIRED', 'RESEARCH_ROUTE_REQUIRED',
 ]);
 
 async function request(method, pathname, body) {
@@ -123,11 +126,14 @@ function compactContext(context) {
     researchPlanId: context.run.research_plan_id,
     envelopeRevision: context.run.envelope_revision,
     envelopeSha256: context.run.confirmed_envelope_sha256,
+    scientificGoal: context.run.confirmed_envelope?.scientificGoal,
+    scientificGoalSha256: context.run.scientific_goal_sha256,
     workingPlan: {
       currentStageId: context.run.working_plan?.currentStageId,
       summary: context.run.working_plan?.summary,
       nextActions: context.run.working_plan?.nextActions,
       explorationReview: context.run.working_plan?.explorationReview,
+      goalAssessment: context.run.working_plan?.goalAssessment,
     },
     boundary: {
       hpcProfileId: context.run.confirmed_envelope?.hpcProfileId,
@@ -154,6 +160,13 @@ function compactContext(context) {
     monitor: context.monitor,
     pendingItems: context.pendingItems,
     latestStageReflections: context.latestStageReflections,
+    ...(context.researchMap ? { researchMap: {
+      goalSha256: context.researchMap.goalSha256,
+      routeCount: context.researchMap.routes.length,
+      closedRouteCount: context.researchMap.routes.filter(item => ['resolved', 'falsified'].includes(item.disposition)).length,
+      latestSearch: context.researchMap.searches.at(-1),
+      readMore: `workbench research-map show --task ${context.task.id}`,
+    } } : {}),
     eventCursor: context.eventCursor,
     blockers: context.blockers,
   };
@@ -173,6 +186,7 @@ async function main() {
     const started = Date.now(); const projects = await request('GET', '/api/projects'); const execution = await request('GET', '/api/agent/v1/execution-contract');
     return { ok: true, baseUrl, latencyMs: Date.now() - started, projectCount: projects.length, runtimeSchemaVersion: execution.schemaVersion };
   }
+  if (group === 'research-map' && action === 'show') return request('GET', `/api/agent/v1/tasks/${encodeURIComponent(required('task'))}/research-map`);
   if (group === 'context') {
     const result = await request('GET', `/api/agent/v1/context/tasks/${encodeURIComponent(required('task'))}`);
     if (Array.isArray(result.blockers) && result.blockers.length && flags['allow-blocked'] !== true) { const item = new Error('Context contains blockers'); item.payload = result; item.exitCode = EXIT.blocked; throw item; }

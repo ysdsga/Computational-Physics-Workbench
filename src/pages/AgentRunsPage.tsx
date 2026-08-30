@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, Bot, CheckCircle2, Clock3, Database, FileCheck
 import { agentApi, projectsApi, tasksApi } from '../api/client';
 import type { AgentContext, Project, RunAction, RunEvent, Task } from '../types';
 import { formatLocalDateTime } from '../utils/dateTime';
+import TheoryResearchPanel from '../components/TheoryResearchPanel';
 
 function humanError(error: unknown) {
   const item = error as Error & { code?: string };
@@ -53,9 +54,17 @@ function eventPresentation(event: RunEvent) {
     const decision = eventText(event, 'decision');
     const targetStageId = eventText(event, 'targetStageId');
     return {
-      label: '阶段记录与反思',
+      label: event.payload.routeSearch ? '研究路线探索与反思' : event.payload.goalAssessment ? '原科学目标评估与反思' : '阶段记录与反思',
       tone: decision === 'proceed' ? 'bg-[#67c9b5]' : 'bg-[#dfb26a]',
       summary: [`${stageId} · ${decision}`, targetStageId ? `→ ${targetStageId}` : '', eventText(event, 'summary')].filter(Boolean).join(' · '),
+      command: '',
+    };
+  }
+  if (event.event_type === 'run.archived_invalid') {
+    return {
+      label: '无效轮次 · 已归档',
+      tone: 'bg-[#dfb26a]',
+      summary: [eventText(event, 'reason'), eventText(event, 'archivePath')].filter(Boolean).join(' · '),
       command: '',
     };
   }
@@ -101,6 +110,10 @@ export default function AgentRunsPage() {
     pending: context?.pendingItems.filter(item => item.status === 'open').length ?? 0,
   }), [context, events]);
   const unresolvedHighValueItems = context?.run?.working_plan.explorationReview?.unresolvedHighValueItems ?? [];
+  const archivedInvalidEvent = useMemo(
+    () => events.find(item => item.event_type === 'run.archived_invalid') ?? null,
+    [events],
+  );
 
   return <div className="h-full overflow-y-auto bg-[#0d1214] text-[#e9f0ed]">
     <header className="border-b border-[#2a3433] bg-[#12191b] px-8 py-6">
@@ -116,16 +129,18 @@ export default function AgentRunsPage() {
         <div className="border-l border-[#2a3433] pl-4 text-xs leading-5 text-[#91a19d]"><div className="flex items-center gap-2 font-medium text-[#dce7e3]"><Bot size={15} className="text-[#67c9b5]"/>继续处理</div><p className="mt-1">回到 Codex 对话运行 <code className="text-[#aee6da]">workbench context --task {taskId || '&lt;id&gt;'} --allow-blocked --pretty</code>。Researcher 决定只在对话中确认。</p></div>
       </section>
       {message && <div className="border-l-2 border-[#df9d6a] bg-[#251b16] px-4 py-3 text-sm text-[#edc5aa]">{message}</div>}
+      {archivedInvalidEvent && <div className="border border-[#725329] bg-[#251d12] px-4 py-3 text-sm text-[#edc57e]"><div className="font-medium">该 Run 已标记为无效轮次并归档</div><p className="mt-1 text-xs leading-5 text-[#c7a96f]">保留以下命令、Action 和 Job 仅用于审计，不纳入本任务的科学结论，也不影响此前有效轮次。</p></div>}
       <section className="grid gap-px border border-[#293534] bg-[#293534] sm:grid-cols-6">{[
-        ['Run', context?.run?.status ?? '未开始'], ['Stage', context?.run?.current_stage_id ?? '—'], ['会话操作', String(counts.operations)], ['科学里程碑', String(counts.actions)], ['Jobs', String(counts.jobs)], ['待沟通', String(counts.pending)],
+        ['Run', archivedInvalidEvent ? '无效轮次 · 已归档' : (context?.run?.status ?? '未开始')], ['Stage', context?.run?.current_stage_id ?? '—'], ['会话操作', String(counts.operations)], ['科学里程碑', String(counts.actions)], ['Jobs', String(counts.jobs)], ['待沟通', String(counts.pending)],
       ].map(([label, value]) => <div key={label} className="bg-[#11181a] p-4"><div className="font-mono text-[9px] uppercase text-[#657570]">{label}</div><div className="mt-1.5 truncate text-sm">{value}</div></div>)}</section>
 
+      {context?.researchMap && !archivedInvalidEvent && <TheoryResearchPanel map={context.researchMap} goal={context.run?.confirmed_envelope.scientificGoal} assessment={context.run?.working_plan.goalAssessment}/>}
       <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
         <div className="space-y-5">
           <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><FolderLock size={17} className="text-[#dfb26a]"/>Task Spec</h2>{context?.run ? <><dl className="mt-4 space-y-3 text-xs">{[
             ['Objective', context.run.objective], ['Envelope revision', String(context.run.envelope_revision)], ['Profile', context.run.confirmed_envelope.hpcProfileId ?? 'local only'], ['Capabilities', context.run.confirmed_envelope.allowedCapabilities.join(', ')], ['Working plan', context.run.working_plan.summary ?? '—'],
             ['Exploration review', context.run.confirmed_envelope.explorationReviewRequired ? (context.run.working_plan.explorationReview?.status ?? 'pending') : 'not required'],
-          ].map(([label, value]) => <div key={label} className="grid grid-cols-[8rem_1fr] gap-3 border-b border-[#24302f] pb-2"><dt className="text-[#657570]">{label}</dt><dd className="break-words text-[#bdc9c5]">{value}</dd></div>)}</dl>{unresolvedHighValueItems.length > 0 && <div className="mt-4 border border-[#725329] bg-[#251d12] p-3 text-xs text-[#edc57e]"><div className="font-medium">仍阻止完成的高价值想法</div><ul className="mt-2 list-disc space-y-1 pl-4">{unresolvedHighValueItems.map(item => <li key={item}>{item}</li>)}</ul><p className="mt-2 text-[#c7a96f]">暂缓或转后续任务仍保持未决；需以证据解决或证伪。</p></div>}</> : <p className="mt-4 text-sm text-[#657570]">尚未生成并确认 Task Spec。</p>}</section>
+          ].map(([label, value]) => <div key={label} className="grid grid-cols-[8rem_1fr] gap-3 border-b border-[#24302f] pb-2"><dt className="text-[#657570]">{label}</dt><dd className="break-words text-[#bdc9c5]">{value}</dd></div>)}</dl>{!archivedInvalidEvent && unresolvedHighValueItems.length > 0 && <div className="mt-4 border border-[#725329] bg-[#251d12] p-3 text-xs text-[#edc57e]"><div className="font-medium">仍阻止完成的高价值想法</div><ul className="mt-2 list-disc space-y-1 pl-4">{unresolvedHighValueItems.map(item => <li key={item}>{item}</li>)}</ul><p className="mt-2 text-[#c7a96f]">暂缓或转后续任务仍保持未决；需以证据解决或证伪。</p></div>}</> : <p className="mt-4 text-sm text-[#657570]">尚未生成并确认 Task Spec。</p>}</section>
           <section className="border border-[#293534] bg-[#131a1c] p-5"><h2 className="flex items-center gap-2 font-medium"><AlertTriangle size={17} className="text-[#dfb26a]"/>阻塞与沟通</h2><div className="mt-4 space-y-2">{context?.blockers.map(item => <div key={item.code} className="border border-[#5f482d] bg-[#211b13] p-3 text-xs text-[#e8d0aa]"><div className="font-mono text-[10px]">{item.code}</div><div className="mt-1">{item.message}</div></div>)}{context && context.blockers.length === 0 && <div className="flex gap-2 border border-[#2d5d50] bg-[#13231f] p-3 text-xs text-[#9ee0d1]"><CheckCircle2 size={15}/>当前没有全局 blocker；各阶段仍以待沟通事项为准。</div>}</div></section>
         </div>
         <section className="border border-[#293534] bg-[#131a1c] p-5"><div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-medium"><Activity size={17} className="text-[#67c9b5]"/>科学里程碑 Actions</h2><span className="text-right font-mono text-[10px] text-[#657570]">全部 {counts.actions} 条 · 普通命令记入时间线</span></div><div aria-label="科学里程碑记录列表" className="mt-4 max-h-96 space-y-3 overflow-y-auto overscroll-contain pr-2 [scrollbar-gutter:stable]">{context?.recentActions.map(action => <article key={action.id} className={`border p-4 ${actionTone(action.status)}`}><div className="flex justify-between gap-3"><div><div className="font-mono text-[10px] opacity-70">{action.stage_id}{action.step_id ? ` / ${action.step_id}` : ''}</div><h3 className="mt-1 text-sm font-medium">{action.action_type}</h3></div><span className="h-fit border border-current px-2 py-1 font-mono text-[10px] uppercase">{action.status}</span></div><div className="mt-3 font-mono text-[10px] opacity-75">spec {short(action.spec_sha256)}</div><details className="mt-3 border-t border-current/20 pt-2"><summary className="cursor-pointer text-xs opacity-75">查看里程碑规格与命令预览</summary>{commandPreview(action).map((command, index) => <pre key={index} className="mt-2 overflow-x-auto whitespace-pre-wrap bg-black/20 p-2 font-mono text-[10px]">{command}</pre>)}<pre className="mt-2 max-h-56 overflow-auto bg-black/20 p-3 font-mono text-[10px]">{JSON.stringify(action.spec, null, 2)}</pre></details></article>)}{context?.run && !context.recentActions.length && <div className="border border-dashed border-[#354341] p-10 text-center text-sm text-[#657570]">当前 Run 尚无需要持久化的科学里程碑；普通执行记录请看时间线。</div>}{!context?.run && <div className="border border-dashed border-[#354341] p-10 text-center text-sm text-[#657570]">请先在 Codex 对话中讨论研究方案和 Task Spec。</div>}</div></section>

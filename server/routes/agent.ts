@@ -54,6 +54,11 @@ router.post('/runs', (req, res) => {
   res.status(201).json(createRunDraft(String(taskId), String(researchPlanId), taskSpec, String(idempotencyKey)));
 });
 
+router.get('/tasks/:taskId/research-map', (req, res) => {
+  const context = buildAgentContext(req.params.taskId);
+  if (!context.researchMap) return res.status(409).json({ code: 'RESEARCH_MAP_NOT_APPLICABLE', error: 'Research maps are scoped to theoretical research' });
+  res.json(context.researchMap);
+});
 router.post('/runs/:runId/confirm', (req, res) => res.json(confirmRun(req.params.runId, req.body ?? {})));
 router.put('/runs/:runId/working-plan', (req, res) => res.json(updateWorkingPlan(req.params.runId, req.body ?? {})));
 router.post('/runs/:runId/stage-reflections', (req, res) => res.status(201).json(recordStageReflection(req.params.runId, req.body ?? {})));

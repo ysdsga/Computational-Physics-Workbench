@@ -147,6 +147,7 @@ export const researchPlansApi = {
 
 export const agentApi = {
   context: (taskId: string) => api<AgentContext>(`/agent/v1/context/tasks/${taskId}`),
+  researchMap: (taskId: string) => api<NonNullable<AgentContext['researchMap']>>(`/agent/v1/tasks/${taskId}/research-map`),
   run: (runId: string) => api<ResearchRun>(`/agent/v1/runs/${runId}`),
   createRun: (data: { taskId: string; researchPlanId: string; taskSpec: TaskSpec; idempotencyKey: string }) =>
     api<ResearchRun>('/agent/v1/runs', { method: 'POST', body: JSON.stringify(data) }),

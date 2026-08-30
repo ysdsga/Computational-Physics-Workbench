@@ -206,11 +206,38 @@ export interface ConfirmedEnvelope {
   completionEvidence: string[];
   researcherGates: string[];
   explorationReviewRequired?: boolean;
+  /** Required for newly drafted theoretical Runs with exploration review enabled. */
+  scientificGoal?: ScientificGoal;
+  scientificGoalChange?: { previousGoalSha256: string; reason: string };
   autonomy: {
     allowWorkingPlanEdits: true;
     allowRetriesWithinLimits: true;
     allowOwnJobCancellation: true;
   };
+}
+
+export type ScientificAnswerType = 'explanation' | 'prediction' | 'no_go' | 'conditional' | 'diagnostic';
+
+export interface ScientificGoal {
+  question: string;
+  successCriteria: string[];
+  insufficientOutcomes: string[];
+  acceptedAnswerTypes: ScientificAnswerType[];
+}
+
+export interface GoalAssessment {
+  goalSha256: string;
+  status: 'unanswered' | 'partial' | 'answered';
+  answer: string;
+  answerType: ScientificAnswerType;
+  criteria: Array<{ criterion: string; satisfied: boolean; explanation: string; evidenceRefs: string[] }>;
+  remainingGaps: string[];
+}
+
+export interface ResearchRouteSearch {
+  directions: Array<{ axis: 'longitudinal' | 'horizontal' | 'failure_driven' | 'independent'; question: string; rationale: string }>;
+  learned: string;
+  nextQuestions: string[];
 }
 
 export interface ExplorationReview {
@@ -220,6 +247,10 @@ export interface ExplorationReview {
 }
 
 export interface StageReflectionIdea {
+  id?: string;
+  parentIdeaIds?: string[];
+  learning?: string;
+  nextQuestion?: string;
   idea: string;
   significance: string;
   disposition: 'explore' | 'resolved' | 'falsified' | 'deferred' | 'follow_up';
@@ -236,6 +267,16 @@ export interface StageReflection {
   decision: 'proceed' | 'stay' | 'loop';
   targetStageId: string | null;
   nextActions: Array<Record<string, unknown>>;
+  routeSearch?: ResearchRouteSearch;
+  goalAssessment?: GoalAssessment;
+}
+
+export interface ResearchMap {
+  scientificGoal: ScientificGoal | null;
+  goalSha256: string | null;
+  goalRunId: string | null;
+  routes: Array<StageReflectionIdea & { id: string; runId: string; eventId: string; stageId: string; historyEventIds: string[] }>;
+  searches: Array<{ runId: string; eventId: string; stageId: string; search: ResearchRouteSearch }>;
 }
 
 export interface WorkingPlan extends Record<string, unknown> {
@@ -244,6 +285,7 @@ export interface WorkingPlan extends Record<string, unknown> {
   nextActions?: Array<Record<string, unknown>>;
   directoryLayout?: Record<string, unknown>;
   explorationReview?: ExplorationReview;
+  goalAssessment?: GoalAssessment;
 }
 
 export interface TaskSpec {
@@ -261,6 +303,7 @@ export interface ResearchRun {
   objective: string;
   confirmed_envelope: ConfirmedEnvelope;
   confirmed_envelope_sha256: string;
+  scientific_goal_sha256?: string;
   working_plan: WorkingPlan;
   working_plan_sha256: string;
   envelope_revision: number;
@@ -467,6 +510,7 @@ export interface AgentContext {
   task: Task;
   taskRoot: { relative: string | null; absolute: string | null; resolved: boolean };
   run: ResearchRun | null;
+  researchMap?: ResearchMap;
   research: {
     planId: string | null;
     planTitle: string | null;
