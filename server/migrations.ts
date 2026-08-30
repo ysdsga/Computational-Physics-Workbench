@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import type Database from 'better-sqlite3';
 import { WORKFLOWS } from '../src/data/workflows.js';
 
@@ -12,6 +13,9 @@ const THEORETICAL_EXPLORATION_SCHEMA_VERSION = 7;
 const THEORETICAL_STAGE_REFLECTION_SCHEMA_VERSION = 8;
 const THEORETICAL_IDEA_CLOSURE_SCHEMA_VERSION = 9;
 const THEORETICAL_ACTIVE_EXPLORATION_SCHEMA_VERSION = 10;
+const MODEL_DMFT_SOLVER_STEP_SCHEMA_VERSION = 11;
+const THEORETICAL_TOOL_VERIFICATION_SCHEMA_VERSION = 12;
+const THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION = 13;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -114,13 +118,49 @@ function backupBeforeTheoreticalActiveExploration(db: Database.Database, dbPath:
   db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
 }
 
+function backupBeforeModelDmftSolverStep(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-model-dmft-solver-step-v11.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
+function backupBeforeTheoreticalToolVerification(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-theoretical-tool-verification-v12.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
+function backupBeforeTheoreticalLiteratureCoverage(db: Database.Database, dbPath: string): void {
+  if (dbPath === ':memory:') return;
+  const extension = path.extname(dbPath);
+  const backupPath = path.join(
+    path.dirname(dbPath),
+    `${path.basename(dbPath, extension)}.before-theoretical-literature-coverage-v13.db`,
+  );
+  if (fs.existsSync(backupPath)) return;
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  db.exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+}
+
 function tableCount(db: Database.Database, table: string): number {
   return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
 }
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= THEORETICAL_ACTIVE_EXPLORATION_SCHEMA_VERSION) return;
+  if (currentVersion >= THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION) return;
 
   if (currentVersion < JOB_MONITOR_SCHEMA_VERSION) backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -859,4 +899,154 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
       db.pragma(`user_version = ${THEORETICAL_ACTIVE_EXPLORATION_SCHEMA_VERSION}`);
     })();
   }
+
+  if (currentVersion < MODEL_DMFT_SOLVER_STEP_SCHEMA_VERSION) {
+    const workflowId = 'triqs-model-dmft';
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?')
+      .get(workflowId) as { data: string } | undefined;
+    if (stored) backupBeforeModelDmftSolverStep(db, dbPath);
+    db.transaction(() => {
+      if (stored) {
+        let data: { stages?: unknown[]; steps?: Array<{ id?: string; stageId?: string; order?: number }> };
+        try {
+          data = JSON.parse(stored.data) as typeof data;
+        } catch {
+          throw new Error('The triqs-model-dmft workflow template is invalid JSON; database was left unchanged');
+        }
+        if (!Array.isArray(data.stages) || !Array.isArray(data.steps)) {
+          throw new Error('The triqs-model-dmft workflow template is missing stages or steps; database was left unchanged');
+        }
+
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === workflowId);
+        const solverStepId = 'model-dmft-formulation-solver';
+        if (!builtIn?.steps.some(step => step.id === solverStepId)) {
+          throw new Error('The built-in triqs-model-dmft workflow is missing its impurity solver step; database was left unchanged');
+        }
+
+        const previousBuiltInData = {
+          stages: builtIn.stages,
+          steps: builtIn.steps
+            .filter(step => step.id !== solverStepId)
+            .map(step => step.stageId === 'formulation' && step.order > 3
+              ? { ...step, order: step.order - 1 }
+              : step),
+        };
+        if (isDeepStrictEqual(data, previousBuiltInData)) {
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(
+              JSON.stringify({ stages: builtIn.stages, steps: builtIn.steps }),
+              new Date().toISOString(),
+              workflowId,
+            );
+        }
+      }
+      db.pragma(`user_version = ${MODEL_DMFT_SOLVER_STEP_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < THEORETICAL_TOOL_VERIFICATION_SCHEMA_VERSION) {
+    const workflowId = 'theoretical-research';
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?')
+      .get(workflowId) as { data: string } | undefined;
+    if (stored) backupBeforeTheoreticalToolVerification(db, dbPath);
+    db.transaction(() => {
+      if (stored) {
+        let data: { steps?: Array<{ id?: string; description?: string }> };
+        try {
+          data = JSON.parse(stored.data) as typeof data;
+        } catch {
+          throw new Error('The theoretical-research workflow template is invalid JSON; database was left unchanged');
+        }
+        if (!Array.isArray(data.steps)) {
+          throw new Error('The theoretical-research workflow template is missing steps; database was left unchanged');
+        }
+
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === workflowId);
+        if (!builtIn) {
+          throw new Error('The built-in theoretical-research workflow is missing; database was left unchanged');
+        }
+        const previousDescriptions = new Map([
+          [
+            'theory-derivation-02',
+            '完成主要公式和逻辑链，保留关键中间结果，并记录对最终结论有影响的推导分支。',
+          ],
+          [
+            'theory-validation-02',
+            '尽可能采用不同表示、替代推导、符号检查或小规模数值验证关键结论；无法交叉验证的部分必须明确记录。',
+          ],
+        ]);
+        let changed = false;
+        for (const step of data.steps) {
+          const previousDescription = step.id ? previousDescriptions.get(step.id) : undefined;
+          if (!previousDescription || step.description !== previousDescription) continue;
+          const builtInStep = builtIn.steps.find(item => item.id === step.id);
+          if (!builtInStep) continue;
+          step.description = builtInStep.description;
+          changed = true;
+        }
+        if (changed) {
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(data), new Date().toISOString(), workflowId);
+        }
+      }
+      db.pragma(`user_version = ${THEORETICAL_TOOL_VERIFICATION_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION) {
+    const workflowId = 'theoretical-research';
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?')
+      .get(workflowId) as { data: string } | undefined;
+    if (stored) backupBeforeTheoreticalLiteratureCoverage(db, dbPath);
+    db.transaction(() => {
+      if (stored) {
+        let data: { steps?: Array<{ id?: string; description?: string; outputFiles?: string[] }> };
+        try {
+          data = JSON.parse(stored.data) as typeof data;
+        } catch {
+          throw new Error('The theoretical-research workflow template is invalid JSON; database was left unchanged');
+        }
+        if (!Array.isArray(data.steps)) {
+          throw new Error('The theoretical-research workflow template is missing steps; database was left unchanged');
+        }
+
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === workflowId);
+        if (!builtIn) {
+          throw new Error('The built-in theoretical-research workflow is missing; database was left unchanged');
+        }
+        const previousSteps = new Map([
+          ['theory-context-01', {
+            description: '整理严格结果、主流解释、已有解析或数值基准，以及当前理论必须满足的实验事实。',
+            outputFiles: ['literature_constraints.md'],
+          }],
+          ['theory-context-02', {
+            description: '比较已有路线的覆盖范围与矛盾，明确尚未解决的问题，以及本研究准备增加的理论内容。',
+            outputFiles: ['novelty_statement.md'],
+          }],
+          ['theory-context-reflection', {
+            description: '反思前主动从反例、竞争机制、可控极限和可检验预测等方向寻找可能改变、扩展或推翻中心结论的新想法；不设数量指标，不为凑数制造想法，未发现时简要记录已审视的方向。记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出处置。高价值想法只有在引用证据并标记为已解决或已证伪后才闭合；暂缓或转后续任务仍保持未决。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。',
+            outputFiles: ['context_stage_reflection.md'],
+          }],
+        ]);
+        let changed = false;
+        for (const step of data.steps) {
+          const previousStep = step.id ? previousSteps.get(step.id) : undefined;
+          if (!previousStep
+            || step.description !== previousStep.description
+            || !isDeepStrictEqual(step.outputFiles, previousStep.outputFiles)) continue;
+          const builtInStep = builtIn.steps.find(item => item.id === step.id);
+          if (!builtInStep) continue;
+          step.description = builtInStep.description;
+          step.outputFiles = builtInStep.outputFiles;
+          changed = true;
+        }
+        if (changed) {
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(data), new Date().toISOString(), workflowId);
+        }
+      }
+      db.pragma(`user_version = ${THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION}`);
+    })();
+  }
+
 }

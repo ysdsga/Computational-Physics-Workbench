@@ -597,10 +597,10 @@ const THEORETICAL_RESEARCH_STAGES = makeWorkflowStages([
   { id: 'release', name: '成果封装', description: '整理可审计的论证链、完成证据和研究报告' },
 ]);
 
-function theoreticalStageReflectionStep(stageId: string, order: number): WorkflowStep {
+function theoreticalStageReflectionStep(stageId: string, order: number, extraDescription = ''): WorkflowStep {
   return {
     id: `theory-${stageId}-reflection`, stageId, order, name: '记录、反思与下一步判断',
-    description: '反思前主动从反例、竞争机制、可控极限和可检验预测等方向寻找可能改变、扩展或推翻中心结论的新想法；不设数量指标，不为凑数制造想法，未发现时简要记录已审视的方向。记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出处置。高价值想法只有在引用证据并标记为已解决或已证伪后才闭合；暂缓或转后续任务仍保持未决。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。',
+    description: `反思前主动从反例、竞争机制、可控极限和可检验预测等方向寻找可能改变、扩展或推翻中心结论的新想法；不设数量指标，不为凑数制造想法，未发现时简要记录已审视的方向。记录本阶段已经确定的结果、仍存的不确定性以及新出现的关键问题或启发性想法，并逐项给出处置。高价值想法只有在引用证据并标记为已解决或已证伪后才闭合；暂缓或转后续任务仍保持未决。根据影响范围继续前进、停留修正，或回到最早受影响的核心阶段；完整记录追加到 Run 时间线，回流目标和下一步写入 Working Plan。${extraDescription}`,
     outputFiles: [`${stageId}_stage_reflection.md`],
   };
 }
@@ -619,15 +619,15 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   theoreticalStageReflectionStep('question', 3),
   {
     id: 'theory-context-01', stageId: 'context', order: 1, name: '建立文献与基准事实',
-    description: '整理严格结果、主流解释、已有解析或数值基准，以及当前理论必须满足的实验事实。',
-    outputFiles: ['literature_constraints.md'],
+    description: '调用 $literature-research 系统整理严格结果、主流解释、已有解析或数值基准，以及当前理论必须满足的实验事实；覆盖里程碑、近期工作、最接近工作和可信的竞争或限制性证据，并形成逐主张的证据矩阵。',
+    outputFiles: ['literature_constraints.md', 'literature_evidence_matrix.md', 'pending_literature.md'],
   },
   {
     id: 'theory-context-02', stageId: 'context', order: 2, name: '识别理论缺口与研究新增量',
-    description: '比较已有路线的覆盖范围与矛盾，明确尚未解决的问题，以及本研究准备增加的理论内容。',
-    outputFiles: ['novelty_statement.md'],
+    description: '比较已有路线的覆盖范围与矛盾，明确尚未解决的问题，以及本研究准备增加的理论内容。每项中心新增量必须通过 $literature-research 给出最接近的已有工作，并标记为已有、部分已有、本研究新增或与文献冲突；后续中心主张实质变化时回到本步复核。',
+    outputFiles: ['novelty_statement.md', 'novelty_audit.md'],
   },
-  theoreticalStageReflectionStep('context', 3),
+  theoreticalStageReflectionStep('context', 3, '同时审查文献覆盖是否达到当前决策所需的语义饱和：每项中心主张已有最近邻工作、近期证据和竞争解释，独立检索与前后向引文追踪不再产生新的关键机制、研究路线或更接近的前人工作，未获取文献已记录其影响。未满足时停留在本阶段或回到文献调研，不进入模型阶段。'),
   {
     id: 'theory-model-01', stageId: 'model', order: 1, name: '定义自由度与理论结构',
     description: '给出研究对象的自由度、哈密顿量、拉格朗日量或作用量、相互作用结构，以及必要的初始和边界条件。',
@@ -662,7 +662,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   },
   {
     id: 'theory-derivation-02', stageId: 'derivation', order: 2, name: '完成核心推导',
-    description: '完成主要公式和逻辑链，保留关键中间结果，并记录对最终结论有影响的推导分支。',
+    description: '完成主要公式和逻辑链，保留关键中间结果，并记录对最终结论有影响的推导分支。涉及符号代数、群论、复分析、算符代数、约束求解或可数值核查的内容时，调用 $theory-derivation 选择合适工具辅助推导。',
     outputFiles: ['derivation.md'],
   },
   {
@@ -678,7 +678,7 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   },
   {
     id: 'theory-validation-02', stageId: 'validation', order: 2, name: '进行独立交叉验证',
-    description: '尽可能采用不同表示、替代推导、符号检查或小规模数值验证关键结论；无法交叉验证的部分必须明确记录。',
+    description: '尽可能采用不同表示、替代推导、符号检查或小规模数值验证关键结论。对支撑中心结论的可工具化结果，调用 $theory-derivation 完成至少一种独立校验并保存可复查的输入、输出、假设和适用边界；无法交叉验证的部分必须明确记录。',
     outputFiles: ['cross_validation.md'],
   },
   theoreticalStageReflectionStep('validation', 3),
@@ -715,6 +715,102 @@ const THEORETICAL_RESEARCH_STEPS: WorkflowStep[] = [
   theoreticalStageReflectionStep('release', 3),
 ];
 
+// === Generic TRIQS model DMFT ===
+// The workflow defines stable scientific milestones only. Model choices,
+// numerical parameters, convergence thresholds, observables, and comparison
+// matrices belong to the task's Research Plan and Working Plan.
+const TRIQS_MODEL_DMFT_STAGES = makeWorkflowStages([
+  { id: 'model', name: '模型与目标', description: '确认研究方案、计算边界与完成判据' },
+  { id: 'formulation', name: 'DMFT 表述与实现', description: '将研究方案中的模型落实为可验证的 TRIQS DMFT 问题' },
+  { id: 'solve', name: '自洽求解', description: '建立初态、完成 DMFT 自洽并保存收敛解' },
+  { id: 'measurement', name: '收敛态测量', description: '基于收敛解完成研究方案要求的生产测量' },
+  { id: 'validation', name: '一致性与验证', description: '验证数值可靠性、物理一致性和规定的对照' },
+  { id: 'release', name: '结果分析与发布', description: '回答研究问题并形成可复现的完成证据' },
+]);
+
+const TRIQS_MODEL_DMFT_STEPS: WorkflowStep[] = [
+  {
+    id: 'model-dmft-model-01', stageId: 'model', order: 1, name: '确认研究方案与完成判据',
+    description: '确认本任务采用的研究方案、科学边界、目标观测量以及成功、失败和可证伪判据；具体模型与数值选择以研究方案为准。',
+  },
+  {
+    id: 'model-dmft-model-02', stageId: 'model', order: 2, name: '明确模型 DMFT 计算任务',
+    description: '把研究方案转化为本次模型 DMFT 需要完成的计算范围、必要对照和完成证据，不在工作流模板中固化任务专属参数。',
+  },
+  {
+    id: 'model-dmft-model-03', stageId: 'model', order: 3, name: '检查研究方案所需计算环境',
+    description: '检查研究方案指定的软件栈、依赖和运行接口是否可用且相互兼容，确认具备进入模型实现阶段的条件；安装、连接尝试和临时诊断不展开为工作流节点。',
+  },
+  {
+    id: 'model-dmft-formulation-01', stageId: 'formulation', order: 1, name: '构建格点模型',
+    description: '按研究方案实现模型的单粒子部分和格点表示，形成可供 DMFT 局域化计算使用的模型输入。',
+  },
+  {
+    id: 'model-dmft-formulation-02', stageId: 'formulation', order: 2, name: '构建杂质问题',
+    description: '按研究方案建立局域自由度、相互作用和杂质表示，确保其与格点模型及目标物理问题一致。',
+  },
+  {
+    id: 'model-dmft-formulation-solver', stageId: 'formulation', order: 3, name: '建立杂质求解方案',
+    description: '按研究方案准备与杂质问题和目标观测量相适配的 TRIQS 杂质求解方案，确认求解器接口、局域问题表示和测量能力满足本任务；具体方法和数值设置由研究方案及 Working Plan 确定。',
+  },
+  {
+    id: 'model-dmft-formulation-03', stageId: 'formulation', order: 4, name: '建立 DMFT 自洽关系',
+    description: '建立格点局域问题与杂质问题之间的自洽映射；具体方程、约束和控制方式由研究方案确定。',
+  },
+  {
+    id: 'model-dmft-formulation-04', stageId: 'formulation', order: 5, name: '验证模型与 DMFT 实现',
+    description: '在进入正式计算前验证模型映射、TRIQS 实现和必要基准，确认计算对象与研究方案一致。',
+  },
+  {
+    id: 'model-dmft-solve-01', stageId: 'solve', order: 1, name: '准备初始计算状态',
+    description: '按研究方案准备新的初始状态或可靠的重启状态，为目标 DMFT 自洽计算建立明确起点。',
+  },
+  {
+    id: 'model-dmft-solve-02', stageId: 'solve', order: 2, name: '运行 DMFT 自洽计算',
+    description: '完成目标模型的 DMFT 自洽求解；迭代控制、求解器设置和作业安排由研究方案及 Working Plan 给出。',
+  },
+  {
+    id: 'model-dmft-solve-03', stageId: 'solve', order: 3, name: '获得并保存收敛解',
+    description: '依据研究方案规定的判据确认目标物理解收敛，并保存完整迭代历史和可恢复的收敛状态。',
+  },
+  {
+    id: 'model-dmft-measurement-01', stageId: 'measurement', order: 1, name: '准备收敛态生产计算',
+    description: '以已确认的收敛解为基础，准备独立、可追溯的生产测量，冻结本次测量使用的计算条件。',
+  },
+  {
+    id: 'model-dmft-measurement-02', stageId: 'measurement', order: 2, name: '完成目标观测量测量',
+    description: '完成研究方案规定的静态、单粒子或更高阶观测量测量，不在通用模板中预设具体观测量和测量通道。',
+  },
+  {
+    id: 'model-dmft-measurement-03', stageId: 'measurement', order: 3, name: '保存完整原始结果',
+    description: '保存可用于复查和后续分析的原始测量结果、计算状态与必要元数据，保持结果来源可追溯。',
+  },
+  {
+    id: 'model-dmft-validation-01', stageId: 'validation', order: 1, name: '验证计算收敛与数值可靠性',
+    description: '按研究方案验证自洽收敛、统计质量和数值稳定性，确认主要结论不由未控制的数值误差造成。',
+  },
+  {
+    id: 'model-dmft-validation-02', stageId: 'validation', order: 2, name: '验证物理一致性',
+    description: '检查结果应满足的物理约束、内部一致性和适用条件；具体检查项目由模型与研究目标决定。',
+  },
+  {
+    id: 'model-dmft-validation-03', stageId: 'validation', order: 3, name: '完成研究方案规定的对照验证',
+    description: '完成研究方案要求的基准、极限、不同分支或替代设置对照，并记录对中心结论的影响。',
+  },
+  {
+    id: 'model-dmft-release-01', stageId: 'release', order: 1, name: '提取并分析目标物理结果',
+    description: '围绕研究方案定义的目标观测量整理结果，提取控制现象的关联效应、物理趋势和适用范围。',
+  },
+  {
+    id: 'model-dmft-release-02', stageId: 'release', order: 2, name: '回答研究问题与可证伪判据',
+    description: '综合计算、验证和对照证据，说明研究问题得到怎样的回答，以及原有设想是否被支持、限制或否定。',
+  },
+  {
+    id: 'model-dmft-release-03', stageId: 'release', order: 3, name: '整理可复现结果与完成证据',
+    description: '封装模型说明、计算配置、原始结果、分析产物和证据索引，记录限制条件与后续开放问题。',
+  },
+];
+
 // === Workflow Registry ===
 export const WORKFLOWS: WorkflowTemplate[] = [
   {
@@ -737,6 +833,13 @@ export const WORKFLOWS: WorkflowTemplate[] = [
     description: '全势磁性 DFT、dmftproj 投影、Wien2kConverter 与磁性 DMFT',
     stages: WIEN2K_DMFTPROJ_STAGES,
     steps: WIEN2K_DMFTPROJ_STEPS,
+  },
+  {
+    id: 'triqs-model-dmft',
+    name: '模型 DMFT（TRIQS）',
+    description: '以研究方案承载科学细节，从模型构建、自洽求解到验证和成果封装的通用 DMFT 核心骨架',
+    stages: TRIQS_MODEL_DMFT_STAGES,
+    steps: TRIQS_MODEL_DMFT_STEPS,
   },
   {
     id: 'theoretical-research',
