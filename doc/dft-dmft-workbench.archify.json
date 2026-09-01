@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "DFT+DMFT Workbench 系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/ysdsga/DFT-DMFT-Workbench.git",
+      "revision": "afb5dc491334a271e90c7bf7e89037fdec2d17b5"
+    },
+    "viewBox": [1380, 660],
+    "views": [
+      {
+        "id": "observation-path",
+        "label": "Web 观察路径",
+        "focus": ["researcher", "react-ui", "web-api", "sqlite-db", "project-files"],
+        "note": "WebUI 管理项目元数据并观察已记录状态，不启动或授权 Agent 作业。"
+      },
+      {
+        "id": "execution-path",
+        "label": "Codex 执行路径",
+        "focus": ["researcher", "codex-agent", "workbench-cli", "agent-api", "task-root", "hpc-host", "lsf-scheduler"],
+        "note": "真实研究执行经 CLI、确认边界、Task 根和远程 LSF 通道形成可追溯闭环。"
+      },
+      {
+        "id": "safety-boundaries",
+        "label": "数据安全边界",
+        "focus": ["web-api", "agent-api", "sqlite-db", "project-files", "task-root", "hpc-host"],
+        "note": "路径规范化、Confirmed Envelope、Task 写根与不可破坏账本共同保护科研数据。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "researcher",
+      "type": "external",
+      "label": "研究者",
+      "sublabel": "目标、科学决策与明确确认",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 8, "label": "研究者与 Codex" },
+        { "path": "docs/ARCHITECTURE.md", "line": 34, "label": "Envelope 确认" }
+      ],
+      "pos": [25, 260],
+      "size": [160, 68]
+    },
+    {
+      "id": "react-ui",
+      "type": "frontend",
+      "label": "React 工作台",
+      "sublabel": "React 19 · HashRouter · Vite",
+      "sources": [
+        { "path": "src/App.tsx", "line": 17, "end_line": 32, "label": "页面与路由" },
+        { "path": "package.json", "line": 16, "end_line": 26, "label": "前端依赖" }
+      ],
+      "pos": [235, 90],
+      "size": [190, 68]
+    },
+    {
+      "id": "web-api",
+      "type": "backend",
+      "label": "Web 与元数据 API",
+      "sublabel": "Express 5 · REST · 静态 SPA",
+      "sources": [
+        { "path": "server/index.ts", "line": 34, "end_line": 49, "label": "HTTP 路由" },
+        { "path": "server/index.ts", "line": 65, "end_line": 81, "label": "静态托管" }
+      ],
+      "pos": [515, 90],
+      "size": [200, 68]
+    },
+    {
+      "id": "sqlite-db",
+      "type": "database",
+      "label": "SQLite 科研账本",
+      "sublabel": "workbench.db · WAL · 外键",
+      "sources": [
+        { "path": "server/db.ts", "line": 8, "end_line": 17, "label": "数据库与 PRAGMA" },
+        { "path": "server/migrations.ts", "line": 1, "label": "兼容迁移" }
+      ],
+      "pos": [805, 90],
+      "size": [200, 68]
+    },
+    {
+      "id": "project-files",
+      "type": "database",
+      "label": "科研文件与项目目录",
+      "sublabel": "repository/ 与 Project working_dir",
+      "sources": [
+        { "path": "server/routes/files.ts", "line": 14, "end_line": 19, "label": "working_dir 访问" },
+        { "path": "server/services/pathSafety.ts", "line": 62, "end_line": 85, "label": "规范路径边界" }
+      ],
+      "pos": [515, 220],
+      "size": [200, 68]
+    },
+    {
+      "id": "codex-agent",
+      "type": "external",
+      "label": "Codex Agent",
+      "sublabel": "研究规划、诊断、执行与证据判断",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 3, "end_line": 28, "label": "Agent 本体与入口" },
+        { "path": "skills/workbench-agent/SKILL.md", "line": 1, "label": "项目 Agent skill" }
+      ],
+      "pos": [235, 400],
+      "size": [190, 68]
+    },
+    {
+      "id": "workbench-cli",
+      "type": "backend",
+      "label": "workbench CLI",
+      "sublabel": "Context · Plan · Action · Monitor",
+      "sources": [
+        { "path": "bin/workbench.js", "line": 20, "end_line": 72, "label": "CLI 命令面" },
+        { "path": "bin/workbench.js", "line": 100, "end_line": 105, "label": "HTTP 客户端" }
+      ],
+      "pos": [515, 400],
+      "size": [200, 68]
+    },
+    {
+      "id": "agent-api",
+      "type": "security",
+      "label": "Agent API 与执行服务",
+      "sublabel": "Envelope · Action · Job · Event",
+      "sources": [
+        { "path": "server/routes/agent.ts", "line": 37, "end_line": 104, "label": "Agent 契约" },
+        { "path": "server/routes/remote.ts", "line": 14, "end_line": 21, "label": "远程会话 API" },
+        { "path": "server/services/actionExecutor.ts", "line": 182, "end_line": 214, "label": "能力执行规格" }
+      ],
+      "pos": [805, 400],
+      "size": [200, 68]
+    },
+    {
+      "id": "task-root",
+      "type": "database",
+      "label": "本地 Task 根",
+      "sublabel": "输入、脚本、输出与分析产物",
+      "sources": [
+        { "path": "server/services/taskRoots.ts", "line": 45, "label": "Task 根解析" },
+        { "path": "server/services/pathSafety.ts", "line": 62, "end_line": 85, "label": "路径逃逸防护" }
+      ],
+      "pos": [805, 540],
+      "size": [200, 68]
+    },
+    {
+      "id": "hpc-host",
+      "type": "cloud",
+      "label": "远程 HPC 边界",
+      "sublabel": "OpenSSH/SFTP · Task 写根",
+      "sources": [
+        { "path": "server/services/remote.ts", "line": 64, "end_line": 65, "label": "SSH 安全参数" },
+        { "path": "server/services/remote.ts", "line": 308, "end_line": 340, "label": "远程路径与传输" },
+        { "path": "server/services/hpcConfig.ts", "line": 177, "end_line": 187, "label": "Task 远程绑定" }
+      ],
+      "pos": [1130, 400],
+      "size": [200, 68]
+    },
+    {
+      "id": "lsf-scheduler",
+      "type": "messagebus",
+      "label": "LSF 调度与计算",
+      "sublabel": "bsub · bjobs/bhist · bkill",
+      "sources": [
+        { "path": "server/services/remote.ts", "line": 418, "end_line": 477, "label": "提交与核对" },
+        { "path": "server/services/remote.ts", "line": 510, "end_line": 567, "label": "查询与对账" }
+      ],
+      "pos": [1130, 540],
+      "size": [200, 68]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "本地 DFT+DMFT Workbench",
+      "wraps": ["react-ui", "web-api", "sqlite-db", "project-files", "workbench-cli", "agent-api", "task-root"],
+      "pad": 32
+    },
+    {
+      "kind": "security-group",
+      "label": "Confirmed Envelope 与 Task 写根",
+      "wraps": ["agent-api", "task-root"],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "已登记的远程执行边界",
+      "wraps": ["hpc-host", "lsf-scheduler"],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    {
+      "id": "researcher-ui",
+      "from": "researcher",
+      "to": "react-ui",
+      "label": "浏览与维护元数据",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-web-api",
+      "from": "react-ui",
+      "to": "web-api",
+      "label": "HTTP JSON API",
+      "variant": "emphasis",
+      "labelAt": [470, 190]
+    },
+    {
+      "id": "web-api-ledger",
+      "from": "web-api",
+      "to": "sqlite-db",
+      "label": "事务化状态读写",
+      "labelAt": [760, 190]
+    },
+    {
+      "id": "web-api-files",
+      "from": "web-api",
+      "to": "project-files",
+      "label": "受限文件 API",
+      "labelAt": [615, 185]
+    },
+    {
+      "id": "researcher-codex",
+      "from": "researcher",
+      "to": "codex-agent",
+      "label": "研究目标与明确确认",
+      "variant": "emphasis"
+    },
+    {
+      "id": "codex-cli",
+      "from": "codex-agent",
+      "to": "workbench-cli",
+      "label": "doctor · context · plan · monitor",
+      "variant": "security",
+      "labelAt": [470, 375]
+    },
+    {
+      "id": "cli-agent-api",
+      "from": "workbench-cli",
+      "to": "agent-api",
+      "label": "HTTP Agent API",
+      "variant": "security",
+      "labelAt": [760, 375]
+    },
+    {
+      "id": "agent-ledger",
+      "from": "agent-api",
+      "to": "sqlite-db",
+      "label": "Run、Action、Job 与证据账本",
+      "variant": "security",
+      "labelAt": [1045, 300]
+    },
+    {
+      "id": "codex-task-root",
+      "from": "codex-agent",
+      "to": "task-root",
+      "label": "确认边界内本地执行",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "agent-task-root",
+      "from": "agent-api",
+      "to": "task-root",
+      "label": "边界校验与产物登记",
+      "variant": "security",
+      "labelAt": [970, 520]
+    },
+    {
+      "id": "agent-hpc",
+      "from": "agent-api",
+      "to": "hpc-host",
+      "label": "SSH/SFTP 会话与作业控制",
+      "variant": "dashed",
+      "labelAt": [1067, 375]
+    },
+    {
+      "id": "hpc-lsf",
+      "from": "hpc-host",
+      "to": "lsf-scheduler",
+      "label": "提交、查询、日志与取消",
+      "variant": "emphasis",
+      "labelAt": [1230, 520]
+    }
+  ]
+}
