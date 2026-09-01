@@ -34,6 +34,9 @@ coverage/
 /test-results/
 /playwright-report/
 /tmp/
+/.tmp/
+/.codex_patch_probe
+*.visual-check.*
 
 # Editor directories and files
 .vscode/*

@@ -119,8 +119,8 @@ export function createAction(runId: string, input: {
     if (previous.run_id !== runId || previous.stage_id !== stageId || previous.action_type !== actionType) {
       throw new AgentCoreError(409, 'ACTION_RETRY_MISMATCH', 'Retry source must belong to the same Run, stage and Action type');
     }
-    if (!['waiting_codex', 'failed'].includes(previous.status)) {
-      throw new AgentCoreError(409, 'ACTION_RETRY_SOURCE_NOT_FAILED', 'Retry source must be waiting for Codex diagnosis or failed');
+    if (!['waiting_codex', 'failed', 'cancelled'].includes(previous.status)) {
+      throw new AgentCoreError(409, 'ACTION_RETRY_SOURCE_NOT_FAILED', 'Retry source must be waiting for Codex diagnosis, failed, or cancelled as an invalid/replaced Action');
     }
     if (db.prepare('SELECT 1 FROM run_actions WHERE retry_of_action_id = ?').get(retryOfActionId)) {
       throw new AgentCoreError(409, 'ACTION_RETRY_ALREADY_CREATED', 'This Action already has a retry successor');

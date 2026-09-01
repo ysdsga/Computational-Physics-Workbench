@@ -20,8 +20,9 @@ export function canConcludeUncertainSubmissionWasNotAccepted(row: Record<string,
   const previousCandidates = Array.isArray(previous.candidates) ? previous.candidates : null;
   const previousObservedAt = new Date(String(previous.observedAt ?? '')).getTime();
   if (!previousCandidates || previousCandidates.length > 0 || !Number.isFinite(previousObservedAt) || observedAt - previousObservedAt < UNCERTAIN_NO_MATCH_CONFIRMATION_MS) return false;
+  const previousSchedulerExplicitlyReportedNoMatch = /no\s+matching\s+job\s+found/i.test(String(previous.raw ?? ''));
   const transportDetail = `${String(row.submit_stderr ?? '')}\n${String(previous.code ?? '')}\n${String(previous.message ?? '')}`;
-  return /(?:SSH_TIMEOUT|OPENSSH|timed?\s*out|connection|broken\s+pipe)/i.test(transportDetail);
+  return previousSchedulerExplicitlyReportedNoMatch || /(?:SSH_TIMEOUT|OPENSSH|timed?\s*out|connection|broken\s+pipe)/i.test(transportDetail);
 }
 
 export function uncertainNoMatchGraceMinutes(): number {

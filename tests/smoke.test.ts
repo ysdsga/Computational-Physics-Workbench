@@ -601,6 +601,12 @@ test('retry lineage is single-chain and the confirmed retry budget is enforced',
   const branch = await create('retry-branch', original.id); assert.equal(branch.response.status, 409); assert.equal((branch.payload as any).code, 'ACTION_RETRY_ALREADY_CREATED');
   const retry2 = await create('retry-2', (retry1.payload as any).id); assert.equal(retry2.response.status, 201); assert.equal((retry2.payload as any).retry_attempt, 2); await failForRetry((retry2.payload as any).id);
   const retry3 = await create('retry-3', (retry2.payload as any).id); assert.equal(retry3.response.status, 409); assert.equal((retry3.payload as any).code, 'ACTION_RETRY_LIMIT_REACHED');
+
+  const cancelled = (await create('retry-cancelled-0')).payload as any;
+  await api(`/api/agent/v1/actions/${cancelled.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'cancelled', result: { reason: 'Known-invalid Action was stopped before replacement' } }) });
+  const cancelledRetry = await create('retry-cancelled-1', cancelled.id);
+  assert.equal(cancelledRetry.response.status, 201);
+  assert.equal((cancelledRetry.payload as any).retry_attempt, 1);
 });
 
 test('LSF submission is recorded before bsub, sanity checked, and uncertain responses reconcile without resubmission', async () => {
@@ -720,6 +726,122 @@ test('an explicit pre-scheduler rejection is traceable but does not consume the 
   assert.equal(retry.response.status, 201);
   assert.equal((retry.payload as any).retry_attempt, 0);
   remoteModule.setRemoteProcessRunnerForTests(null);
+});
+
+test('pre-scheduler input verification identifies the missing bound path and omits a known login banner', async () => {
+  const fixture = await createFixture('fixture-bound-input-missing');
+  const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-bound-input-missing-run' }) })).payload as any;
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+  fs.mkdirSync(path.join(fixture.taskRoot, 'jobs'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.taskRoot, 'jobs', 'run.lsf'), '#!/bin/sh\n#BSUB -q snode\n#BSUB -n 4\n#BSUB -W 00:10\necho run\n');
+  fs.writeFileSync(path.join(fixture.taskRoot, 'jobs', 'input.toml'), 'value = 1\n');
+
+  const remoteModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'remote.ts')).href);
+  remoteModule.setRemoteProcessRunnerForTests(async (command: string, args: string[]) => {
+    const remoteCommand = args.at(-1) ?? '';
+    if (command === 'ssh' && remoteCommand.includes('WORKBENCH_BOUND_INPUT_MISSING')) {
+      return {
+        code: 76,
+        stdout: '',
+        stderr: 'Welcome to the secure server.\nUnauthorized access is strictly prohibited\nWORKBENCH_BOUND_INPUT_MISSING path=input.toml\n',
+      };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+
+  try {
+    const action = await api(`/api/agent/v1/runs/${draft.id}/executable-actions`, { method: 'POST', body: JSON.stringify({
+      stageId: fixture.stages[1], capability: 'job.submit',
+      spec: {
+        method: 'oneshot-dft-dmft', softwareStack: 'QE+Wannier90+TRIQS', remoteWorkdir: 'jobs',
+        localScriptPath: 'jobs/run.lsf', remoteScriptPath: 'run.lsf',
+        remoteInputs: [{ localPath: 'jobs/input.toml', remotePath: 'input.toml' }], submissionKey: 'missing-bound-input',
+      },
+      idempotencyKey: 'action-missing-bound-input',
+    }) });
+    assert.equal(action.response.status, 201);
+    const executed = await api(`/api/agent/v1/actions/${(action.payload as any).id}/execute`, { method: 'POST', body: '{}' });
+    assert.equal(executed.response.status, 502);
+    assert.equal((executed.payload as any).code, 'REMOTE_COMMAND_FAILED');
+    assert.match((executed.payload as any).error, /WORKBENCH_BOUND_INPUT_MISSING path=input\.toml/);
+    assert.doesNotMatch((executed.payload as any).error, /Unauthorized access/);
+    const context = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+    const job = context.recentJobs.find((item: any) => item.action_id === (action.payload as any).id);
+    assert.equal(job.status, 'preparation_failed');
+    assert.equal(job.job_id, null);
+  } finally {
+    remoteModule.setRemoteProcessRunnerForTests(null);
+  }
+});
+
+test('concurrent observations for one remote Job cannot overwrite a newer terminal state', async () => {
+  const fixture = await createFixture('fixture-remote-observation-race');
+  const draft = (await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-remote-observation-race-run' }) })).payload as any;
+  await api(`/api/agent/v1/runs/${draft.id}/confirm`, { method: 'POST', body: JSON.stringify({ summary: 'confirmed', source: 'codex_conversation' }) });
+  fs.mkdirSync(path.join(fixture.taskRoot, 'jobs'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.taskRoot, 'jobs', 'run.lsf'), '#!/bin/sh\n#BSUB -q snode\n#BSUB -n 4\n#BSUB -W 00:10\necho run\n');
+
+  const remoteModule = await import(pathToFileURL(path.join(ROOT, 'server', 'services', 'remote.ts')).href);
+  let jobName = '';
+  let raceEnabled = false;
+  let observationCount = 0;
+  let activeObservations = 0;
+  let maxActiveObservations = 0;
+  remoteModule.setRemoteProcessRunnerForTests(async (command: string, args: string[]) => {
+    const remoteCommand = args.at(-1) ?? '';
+    if (command === 'ssh' && remoteCommand.includes('bsub -J')) {
+      jobName = remoteCommand.match(/-J\s+'([^']+)'/)?.[1] ?? '';
+      return { code: 0, stdout: 'Job <880> is submitted.\n', stderr: '' };
+    }
+    if (command === 'ssh' && remoteCommand.includes("bjobs -a -noheader -o 'jobid stat job_name'") && !remoteCommand.includes(' -J ')) {
+      if (!raceEnabled) return { code: 0, stdout: `880 RUN ${jobName}\n`, stderr: '' };
+      const index = ++observationCount;
+      activeObservations += 1;
+      maxActiveObservations = Math.max(maxActiveObservations, activeObservations);
+      await new Promise(resolve => setTimeout(resolve, index === 1 ? 50 : 5));
+      activeObservations -= 1;
+      return { code: 0, stdout: `880 ${index === 1 ? 'RUN' : 'DONE'} ${jobName}\n`, stderr: '' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  });
+
+  try {
+    const actionResult = await api(`/api/agent/v1/runs/${draft.id}/executable-actions`, { method: 'POST', body: JSON.stringify({
+      stageId: fixture.stages[1], capability: 'job.submit',
+      spec: { method: 'oneshot-dft-dmft', softwareStack: 'QE+Wannier90+TRIQS', remoteWorkdir: 'jobs/race', localScriptPath: 'jobs/run.lsf', remoteScriptPath: 'run.lsf', submissionKey: 'race' },
+      idempotencyKey: 'action-race',
+    }) });
+    assert.equal(actionResult.response.status, 201);
+    const executed = await api(`/api/agent/v1/actions/${(actionResult.payload as any).id}/execute`, { method: 'POST', body: '{}' });
+    assert.equal(executed.response.status, 200);
+    const context = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+    const job = context.recentJobs.find((item: any) => item.action_id === (actionResult.payload as any).id);
+    assert.equal(job.status, 'run');
+
+    raceEnabled = true;
+    await Promise.all([
+      api(`/api/agent/v1/remote/jobs/${job.id}/status`, { method: 'POST', body: '{}' }),
+      api(`/api/agent/v1/remote/jobs/${job.id}/reconcile`, { method: 'POST', body: '{}' }),
+    ]);
+
+    const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
+    dbModule.default.prepare('UPDATE remote_jobs SET next_check_at = ?, terminal_at = NULL WHERE id = ?')
+      .run('2099-01-01T00:00:00.000Z', job.id);
+    const observationsBeforeTerminalRead = observationCount;
+    const normalizedTerminal = await api(`/api/agent/v1/remote/jobs/${job.id}/status`, { method: 'POST', body: '{}' });
+    assert.equal(normalizedTerminal.response.status, 200);
+    assert.equal((normalizedTerminal.payload as any).status, 'done');
+    assert.equal((normalizedTerminal.payload as any).next_check_at, null);
+    assert.ok((normalizedTerminal.payload as any).terminal_at);
+    assert.equal(observationCount, observationsBeforeTerminalRead, 'terminal status reads must not query the scheduler again');
+
+    const finalContext = (await api(`/api/agent/v1/context/tasks/${fixture.task.id}`)).payload as any;
+    const finalJob = finalContext.recentJobs.find((item: any) => item.id === job.id);
+    assert.equal(maxActiveObservations, 1, 'the same Job must have only one scheduler observation in flight');
+    assert.equal(finalJob.status, 'done', 'a stale RUN observation must never overwrite DONE');
+  } finally {
+    remoteModule.setRemoteProcessRunnerForTests(null);
+  }
 });
 
 test('execution product surface contains no material-specific route', () => {

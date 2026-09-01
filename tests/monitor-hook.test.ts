@@ -50,6 +50,19 @@ test('uncertain submission needs two empty reconciliations and a safety grace be
   assert.equal(canConcludeUncertainSubmissionWasNotAccepted(base, ['700'], observedAt), false);
 });
 
+test('explicit scheduler no-match closes an old uncertain submission even when the original stderr was only a login banner', () => {
+  const observedAt = '2026-08-16T00:10:00.000Z';
+  const base = {
+    status: 'submission_uncertain',
+    job_id: null,
+    created_at: '2026-08-16T00:00:00.000Z',
+    submit_stderr: 'Welcome to the secure server. Unauthorized access is strictly prohibited',
+    last_observation_json: JSON.stringify({ candidates: [], raw: 'No matching job found\n', observedAt: '2026-08-16T00:08:00.000Z' }),
+  };
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted(base, [], observedAt), true);
+  assert.equal(canConcludeUncertainSubmissionWasNotAccepted({ ...base, last_observation_json: JSON.stringify({ candidates: [], raw: '', observedAt: '2026-08-16T00:08:00.000Z' }) }, [], observedAt), false);
+});
+
 test('repo Stop Hook has a Windows command override and stays synchronous', () => {
   const config = JSON.parse(fs.readFileSync(new URL('../.codex/hooks.json', import.meta.url), 'utf8'));
   const hook = config.hooks.Stop[0].hooks[0];
