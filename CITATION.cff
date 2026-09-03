@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it using the metadata below."
+title: "DFT+DMFT Workbench"
+abstract: >-
+  A local-first, agent-operated and human-reviewed research workbench for
+  computational and theoretical physics. It provides traceable research
+  planning, workflow execution, evidence review, reusable experience, and
+  bounded local or HPC operations. DFT+DMFT is the first integrated use case,
+  not the boundary of the system.
+type: software
+authors:
+  - family-names: "Yan"
+    given-names: "Shuai"
+    orcid: "https://orcid.org/0000-0002-3105-1973"
+version: 0.1.0
+repository-code: "https://github.com/ysdsga/DFT-DMFT-Workbench"
+url: "https://github.com/ysdsga/DFT-DMFT-Workbench"
+license: Apache-2.0
+keywords:
+  - computational physics
+  - theoretical physics
+  - scientific agents
+  - human-in-the-loop
+  - research workflow
+  - DFT
+  - DMFT

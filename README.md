@@ -134,6 +134,20 @@ npm run test:e2e
 
 不要在 Issue、日志或测试夹具中提交真实密钥、HPC 地址、用户名、私钥、未公开科研数据或本地数据库。安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
 
+## 如何引用
+
+如果这个软件参与了研究规划、计算执行、证据整理或结果复现，请同时引用：
+
+1. 这个软件及所使用的具体版本；
+2. 研究中实际使用的物理方法、求解器和上游科学软件；
+3. 使用该工具得到的物理成果论文（如果已经发表）。
+
+软件引用元数据见 [CITATION.cff](CITATION.cff)。GitHub 会据此生成 APA 和 BibTeX 引用；首个正式 release 归档到 Zenodo 后，将在这里补充版本 DOI。
+
+当前建议引用为：
+
+> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.0) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
+
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE)。提交贡献即表示你同意按照该许可证提供相应贡献，除非你明确书面声明其他安排。
