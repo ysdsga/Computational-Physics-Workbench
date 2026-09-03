@@ -1,5 +1,7 @@
 # DFT+DMFT Workbench
 
+[English](README.en.md) | 简体中文
+
 > An agent-operated, human-reviewed research workbench for computational and theoretical physics.
 
 这是一个本地优先的科研协作系统：研究者通过对话提出问题、确认科学边界并审阅证据，Codex Agent 负责规划、执行、排错、远程作业监控和可追溯记录。
