@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a focused improvement or new physics workflow capability
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What research or collaboration problem is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the smallest useful outcome, not only a preferred implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: scientific_scope
+    attributes:
+      label: Scientific scope and evidence
+      description: State the methods, assumptions, applicability boundaries, and references or validation evidence.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What existing workflow or workaround have you tried?
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement or test this proposal.

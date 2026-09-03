@@ -1,6 +1,23 @@
 # DFT+DMFT Workbench
 
-一个本地运行的 DFT+DMFT 科研工作台，用于管理材料计算项目、计算任务、工作流步骤、计算文件、经验记录和 HPC/LSF 提交脚本。
+> An agent-operated, human-reviewed research workbench for computational and theoretical physics.
+
+这是一个本地优先的科研协作系统：研究者通过对话提出问题、确认科学边界并审阅证据，Codex Agent 负责规划、执行、排错、远程作业监控和可追溯记录。
+
+DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边界。核心系统面向一般计算物理和理论物理研究，强调 Agent 自主执行、人类关键审阅、科研数据安全以及全过程可追溯。
+
+> **Project status:** `v0.1.0` is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
+
+## 核心思想
+
+传统科研软件通常要求人在图形界面或脚本之间手动组织任务。本项目把工作中心放在研究者与 Agent 的对话协作上：
+
+- **研究者负责承诺和判断**：研究目标、物理假设、资源边界、关键关口和最终结论。
+- **Agent 负责执行和闭环**：制定 Working Plan、调用本地或远程能力、监控作业、诊断失败、整理产物和证据。
+- **Workbench 负责边界和记忆**：强制目录与权限范围，记录 Run、Action、Job、Artifact、Evidence 和可复用经验。
+- **Web 界面负责审阅**：展示已经记录的研究状态，但不充当隐藏的 Agent 或远程执行入口。
+
+完整关系见[交互式系统架构图](doc/dft-dmft-workbench-architecture.html)。
 
 ## 主要功能
 
@@ -100,3 +117,23 @@ npm run test:e2e
 `data/` 中的 SQLite 数据库以及 `repository/` 中的真实科研输入输出不会提交到 Git。它们属于本地用户数据，应单独备份和管理。
 
 项目协作与安全约定见 [AGENTS.md](AGENTS.md)，历史进度见 [progress.md](progress.md)。任务行为、架构变化和设计决定见 [docs/TASKS.md](docs/TASKS.md)、[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和 [docs/DECISIONS.md](docs/DECISIONS.md)；接口、数据字典和完整架构图见 [doc/](doc/)。
+
+## 参与贡献
+
+项目尤其欢迎以下贡献：
+
+- 新的计算物理或理论物理研究工作流；
+- 可复现性、证据评价和不确定度表达；
+- HPC 调度器、科研软件栈和数据传输能力；
+- Agent 安全边界、长任务恢复和失败诊断；
+- 安装体验、文档、测试和科研软件工程。
+
+开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。这是一个志愿维护的早期项目，不承诺固定响应时间；小而完整、带验证证据的贡献最容易被审阅。
+
+## 安全与隐私
+
+不要在 Issue、日志或测试夹具中提交真实密钥、HPC 地址、用户名、私钥、未公开科研数据或本地数据库。安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
+
+## 许可证
+
+本项目采用 [Apache License 2.0](LICENSE)。提交贡献即表示你同意按照该许可证提供相应贡献，除非你明确书面声明其他安排。

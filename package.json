@@ -1,7 +1,26 @@
 {
   "name": "dft-dmft-workbench",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "An agent-operated, human-reviewed research workbench for computational and theoretical physics.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ysdsga/DFT-DMFT-Workbench.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ysdsga/DFT-DMFT-Workbench/issues"
+  },
+  "homepage": "https://github.com/ysdsga/DFT-DMFT-Workbench#readme",
+  "keywords": [
+    "computational-physics",
+    "theoretical-physics",
+    "research-workflow",
+    "human-in-the-loop",
+    "scientific-agents",
+    "dft",
+    "dmft"
+  ],
   "type": "module",
   "bin": {
     "workbench": "bin/workbench.js"
