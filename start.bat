@@ -7,8 +7,9 @@ echo   DFT+DMFT Workbench
 echo ============================================
 echo.
 
-:: Project directory
-set "PROJECT_DIR=D:\DFT+DMFT workbench"
+:: Resolve the project directory from this script's location
+set "PROJECT_DIR=%~dp0"
+if "%PROJECT_DIR:~-1%"=="\" set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 set "PORT=3001"
 
 :: Switch to project directory
@@ -29,20 +30,6 @@ where node >nul 2>&1
 if !errorlevel! equ 0 (
     for /f "delims=" %%i in ('where node') do (
         if not defined NODE_EXE set "NODE_EXE=%%i"
-    )
-)
-
-:: Fallback: WorkBuddy managed node
-if not defined NODE_EXE (
-    if exist "C:\Users\pikaqiu\.workbuddy\binaries\node\versions\22.22.2\node.exe" (
-        set "NODE_EXE=C:\Users\pikaqiu\.workbuddy\binaries\node\versions\22.22.2\node.exe"
-    )
-)
-
-:: Fallback: user node
-if not defined NODE_EXE (
-    if exist "D:\CodexTools\nodejs\node-v22.22.1-win-x64\node.exe" (
-        set "NODE_EXE=D:\CodexTools\nodejs\node-v22.22.1-win-x64\node.exe"
     )
 )
 

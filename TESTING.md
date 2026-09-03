@@ -15,7 +15,7 @@
 ## 命令
 
 ```bash
-cd "D:\DFT+DMFT workbench"
+cd "<path-to-dft-dmft-workbench>"
 npm test              # node --test --import tsx "tests/**/*.test.ts"
 npm run lint          # oxlint（0 errors，10 个历史 warnings）
 npm run typecheck     # 前端与后端 TypeScript
