@@ -17,7 +17,7 @@ export default function Sidebar() {
     <aside className="w-56 bg-[#1a1a2e] border-r border-[#2d2d44] flex flex-col flex-shrink-0">
       <div className="px-5 py-5 border-b border-[#2d2d44]">
         <h1 className="text-base font-bold text-white tracking-wide">
-          DFT+DMFT
+          Computational Physics
         </h1>
         <p className="text-xs text-[#6b6b80] mt-0.5">Workbench</p>
       </div>
