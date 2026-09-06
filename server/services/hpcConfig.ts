@@ -3,6 +3,7 @@ import { AgentCoreError, normalizeRemoteRoot } from './agentCore.js';
 
 const SAFE_ID = /^[A-Za-z0-9._-]{1,160}$/;
 const SAFE_HOST = /^[A-Za-z0-9._-]+$/;
+const SUPPORTED_SCHEDULER = 'LSF';
 
 function requiredText(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -51,6 +52,10 @@ function normalizeProfile(value: unknown): HpcProfile {
   if (!SAFE_ID.test(id)) throw new AgentCoreError(400, 'HPC_PROFILE_ID_INVALID', 'HPC profile id contains unsupported characters');
   const sshAlias = requiredText(input.sshAlias, 'profiles[].sshAlias');
   if (!SAFE_HOST.test(sshAlias)) throw new AgentCoreError(400, 'HPC_SSH_ALIAS_INVALID', 'OpenSSH alias must contain only letters, digits, dot, underscore or hyphen');
+  const scheduler = (optionalText(input.scheduler) || SUPPORTED_SCHEDULER).toUpperCase();
+  if (scheduler !== SUPPORTED_SCHEDULER) {
+    throw new AgentCoreError(400, 'HPC_SCHEDULER_UNSUPPORTED', 'This research preview supports IBM LSF only; Slurm and PBS adapters are not implemented yet');
+  }
 
   const rawUserRoot = optionalText(input.userRoot);
   const rawProjectRoot = optionalText(input.projectRoot);
@@ -66,7 +71,7 @@ function normalizeProfile(value: unknown): HpcProfile {
     id,
     name: requiredText(input.name, 'profiles[].name'),
     sshAlias,
-    scheduler: optionalText(input.scheduler) || 'LSF',
+    scheduler,
     notes: optionalText(input.notes),
   };
   if (rawUserRoot && rawProjectRoot) {

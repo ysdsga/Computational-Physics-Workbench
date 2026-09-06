@@ -10,6 +10,16 @@ DFT+DMFT is the first and currently most complete use case, not the boundary of 
 
 > **Status:** v0.1.0 is an early research preview. Interfaces and data models may change. We welcome physicists, research-software engineers, HPC users, and scientific-agent researchers who want to shape the system through concrete workflows and evidence.
 
+## Supported reference path
+
+This public preview provides one complete reference path:
+
+- Agent client: Codex
+- Remote transport: OpenSSH/SFTP
+- HPC scheduler: IBM LSF
+
+Slurm, PBS, Claude Code, WorkBuddy, and DeepSeek Harness are planned adapter targets and are not officially supported yet. The CLI, HTTP API, execution boundaries, and research ledger are designed as a portable core, while client skills, hooks, long-job wake-ups, and scheduler commands still require host-specific adapters. To prevent accidental submission through the wrong scheduler, this version rejects non-LSF scheduler configurations.
+
 ## Why this project exists
 
 Most research software leaves the researcher to coordinate scripts, interfaces, HPC sessions, intermediate results, and scientific decisions manually. This project makes the researcher-agent conversation the center of that collaboration:

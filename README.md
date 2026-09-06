@@ -10,6 +10,16 @@ DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边�
 
 > **Project status:** `v0.1.0` is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
 
+## 当前支持范围
+
+这个公开预览版提供一条完整的参考路径：
+
+- Agent 客户端：Codex；
+- 远程连接：OpenSSH/SFTP；
+- HPC 调度器：IBM LSF。
+
+Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适配方向，当前尚未正式支持。Workbench 的 CLI、HTTP API、执行边界和科研账本按可移植核心设计，但客户端 Skill、Hook、长作业唤醒以及调度器命令仍需要对应 adapter。为了避免误提交，当前版本会明确拒绝非 LSF 调度器配置。
+
 ## 核心思想
 
 传统科研软件通常要求人在图形界面或脚本之间手动组织任务。本项目把工作中心放在研究者与 Agent 的对话协作上：
