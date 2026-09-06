@@ -33,6 +33,10 @@ function usage(message, code = EXIT.usage) {
   plan metadata --plan <id> --file <json>
   workflow show --task <id>
   workflow update --task <id> --file <json> --expected-sha <sha>
+  workflow template-show --workflow <id>
+  workflow template-patch --workflow <id> --file <json>
+  workflow template-reset --workflow <id>
+  workflow reset-task --task <id> --expected-sha <sha>
 
   run draft --task <id> --plan <id> --task-spec-file <json> --idempotency-key <key>
   run show --run <id>
@@ -87,6 +91,24 @@ function required(name) {
 function readText(name) { return fs.readFileSync(required(name), 'utf8'); }
 function readJson(name) { return JSON.parse(readText(name)); }
 function csvOptional(name) { return typeof flags[name] === 'string' ? flags[name].split(',').map(item => item.trim()).filter(Boolean) : []; }
+
+function applyWorkflowPatch(workflow, patch) {
+  const stages = workflow.stages.map(stage => {
+    const update = (patch.stageUpdates ?? []).find(item => item.id === stage.id);
+    return update ? { ...stage, ...update.changes, id: stage.id } : stage;
+  });
+  const steps = workflow.steps.map(step => {
+    const update = (patch.stepUpdates ?? []).find(item => item.id === step.id);
+    return update ? { ...step, ...update.changes, id: step.id } : step;
+  });
+  for (const update of patch.stageUpdates ?? []) if (!stages.some(stage => stage.id === update.id)) usage(`Workflow stage not found: ${update.id}`);
+  for (const update of patch.stepUpdates ?? []) if (!steps.some(step => step.id === update.id)) usage(`Workflow step not found: ${update.id}`);
+  for (const step of patch.addSteps ?? []) {
+    if (steps.some(item => item.id === step.id)) usage(`Workflow step already exists: ${step.id}`);
+    steps.push(step);
+  }
+  return { ...workflow, stages, steps };
+}
 
 const BLOCKED_CODES = new Set([
   'RUN_NOT_STARTED', 'RUN_NOT_ACTIVE', 'RUN_NOT_CONFIRMED', 'RUN_WAITING_RESEARCHER',
@@ -205,9 +227,21 @@ async function main() {
     if (action === 'metadata') return request('PUT', `/api/research-plans/${plan}`, readJson('file'));
   }
   if (group === 'workflow') {
+    if (action === 'template-show') return request('GET', `/api/workflows/${encodeURIComponent(required('workflow'))}`);
+    if (action === 'template-patch') {
+      const workflow = encodeURIComponent(required('workflow'));
+      const current = await request('GET', `/api/workflows/${workflow}`);
+      return request('PUT', `/api/workflows/${workflow}`, applyWorkflowPatch(current, readJson('file')));
+    }
+    if (action === 'template-reset') return request('POST', `/api/workflows/${encodeURIComponent(required('workflow'))}/reset`, {});
     const task = encodeURIComponent(required('task'));
     if (action === 'show') { const result = await request('GET', `/api/tasks/${task}`); return { ...result.workflow, sha256: result.workflow_sha256 }; }
     if (action === 'update') return request('PUT', `/api/tasks/${task}/workflow`, { ...readJson('file'), expectedWorkflowSha256: required('expected-sha') });
+    if (action === 'reset-task') {
+      const current = await request('GET', `/api/tasks/${task}`);
+      const template = await request('GET', `/api/workflows/${encodeURIComponent(current.workflow_id)}`);
+      return request('PUT', `/api/tasks/${task}/workflow`, { ...template, expectedWorkflowSha256: required('expected-sha') });
+    }
   }
   if (group === 'execution' && action === 'contract') return request('GET', '/api/agent/v1/execution-contract');
   if (group === 'run') {

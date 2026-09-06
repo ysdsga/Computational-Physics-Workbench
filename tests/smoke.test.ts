@@ -107,6 +107,44 @@ async function createFixture(name: string): Promise<Fixture> {
   return { project: configured.payload, task, plan, taskRoot, stages, envelope, spec };
 }
 
+test('workflow template CLI can patch and reset templates and task snapshots', async () => {
+  const workflowId = 'qe-w90-triqs-spontaneous-magnetic-oneshot';
+  const shown = await runCli(['workflow', 'template-show', '--workflow', workflowId]);
+  assert.equal(shown.code, 0, shown.stderr);
+  const originalTemplate = JSON.parse(shown.stdout);
+  const firstStage = originalTemplate.stages[0];
+
+  const patchPath = path.join(tmpRoot, 'workflow-patch.json');
+  fs.writeFileSync(patchPath, JSON.stringify({
+    stageUpdates: [{ id: firstStage.id, changes: { description: 'Temporary CLI test description' } }],
+  }));
+  const patched = await runCli(['workflow', 'template-patch', '--workflow', workflowId, '--file', patchPath]);
+  assert.equal(patched.code, 0, patched.stderr);
+  assert.equal(JSON.parse(patched.stdout).stages[0].description, 'Temporary CLI test description');
+
+  const fixture = await createFixture('workflow-cli');
+  const taskBefore = await api(`/api/projects/${fixture.project.id}/tasks/${fixture.task.id}`);
+  assert.equal(taskBefore.response.status, 200);
+  const taskWorkflow = (taskBefore.payload as any).workflow;
+  taskWorkflow.stages[0].description = 'Task-only temporary description';
+  const taskUpdate = await api(`/api/projects/${fixture.project.id}/tasks/${fixture.task.id}/workflow`, {
+    method: 'PUT',
+    body: JSON.stringify({ ...taskWorkflow, expectedWorkflowSha256: (taskBefore.payload as any).workflow_sha256 }),
+  });
+  assert.equal(taskUpdate.response.status, 200);
+
+  const taskReset = await runCli([
+    'workflow', 'reset-task', '--task', fixture.task.id,
+    '--expected-sha', (taskUpdate.payload as any).sha256,
+  ]);
+  assert.equal(taskReset.code, 0, taskReset.stderr);
+  assert.equal(JSON.parse(taskReset.stdout).stages[0].description, 'Temporary CLI test description');
+
+  const reset = await runCli(['workflow', 'template-reset', '--workflow', workflowId]);
+  assert.equal(reset.code, 0, reset.stderr);
+  assert.equal(JSON.parse(reset.stdout).stages[0].description, firstStage.description);
+});
+
 test('Task Spec gets one confirmation while Working Plan and Actions remain autonomous', async () => {
   const fixture = await createFixture('fixture-a');
   const draftResult = await api('/api/agent/v1/runs', { method: 'POST', body: JSON.stringify({ taskId: fixture.task.id, researchPlanId: fixture.plan.id, taskSpec: fixture.spec, idempotencyKey: 'fixture-a-run' }) });

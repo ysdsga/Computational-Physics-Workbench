@@ -40,7 +40,7 @@ const DFT_DMFT_ONESHOT_STAGES: WorkflowStage[] = [
     color: '#ef4444',
     colorBg: 'rgba(239,68,68,0.12)',
     colorBorder: 'rgba(239,68,68,0.4)',
-    description: '判断计算是否成功，分析物理结果',
+    description: '默认先绘制全部迭代的收敛趋势与最后一轮自能、格林函数；异常时再扩展诊断',
   },
 ];
 
@@ -328,21 +328,21 @@ mpirun -np ${`$`}{NPROCS} python solid_dmft.py dmft_config.ini`,
     id: 'chk-01',
     stageId: 'check',
     order: 1,
-    name: '检查 observables_imp0.dat',
-    description: '查看杂质物理量的演化，判断 DMFT 计算是否收敛以及体系的金属/绝缘特性。',
-    commands: ['cat observables_imp0.dat'],
-    inputFiles: ['observables_imp0.dat'],
-    tips: '关注自能、双占据数、准粒子权重是否稳定。判断体系是金属态还是绝缘态。',
+    name: '绘制全部迭代的收敛与观测量',
+    description: '读取并绘制 conv_imp*.dat 与 observables_imp*.dat（或同类文件）的全部迭代轮次，重点依据最后 5–10 轮作初步稳定性判断。',
+    inputFiles: ['observables_imp*.dat', 'conv_imp*.dat', 'conv_obs*.dat'],
+    outputFiles: ['dmft_recent_convergence.png', 'dmft_recent_observables.png'],
+    tips: '图必须覆盖全部轮次；判断重点放在最后 5–10 轮，只报告趋于稳定、仍振荡/漂移或数据不足。',
   },
   {
     id: 'chk-02',
     stageId: 'check',
     order: 2,
-    name: '检查 conv_imp0.dat',
-    description: '查看自洽误差的收敛行为，确认误差是否真正下降或进入稳定平台。',
-    commands: ['cat conv_imp0.dat'],
-    inputFiles: ['conv_imp0.dat', 'conv_obs0.dat'],
-    tips: '自洽误差应单调下降或在某个小值附近波动。如果发散或振荡过大，需要检查参数。',
+    name: '绘制最后一轮自能与格林函数',
+    description: '从主 HDF5 结果提取最后一轮自能和杂质/局域格林函数，按轨道与自旋绘图并保存。',
+    inputFiles: ['*.h5'],
+    outputFiles: ['dmft_last_sigma.png', 'dmft_last_gimp.png'],
+    tips: '完成这两类图后默认停止。只有图中异常、文件矛盾、正式验收或研究者明确要求时，才追加因果性、全频率、跨副本或离线重放等诊断。',
   },
 ];
 
@@ -369,7 +369,7 @@ const QE_W90_SPONTANEOUS_STAGES = makeWorkflowStages([
   { id: 'dft_nm', name: '非磁 QE 计算', description: '结构、SCF、NSCF、能带和投影态密度' },
   { id: 'wannier_nm', name: 'Wannier90 计算', description: 'Wannier 投影、QE 接口转换和能带验证' },
   { id: 'dmft', name: 'TRIQS DMFT 计算', description: 'DFTTools 转换、基线计算和自发磁性 one-shot DMFT' },
-  { id: 'check', name: '结果检查', description: '检查收敛、磁性状态和主要物理结果' },
+  { id: 'check', name: '结果检查', description: '默认先绘制全部迭代的收敛趋势与最后一轮自能、格林函数；异常时再扩展诊断' },
 ]);
 
 const QE_W90_SPONTANEOUS_STEPS: WorkflowStep[] = [
@@ -467,17 +467,22 @@ const QE_W90_SPONTANEOUS_STEPS: WorkflowStep[] = [
     inputFiles: ['dmft_magnetic.toml', 'seedname.h5'], outputFiles: ['observables_imp*.dat', 'conv_imp*.dat'],
   },
   {
-    id: 'qenm-check-01', stageId: 'check', order: 1, name: '检查 DMFT 收敛',
-    description: '检查迭代误差、占据、自能和主要杂质观测量，确认计算稳定且物理量合理。',
-    inputFiles: ['observables_imp*.dat', 'conv_imp*.dat'],
+    id: 'qenm-check-01', stageId: 'check', order: 1, name: '绘制全部迭代的收敛与观测量',
+    description: '读取并绘制 conv_imp*.dat 与 observables_imp*.dat（或同类文件）的全部迭代轮次，重点依据最后 5–10 轮作初步稳定性判断。',
+    inputFiles: ['observables_imp*.dat', 'conv_imp*.dat', 'conv_obs*.dat'],
+    outputFiles: ['dmft_recent_convergence.png', 'dmft_recent_observables.png'],
+    tips: '图必须覆盖全部轮次；判断重点放在最后 5–10 轮，只报告趋于稳定、仍振荡/漂移或数据不足。',
   },
   {
-    id: 'qenm-check-02', stageId: 'check', order: 2, name: '检查自发磁性结果',
-    description: '比较基线与磁性计算的磁矩和自旋分辨物理量，判断是否形成研究方案预期的磁性状态。',
+    id: 'qenm-check-02', stageId: 'check', order: 2, name: '绘制最后一轮自能与格林函数',
+    description: '从主 HDF5 结果提取最后一轮自能和杂质/局域格林函数，按轨道与自旋绘图并保存。',
+    inputFiles: ['*.h5'],
+    outputFiles: ['dmft_last_sigma.png', 'dmft_last_gimp.png'],
+    tips: '完成快速图后默认停止；仅在图中异常、文件矛盾、正式验收或研究者明确要求时升级诊断。',
   },
   {
     id: 'qenm-check-03', stageId: 'check', order: 3, name: '整理电子结构结果',
-    description: '按研究目标整理占据、自能、谱函数和其他必要结果，记录本次计算使用的输入与配置。',
+    description: '基于快速图记录初步结论和计算配置；不要在没有触发条件时自动生成扩展审计。',
     outputFiles: ['results_summary.md'],
   },
 ];
@@ -488,7 +493,7 @@ const WIEN2K_DMFTPROJ_STAGES = makeWorkflowStages([
   { id: 'wien', name: 'WIEN2k DFT 计算', description: '初始化、结构优化、自旋计算、能带和态密度' },
   { id: 'projector', name: 'dmftproj 投影', description: '准备投影输入、生成局域轨道并检查投影结果' },
   { id: 'dmft', name: 'TRIQS DMFT 计算', description: 'DFTTools 转换、DMFT 配置和 one-shot 计算' },
-  { id: 'check', name: '结果检查', description: '检查收敛、磁性状态和主要物理结果' },
+  { id: 'check', name: '结果检查', description: '默认先绘制全部迭代的收敛趋势与最后一轮自能、格林函数；异常时再扩展诊断' },
 ]);
 
 const WIEN2K_DMFTPROJ_STEPS: WorkflowStep[] = [
@@ -570,17 +575,22 @@ const WIEN2K_DMFTPROJ_STEPS: WorkflowStep[] = [
     inputFiles: ['dmft_config.toml', 'case.h5'], outputFiles: ['observables_imp*.dat', 'conv_imp*.dat'],
   },
   {
-    id: 'wien-check-01', stageId: 'check', order: 1, name: '检查 DMFT 收敛',
-    description: '检查迭代误差、占据、自能和主要杂质观测量，确认计算稳定且物理量合理。',
-    inputFiles: ['observables_imp*.dat', 'conv_imp*.dat'],
+    id: 'wien-check-01', stageId: 'check', order: 1, name: '绘制全部迭代的收敛与观测量',
+    description: '读取并绘制 conv_imp*.dat 与 observables_imp*.dat（或同类文件）的全部迭代轮次，重点依据最后 5–10 轮作初步稳定性判断。',
+    inputFiles: ['observables_imp*.dat', 'conv_imp*.dat', 'conv_obs*.dat'],
+    outputFiles: ['dmft_recent_convergence.png', 'dmft_recent_observables.png'],
+    tips: '图必须覆盖全部轮次；判断重点放在最后 5–10 轮，只报告趋于稳定、仍振荡/漂移或数据不足。',
   },
   {
-    id: 'wien-check-02', stageId: 'check', order: 2, name: '检查磁性与电子状态',
-    description: '检查局域磁矩、自旋分辨占据、自能和金属或绝缘特征，判断是否得到研究方案预期的物理状态。',
+    id: 'wien-check-02', stageId: 'check', order: 2, name: '绘制最后一轮自能与格林函数',
+    description: '从主 HDF5 结果提取最后一轮自能和杂质/局域格林函数，按轨道与自旋绘图并保存。',
+    inputFiles: ['*.h5'],
+    outputFiles: ['dmft_last_sigma.png', 'dmft_last_gimp.png'],
+    tips: '完成快速图后默认停止；仅在图中异常、文件矛盾、正式验收或研究者明确要求时升级诊断。',
   },
   {
     id: 'wien-check-03', stageId: 'check', order: 3, name: '整理电子结构结果',
-    description: '按研究目标整理占据、自能、谱函数和其他必要结果，记录本次计算使用的输入与配置。',
+    description: '基于快速图记录初步结论和计算配置；不要在没有触发条件时自动生成扩展审计。',
     outputFiles: ['results_summary.md'],
   },
 ];
