@@ -8,7 +8,7 @@ DFT+DMFT Workbench is a local-first research collaboration system. A researcher 
 
 DFT+DMFT is the first and currently most complete use case, not the boundary of the system. The core is intended for broader computational and theoretical physics workflows.
 
-> **Status:** v0.1.0 is an early research preview. Interfaces and data models may change. We welcome physicists, research-software engineers, HPC users, and scientific-agent researchers who want to shape the system through concrete workflows and evidence.
+> **Status:** This is an early research preview. Interfaces and data models may change. We welcome physicists, research-software engineers, HPC users, and scientific-agent researchers who want to shape the system through concrete workflows and evidence.
 
 ## Supported reference path
 

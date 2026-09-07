@@ -8,7 +8,7 @@
 
 DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边界。核心系统面向一般计算物理和理论物理研究，强调 Agent 自主执行、人类关键审阅、科研数据安全以及全过程可追溯。
 
-> **Project status:** `v0.1.0` is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
+> **Project status:** This is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
 
 ## 当前支持范围
 
