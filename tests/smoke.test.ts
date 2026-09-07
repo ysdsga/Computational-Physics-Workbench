@@ -58,8 +58,8 @@ after(async () => {
 });
 
 test('server, schema v14 and CLI doctor start on disposable state', async () => {
-  const root = await fetch(`${base}/`);
-  assert.equal(root.status, 200);
+  const workflows = await fetch(`${base}/api/workflows`);
+  assert.equal(workflows.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);

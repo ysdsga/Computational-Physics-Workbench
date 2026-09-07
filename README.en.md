@@ -77,7 +77,7 @@ This is an early-stage volunteer project with no guaranteed response time. Small
 
 If the workbench contributes to research planning, execution, evidence management, or reproducibility, cite the software version in addition to the physical methods and scientific software used. Citation metadata is available in [CITATION.cff](CITATION.cff).
 
-> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.0) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
+> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
 
 A version DOI will be added after the first release is archived with Zenodo.
 

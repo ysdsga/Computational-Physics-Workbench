@@ -1,6 +1,18 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeHpcConfig } from '../server/services/hpcConfig.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-hpc-config-'));
+process.env.WORKBENCH_DB_PATH = path.join(tempRoot, 'test.db');
+const { normalizeHpcConfig } = await import('../server/services/hpcConfig.js');
+
+after(async () => {
+  const { closeDb } = await import('../server/db.js');
+  closeDb();
+  fs.rmSync(tempRoot, { recursive: true, force: true });
+});
 
 function profile(scheduler: string) {
   return {

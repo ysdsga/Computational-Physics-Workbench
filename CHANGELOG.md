@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-09-07
+
+### Fixed
+
+- Fresh source checkouts create the ignored runtime database directory automatically on first start.
+- The test suite no longer requires a prebuilt `dist/index.html`, and isolated HPC configuration tests use a disposable database.
+
 ## [0.1.0] - 2026-09-07
 
 Initial public research preview.

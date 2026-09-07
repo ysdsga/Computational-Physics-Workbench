@@ -12,7 +12,7 @@ authors:
   - family-names: "Yan"
     given-names: "Shuai"
     orcid: "https://orcid.org/0000-0002-3105-1973"
-version: 0.1.0
+version: 0.1.1
 repository-code: "https://github.com/ysdsga/DFT-DMFT-Workbench"
 url: "https://github.com/ysdsga/DFT-DMFT-Workbench"
 license: Apache-2.0

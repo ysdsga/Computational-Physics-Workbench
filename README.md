@@ -158,7 +158,7 @@ npm run test:e2e
 
 当前建议引用为：
 
-> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.0) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
+> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
 
 ## 许可证
 
