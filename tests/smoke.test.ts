@@ -57,14 +57,14 @@ after(async () => {
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
 });
 
-test('server, schema v14 and CLI doctor start on disposable state', async () => {
+test('server, schema v15 and CLI doctor start on disposable state', async () => {
   const workflows = await fetch(`${base}/api/workflows`);
   assert.equal(workflows.status, 200);
   const doctor = await runCli(['doctor']);
   assert.equal(doctor.code, 0, doctor.stderr);
   assert.equal(JSON.parse(doctor.stdout).runtimeSchemaVersion, 4);
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
-  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 14);
+  assert.equal(dbModule.default.pragma('user_version', { simple: true }), 15);
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-essential-v3.db')));
   assert.ok(fs.existsSync(path.join(tmpRoot, 'test.before-job-monitor-v6.db')));
 });

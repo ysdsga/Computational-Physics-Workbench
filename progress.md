@@ -1,7 +1,7 @@
-# DFT+DMFT Workbench 当前状态
+# Computational Physics Workbench 当前状态
 
-> 核对日期：2026-08-30
-> 当前代码与正式库：Essential Workbench V3 / SQLite schema v14；当前常驻后端尚待维护重启加载新执行逻辑。
+> 核对日期：2026-09-07
+> 当前代码：Essential Workbench V3 / SQLite schema v15；正式库未在本轮迁移（此前记录为 v14），启动新版服务时将先备份再执行保守迁移。
 
 ## 2026-08-30：理论研究外循环（正式模板已迁移）
 
@@ -33,7 +33,7 @@
 - 自动重试必须显式 `--retry-of`，形成不可分叉谱系并由 Envelope `maxAutomaticRetries` 硬性限制。
 - Agent 运行记录、待沟通事项、超算管理、证据库、经验库均已分离；Agent Web 面只观察，不执行。
 - Artifact 支持 valid/suspect/invalid/superseded；Experience 支持 manual/candidate/confirmed、适用边界与来源。
-- 唯一 `workbench-agent` skill 与 `workbench` CLI 已升级为 V3 恢复/纠错/自治协议。
+- 核心执行 Skill `workbench-agent` 与 `workbench` CLI 已升级为 V3 恢复/纠错/自治协议；仓库同时提供 `literature-research` 与 `theory-derivation` 科学能力。
 - 理论研究模板在每个阶段加入追加式记录与反思；支持不限次数的 `stay/loop/proceed`，并以完成守卫确保回流后的阶段重新闭环。
 
 ## 验证基线

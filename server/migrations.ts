@@ -18,6 +18,7 @@ const MODEL_DMFT_SOLVER_STEP_SCHEMA_VERSION = 11;
 const THEORETICAL_TOOL_VERIFICATION_SCHEMA_VERSION = 12;
 const THEORETICAL_LITERATURE_COVERAGE_SCHEMA_VERSION = 13;
 const THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION = 14;
+const MODEL_DMFT_VALIDATION_SCHEMA_VERSION = 15;
 
 function columnExists(db: Database.Database, table: string, column: string): boolean {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -162,7 +163,7 @@ function tableCount(db: Database.Database, table: string): number {
 
 export function runMigrations(db: Database.Database, dbPath: string): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion >= THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION) return;
+  if (currentVersion >= MODEL_DMFT_VALIDATION_SCHEMA_VERSION) return;
 
   if (currentVersion < JOB_MONITOR_SCHEMA_VERSION) backupBeforeAgentV1(db, dbPath);
   if (currentVersion < 1) db.transaction(() => {
@@ -1065,6 +1066,66 @@ export function runMigrations(db: Database.Database, dbPath: string): void {
         if (!isDeepStrictEqual(data, updated)) db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(updated), new Date().toISOString(), 'theoretical-research');
       }
       db.pragma(`user_version = ${THEORETICAL_RESEARCH_LOOP_SCHEMA_VERSION}`);
+    })();
+  }
+
+  if (currentVersion < MODEL_DMFT_VALIDATION_SCHEMA_VERSION) {
+    const workflowId = 'triqs-model-dmft';
+    const stored = db.prepare('SELECT data FROM workflow_templates WHERE id = ?').get(workflowId) as { data: string } | undefined;
+    if (stored && dbPath !== ':memory:') {
+      const backupPath = path.join(path.dirname(dbPath), path.basename(dbPath, path.extname(dbPath)) + '.before-model-dmft-validation-v15.db');
+      if (!fs.existsSync(backupPath)) db.exec("VACUUM INTO '" + backupPath.replace(/'/g, "''") + "'");
+    }
+    db.transaction(() => {
+      if (stored) {
+        const data = JSON.parse(stored.data) as {
+          stages?: Array<{ id?: string; description?: string }>;
+          steps?: Array<{ id?: string; name?: string; description?: string }>;
+        };
+        if (!Array.isArray(data.stages) || !Array.isArray(data.steps)) {
+          throw new Error('The triqs-model-dmft workflow template is missing stages or steps; database was left unchanged');
+        }
+        const builtIn = WORKFLOWS.find(workflow => workflow.id === workflowId);
+        if (!builtIn) throw new Error('The built-in triqs-model-dmft workflow is missing; database was left unchanged');
+
+        let changed = false;
+        const validationStage = data.stages.find(stage => stage.id === 'validation');
+        const builtInValidationStage = builtIn.stages.find(stage => stage.id === 'validation');
+        const previousStageDescription = '验证数值可靠性、物理一致性和规定的对照';
+        if (validationStage?.description === previousStageDescription && builtInValidationStage) {
+          validationStage.description = builtInValidationStage.description;
+          changed = true;
+        }
+
+        const previousSteps = new Map([
+          ['model-dmft-validation-01', {
+            name: '验证计算收敛与数值可靠性',
+            description: '按研究方案验证自洽收敛、统计质量和数值稳定性，确认主要结论不由未控制的数值误差造成。',
+          }],
+          ['model-dmft-validation-02', {
+            name: '验证物理一致性',
+            description: '检查结果应满足的物理约束、内部一致性和适用条件；具体检查项目由模型与研究目标决定。',
+          }],
+          ['model-dmft-validation-03', {
+            name: '完成研究方案规定的对照验证',
+            description: '完成研究方案要求的基准、极限、不同分支或替代设置对照，并记录对中心结论的影响。',
+          }],
+        ]);
+        for (const step of data.steps) {
+          const previous = step.id ? previousSteps.get(step.id) : undefined;
+          if (!previous || step.name !== previous.name || step.description !== previous.description) continue;
+          const builtInStep = builtIn.steps.find(item => item.id === step.id);
+          if (!builtInStep) continue;
+          step.name = builtInStep.name;
+          step.description = builtInStep.description;
+          changed = true;
+        }
+        if (changed) {
+          db.prepare('UPDATE workflow_templates SET data = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(data), new Date().toISOString(), workflowId);
+        }
+      }
+      db.pragma('user_version = ' + MODEL_DMFT_VALIDATION_SCHEMA_VERSION);
     })();
   }
 }

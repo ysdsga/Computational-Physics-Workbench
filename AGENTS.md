@@ -1,4 +1,4 @@
-# DFT+DMFT Workbench — Codex 项目指南
+# Computational Physics Workbench — Codex 项目指南
 
 ## 项目目标
 

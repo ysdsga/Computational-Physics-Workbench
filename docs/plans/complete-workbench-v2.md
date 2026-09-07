@@ -1,4 +1,4 @@
-# DFT+DMFT Workbench V2：Codex 驱动的完整纵向闭环实施计划
+# Computational Physics Workbench V2：Codex 驱动的完整纵向闭环实施计划
 
 > 状态：步骤 1～6 已完成；工作流骨架、研究方案采用快照、Agent 运行记录、待沟通筛选、超算管理、证据/经验分离和 Codex 经验检索/沉淀反馈已落实；步骤 7 的正式数据库备份与 schema v4 迁移已完成，真实 HPC pilot 未授权、未执行  
 > 调查与修订日期：2026-08-15  
@@ -47,7 +47,7 @@ V1 已把合同、上下文、policy、账本、评价和受控 OpenSSH/LSF 原�
 
 - 数据与迁移：`server/db.ts`、`server/migrations.ts`。
 - Agent/执行服务：`server/services/agentCore.ts`、`agentActions.ts`、`actionExecutor.ts`、`remote.ts`、`pathSafety.ts`；不新增材料或软件栈专用 adapter。
-- Codex 工具入口：`bin/workbench.js`、`skills/workbench-agent/SKILL.md`、`skills/workbench-agent/agents/openai.yaml`，以及必要的只读/写入 API。
+- Codex 工具入口：`bin/workbench.js`、`.agents/skills/workbench-agent/SKILL.md`、`.agents/skills/workbench-agent/agents/openai.yaml`，以及必要的只读/写入 API。
 - Web 读模型：`src/types/index.ts`、`src/api/client.ts`、`AgentRunsPage.tsx`、`ReviewCenterPage.tsx`、`ExperiencePage.tsx`、任务工作流组件。
 - 验证与说明：`tests/`、`TESTING.md`、`README.md`、`docs/`、`doc/`、`AGENTS.md`。不进行无关的全仓 DAO 或视觉系统重构。
 

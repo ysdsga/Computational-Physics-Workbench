@@ -91,8 +91,8 @@ const server = app.listen(PORT, HOST, () => {
   const address = server.address();
   if (!address || typeof address === 'string') return;
   const actualPort = address.port;
-  console.log(`[DFT+DMFT Workbench] Server running at http://${HOST}:${actualPort}`);
-  console.log(`[DFT+DMFT Workbench] 按 Ctrl+C 停止服务`);
+  console.log(`[Computational Physics Workbench] Server running at http://${HOST}:${actualPort}`);
+  console.log(`[Computational Physics Workbench] 按 Ctrl+C 停止服务`);
 });
 
 // Exported for tests (smoke tests import this module and manage the server)
@@ -104,7 +104,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
     console.error('============================================');
     console.error(`  [错误] 端口 ${PORT} 已被占用！`);
     console.error('============================================');
-    console.error('  可能原因：另一个 DFT+DMFT Workbench 实例正在运行。');
+    console.error('  可能原因：另一个 Computational Physics Workbench 实例正在运行。');
     console.error('  解决方法：关闭其他实例后重试。');
     console.error('');
   } else {

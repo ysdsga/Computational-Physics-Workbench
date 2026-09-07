@@ -766,7 +766,11 @@ const TRIQS_MODEL_DMFT_STAGES = makeWorkflowStages([
   { id: 'formulation', name: 'DMFT 表述与实现', description: '将研究方案中的模型落实为可验证的 TRIQS DMFT 问题' },
   { id: 'solve', name: '自洽求解', description: '建立初态、完成 DMFT 自洽并保存收敛解' },
   { id: 'measurement', name: '收敛态测量', description: '基于收敛解完成研究方案要求的生产测量' },
-  { id: 'validation', name: '一致性与验证', description: '验证数值可靠性、物理一致性和规定的对照' },
+  {
+    id: 'validation',
+    name: '一致性与验证',
+    description: '按固定顺序先验证完整迭代历史是否进入稳定平台，再检查末轮自能与格林函数的物理合理性；仅在异常、矛盾、正式验收或研究方案要求时升级扩展诊断',
+  },
   { id: 'release', name: '结果分析与发布', description: '回答研究问题并形成可复现的完成证据' },
 ]);
 
@@ -828,16 +832,16 @@ const TRIQS_MODEL_DMFT_STEPS: WorkflowStep[] = [
     description: '保存可用于复查和后续分析的原始测量结果、计算状态与必要元数据，保持结果来源可追溯。',
   },
   {
-    id: 'model-dmft-validation-01', stageId: 'validation', order: 1, name: '验证计算收敛与数值可靠性',
-    description: '按研究方案验证自洽收敛、统计质量和数值稳定性，确认主要结论不由未控制的数值误差造成。',
+    id: 'model-dmft-validation-01', stageId: 'validation', order: 1, name: '绘制完整迭代历史并判断稳定平台',
+    description: '每次完成 DMFT 计算后，首先读取并绘制全部可用迭代轮次的收敛量与主要观测量；结合完整历史并重点检查末 5–10 轮，判断结果是已进入稳定平台、仍在漂移或振荡，还是数据不足。不得只选择有利的局部轮次，也不得仅凭达到预设迭代数宣称收敛。',
   },
   {
-    id: 'model-dmft-validation-02', stageId: 'validation', order: 2, name: '验证物理一致性',
-    description: '检查结果应满足的物理约束、内部一致性和适用条件；具体检查项目由模型与研究目标决定。',
+    id: 'model-dmft-validation-02', stageId: 'validation', order: 2, name: '绘制末轮自能和格林函数并检查物理合理性',
+    description: '在完整迭代历史显示已进入稳定平台后，从同一末轮结果绘制自能和杂质/局域格林函数的实部与虚部，并检查因果性、平滑性、高频渐近行为、对称关系和不同数据文件的一致性。只有收敛趋势与末轮单粒子量都合理，才能把该结果作为候选收敛解。',
   },
   {
-    id: 'model-dmft-validation-03', stageId: 'validation', order: 3, name: '完成研究方案规定的对照验证',
-    description: '完成研究方案要求的基准、极限、不同分支或替代设置对照，并记录对中心结论的影响。',
+    id: 'model-dmft-validation-03', stageId: 'validation', order: 3, name: '按需升级扩展验证与对照',
+    description: '默认完成前两项快速验收后停止。只有收敛图或末轮自能/格林函数出现异常、关键文件互相矛盾、任务进入正式验收/发表证据阶段，或研究方案明确要求时，才追加噪声底、全频率矩阵因果性、独立种子、窗口扫描、分支对照等针对性测试；先说明触发异常与最小追加检查。',
   },
   {
     id: 'model-dmft-release-01', stageId: 'release', order: 1, name: '提取并分析目标物理结果',
@@ -850,6 +854,159 @@ const TRIQS_MODEL_DMFT_STEPS: WorkflowStep[] = [
   {
     id: 'model-dmft-release-03', stageId: 'release', order: 3, name: '整理可复现结果与完成证据',
     description: '封装模型说明、计算配置、原始结果、分析产物和证据索引，记录限制条件与后续开放问题。',
+  },
+];
+
+// === Physics literature reproduction ===
+// The workflow keeps the claim-level scientific skeleton shared by analytical
+// theory, numerical model studies, and material calculations. Paper-specific
+// equations, parameters, tolerances, software, and run matrices belong to the
+// Research Plan and Working Plan.
+const PHYSICS_LITERATURE_REPRODUCTION_STAGES = makeWorkflowStages([
+  { id: 'scope', name: '范围与判据', description: '固定论文身份、复现动机、目标层级、独立性与声明边界' },
+  { id: 'claims', name: '主张拆解', description: '把论文结论拆成可检验主张、依赖关系和类型化复现路线' },
+  { id: 'resources', name: '资源与出处', description: '冻结正文、补充材料、代码、数据、参数出处与缺失信息' },
+  { id: 'specification', name: '可执行规格', description: '将论文方法转写为带约定、参数来源、运行矩阵和证据映射的规格' },
+  { id: 'pilot', name: '最小闭环', description: '先验证环境、观测量管线和最小主张路径，再进入正式复现' },
+  { id: 'reproduction', name: '正式复现', description: '按冻结协议执行目标主张，保存原始结果、完整历史和偏离记录' },
+  { id: 'validation', name: '对比与验证', description: '进行正确性、独立性、可比性和不确定度检查，逐项裁决主张' },
+  { id: 'release', name: '封装与结论', description: '整理可重跑产物、逐主张证据链、限制和研究者审阅结论' },
+]);
+
+const PHYSICS_LITERATURE_REPRODUCTION_STEPS: WorkflowStep[] = [
+  {
+    id: 'repro-scope-01', stageId: 'scope', order: 1, name: '确认论文身份与复现动机',
+    description: '记录论文题名、作者、DOI 或稳定标识、版本、补充材料与勘误，并说明为何复现及它与当前研究的关系。预印本、正式版本和后续修订不得混为同一来源。',
+    outputFiles: ['paper_identity.md'],
+  },
+  {
+    id: 'repro-scope-02', stageId: 'scope', order: 2, name: '选择复现深度与独立性模式',
+    description: '分别选择复现深度（可运行性、核心机制、关键主张、完整结果或后续基线）和独立性模式（原作者产物复跑、独立重建或双路线交叉验证）。两者是独立维度，不用复跑成功代替独立复现。',
+    outputFiles: ['reproduction_scope.md'],
+  },
+  {
+    id: 'repro-scope-03', stageId: 'scope', order: 3, name: '定义完成、降级与声明边界',
+    description: '预先规定完成证据、可比条件、允许误差和不能作为证据的结果；说明资源缺失时如何降级目标。复现完成、部分复现、未复现和条件不足无法判断必须区分，不承诺得到与论文一致的结论。',
+    outputFiles: ['completion_and_claim_boundaries.md'],
+  },
+  {
+    id: 'repro-claims-01', stageId: 'claims', order: 1, name: '建立逐主张复现台账',
+    description: '为每项目标建立稳定 claim_id，记录其在论文中的位置、主张类型、控制条件、目标观测量、原文结果、验收容差和所需证据。图、表、公式、相边界、标度、趋势和机制解释应拆开记录。',
+    outputFiles: ['claim_ledger.csv', 'claim_ledger.md'],
+  },
+  {
+    id: 'repro-claims-02', stageId: 'claims', order: 2, name: '重建主张依赖与论证链',
+    description: '连接模型假设、推导或算法、参数与输入、原始观测量、后处理和最终主张，标出共同上游依赖。相关图像同时成功不能被误当作多份独立证据。',
+    outputFiles: ['claim_dependency_map.md'],
+  },
+  {
+    id: 'repro-claims-03', stageId: 'claims', order: 3, name: '选择类型化复现路线',
+    description: '按目标主张选择解析理论、模型数值或真实材料计算路线，可组合但不得无故执行全部路线。混合论文需说明各路线的接口、共享假设，以及哪条路线为哪项 claim 提供证据。',
+    outputFiles: ['reproduction_tracks.md'],
+  },
+  {
+    id: 'repro-resources-01', stageId: 'resources', order: 1, name: '收集并冻结来源资源',
+    description: '调用 $literature-research 检索正文、补充材料、勘误、作者代码与数据、相关方法论文及必要基准；记录稳定来源、访问日期、版本或提交号、许可证和文件哈希。二手转述不能替代关键一手来源。',
+    outputFiles: ['resource_manifest.json', 'source_hashes.sha256', 'pending_resources.md'],
+  },
+  {
+    id: 'repro-resources-02', stageId: 'resources', order: 2, name: '建立参数与约定出处表',
+    description: '逐项记录模型参数、材料输入、离散化、初态、边界条件、数值控制、测量和后处理约定，并将来源标为论文明确给出、由正文推导、从代码提取、引用他文、合理推断或本次自选。数值必须和物理语义、单位及适用对象绑定。',
+    outputFiles: ['parameter_provenance.csv', 'conventions_and_units.md'],
+  },
+  {
+    id: 'repro-resources-03', stageId: 'resources', order: 3, name: '评估缺失信息与替代验证',
+    description: '列出缺失资源、歧义和潜在勘误，评估它们影响哪些 claim 与可比性。替代数据、近似参数或重建输入只能支持明确限定的验证；关键缺失会改变结论时，先请求研究者决定或降低复现目标。',
+    outputFiles: ['ambiguity_ledger.md', 'resource_gap_assessment.md'],
+  },
+  {
+    id: 'repro-spec-01', stageId: 'specification', order: 1, name: '统一符号、单位与观测量定义',
+    description: '把论文符号、规范、单位、基底、序参量、傅里叶约定、归一化、指标和聚合方式转换为统一可执行定义；显式区分内部优化量、代理量和真正支撑论文主张的观测量。',
+    outputFiles: ['observable_and_notation_spec.md'],
+  },
+  {
+    id: 'repro-spec-theory', stageId: 'specification', order: 2, name: '制定解析理论复核规格',
+    description: '针对解析理论 claim，列出起始假设、引理、推导分支、近似阶次、正则化或解析延拓、可控极限和待独立核查的关键等式；需要时调用 $theory-derivation 保存可复查的符号或数值校验。',
+    outputFiles: ['analytical_reproduction_spec.md'], optional: true,
+  },
+  {
+    id: 'repro-spec-model', stageId: 'specification', order: 3, name: '制定模型数值复现规格',
+    description: '针对模型研究 claim，定义哈密顿量或作用量、格点与边界、算法、系统尺寸、扫描变量、初始化、热化或自洽、随机性、误差估计、有限尺寸或截断处理及输出观测量。具体数值写入研究方案。',
+    outputFiles: ['model_numerics_reproduction_spec.md'], optional: true,
+  },
+  {
+    id: 'repro-spec-material', stageId: 'specification', order: 4, name: '制定材料计算复现规格',
+    description: '针对材料 claim，定义结构来源、电子结构方法、赝势或基组、交换关联处理、k/q 网格、低能子空间、相互作用与双计数、求解器和后处理等影响可比性的选择。所有物理参数及依据写入研究方案，不由模板预设。',
+    outputFiles: ['materials_reproduction_spec.md'], optional: true,
+  },
+  {
+    id: 'repro-spec-05', stageId: 'specification', order: 5, name: '冻结主张—运行—证据矩阵',
+    description: '为每个 claim 指定必要运行、输入版本、对照、重复、输出、验证器、容差和证据路径，并区分最低复现集与可选稳健性扩展。正式执行前冻结协议；事后改动必须记录理由、影响和版本，禁止为贴合论文曲线而无痕调参。',
+    outputFiles: ['claim_evidence_matrix.md', 'run_matrix.csv', 'protocol_lock.md'],
+  },
+  {
+    id: 'repro-pilot-01', stageId: 'pilot', order: 1, name: '验证环境与输入完整性',
+    description: '确认依赖、编译选项、硬件或数值后端、随机种子策略及输入哈希能够被记录和重建。若复跑作者产物，应先验证原始入口与最小示例，但其成功只证明该产物可运行。',
+    outputFiles: ['environment_lock.md', 'input_integrity_check.md'],
+  },
+  {
+    id: 'repro-pilot-02', stageId: 'pilot', order: 2, name: '验证观测量与后处理管线',
+    description: '用合成数据、已知极限或手算样例测试单位转换、统计量、误差条、拟合、插值、解析延拓、作图和数字化流程。尽可能让关键指标实现独立于待复现主程序，避免共同错误制造表面一致。',
+    outputFiles: ['observable_pipeline_tests.md'],
+  },
+  {
+    id: 'repro-pilot-03', stageId: 'pilot', order: 3, name: '跑通最小主张闭环',
+    description: '选择一个最小、低成本且可观察的 claim 路径，使输入经过核心推导或计算得到中间量和目标观测量，并检查数据流、符号、尺度及已知极限。最小闭环通过不等于论文结论已复现。',
+    outputFiles: ['pilot_report.md', 'pilot_evidence_index.md'],
+  },
+  {
+    id: 'repro-run-01', stageId: 'reproduction', order: 1, name: '执行冻结的目标复现矩阵',
+    description: '按协议执行支撑目标 claims 的解析复核、模型数值计算或材料计算。普通命令与临时诊断只记 Event；正式提交、多运行批次和替代科学计算作为可追溯 Action，不为每次尝试新增工作流节点。',
+  },
+  {
+    id: 'repro-run-02', stageId: 'reproduction', order: 2, name: '保存原始结果与完整演化历史',
+    description: '保留配置、日志、随机种子、检查点、全部迭代或扫描历史、未处理观测量和生成图表的数据，不只保存最终图片或最有利的结果。每个产物须能追溯到 claim、运行和输入版本。',
+    outputFiles: ['run_manifest.json', 'raw_results_index.md'],
+  },
+  {
+    id: 'repro-run-03', stageId: 'reproduction', order: 3, name: '记录偏离、失败与科学重试',
+    description: '记录对冻结协议的每次偏离、失败原因及其影响。环境、连接和传输问题与科学失败分开；替换失败科学运行时显式绑定重试来源，不得通过选择性重跑、删点或事后缩窄比较区间来制造一致。',
+    outputFiles: ['deviation_and_retry_ledger.md'],
+  },
+  {
+    id: 'repro-validation-01', stageId: 'validation', order: 1, name: '执行正确性与物理一致性检查',
+    description: '检查输出结构、量纲、对称性、守恒律、因果性或正定性、误差传播、数值收敛和已知极限。不同路线只执行与目标 claim 相关的检查，并保存失败检查而非只报告通过项。',
+    outputFiles: ['correctness_and_physics_checks.md'],
+  },
+  {
+    id: 'repro-validation-02', stageId: 'validation', order: 2, name: '进行独立交叉验证',
+    description: '用替代推导、第二实现、精确对角化或小尺寸基准、另一数值表示、独立后处理或论文提供数据核查关键中间量。若无法获得独立验证，明确记录证据相关性和剩余风险。',
+    outputFiles: ['independent_cross_validation.md'],
+  },
+  {
+    id: 'repro-validation-03', stageId: 'validation', order: 3, name: '审计可比性与差异预算',
+    description: '逐项比较数据或结构版本、方法、参数、有限尺寸、收敛水平、随机与系统误差、图像数字化误差和后处理定义。先判断是否处于可比条件，再讨论数值差异；趋势相同、数值相同和机制得到支持是不同证据等级。',
+    outputFiles: ['comparability_audit.md', 'discrepancy_budget.md'],
+  },
+  {
+    id: 'repro-validation-04', stageId: 'validation', order: 4, name: '形成逐主张复现裁决',
+    description: '对每个 claim 基于预定标准标记为复现、部分复现、未复现或条件不足无法判断，并引用有效证据、说明适用条件和替代解释。计算完成状态不得自动转换为科学裁决；机制性主张不能仅由拟合或视觉相似宣称成立。',
+    outputFiles: ['claim_verdicts.md'],
+  },
+  {
+    id: 'repro-release-01', stageId: 'release', order: 1, name: '整理逐主张证据链',
+    description: '把来源、假设、规格、运行、原始产物、验证记录、差异解释和裁决按 claim_id 连接成可审计链，标记无效、可疑和被取代的产物，不静默覆盖来源。',
+    outputFiles: ['reproduction_evidence_index.md', 'artifact_validity_register.md'],
+  },
+  {
+    id: 'repro-release-02', stageId: 'release', order: 2, name: '封装可重跑复现包',
+    description: '整理代码或推导文档、环境锁定、输入与来源清单、机器可读运行矩阵、原始及处理结果、最小重跑命令和 README。受许可或体积限制不能打包的资源，应保存获取方式、哈希和替代说明。',
+    outputFiles: ['README_reproduction.md', 'reproduction_manifest.json'],
+  },
+  {
+    id: 'repro-release-03', stageId: 'release', order: 3, name: '撰写复现报告并请求研究者审阅',
+    description: '汇总成功、部分成功、未成功与无法判断的 claims，解释偏差、限制和剩余不确定性，区分论文复现与本次新增探索。最终可对外声称的结论由研究者审阅确认；新发现和扩展想法进入独立后续任务。',
+    outputFiles: ['reproduction_report.md', 'limitations_and_open_questions.md', 'extension_backlog.md'],
   },
 ];
 
@@ -889,6 +1046,13 @@ export const WORKFLOWS: WorkflowTemplate[] = [
     description: '围绕原科学问题持续找路、建模、推导与验证，从失败中更新研究地图，目标达成后封装成果',
     stages: THEORETICAL_RESEARCH_STAGES,
     steps: THEORETICAL_RESEARCH_STEPS.map(withTheoryResearchLoop),
+  },
+  {
+    id: 'physics-literature-reproduction',
+    name: '物理文献复现',
+    description: '面向解析理论、模型数值与真实材料论文，以逐主张、可比条件和证据链为核心的通用复现工作流',
+    stages: PHYSICS_LITERATURE_REPRODUCTION_STAGES,
+    steps: PHYSICS_LITERATURE_REPRODUCTION_STEPS,
   },
 ];
 

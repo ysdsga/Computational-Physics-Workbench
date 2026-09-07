@@ -10,7 +10,7 @@ import { WORKFLOWS } from '../src/data/workflows.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('v8 through v14 preserve existing Task snapshots while upgrading built-in templates', async () => {
+test('v8 through v15 preserve existing Task snapshots while upgrading built-in templates', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-workflow-v7-'));
   const dbPath = path.join(tempRoot, 'migration.db');
   const seed = new Database(dbPath);
@@ -61,7 +61,7 @@ test('v8 through v14 preserve existing Task snapshots while upgrading built-in t
   process.env.WORKBENCH_DB_PATH = dbPath;
   const dbModule = await import(pathToFileURL(path.join(ROOT, 'server', 'db.ts')).href);
   try {
-    assert.equal(dbModule.default.pragma('user_version', { simple: true }), 14);
+    assert.equal(dbModule.default.pragma('user_version', { simple: true }), 15);
     const row = dbModule.default.prepare('SELECT data FROM workflow_templates WHERE id = ?')
       .get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof oldWorkflow;
@@ -103,7 +103,7 @@ test('v7 through v13 template migrations preserve intentionally removed theoreti
   seed.pragma('user_version = 6');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data);
     assert.deepEqual(migrated.stages, customWorkflow.stages);
@@ -142,7 +142,7 @@ test('v9 and v10 update only unchanged built-in reflection descriptions', () => 
   seed.pragma('user_version = 8');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof workflow;
     assert.match(migrated.steps.find(step => step.id === 'theory-question-reflection')?.description ?? '', /只有在引用证据/);
@@ -182,7 +182,7 @@ test('v10 adds active exploration prompts without overwriting customized reflect
   seed.pragma('user_version = 9');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof workflow;
     assert.match(migrated.steps.find(step => step.id === 'theory-question-reflection')?.description ?? '', /反例、竞争机制、可控极限和可检验预测/);
@@ -218,7 +218,7 @@ test('v12 adds theory tool routing only to unchanged built-in step descriptions'
   seed.pragma('user_version = 11');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof workflow;
     assert.match(migrated.steps.find(step => step.id === 'theory-derivation-02')?.description ?? '', /\$theory-derivation/);
@@ -266,7 +266,7 @@ test('v13 strengthens unchanged literature steps while preserving customized cov
   seed.pragma('user_version = 12');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const migrated = JSON.parse(row.data) as typeof workflow;
     const literatureStep = migrated.steps.find(step => step.id === 'theory-context-01');
@@ -309,7 +309,7 @@ test('v14 upgrades only unchanged theory steps, keeps other workflows and Task s
   seed.pragma('user_version = 13');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const upgraded = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('theoretical-research') as { data: string };
     const data = JSON.parse(upgraded.data);
     assert.match(data.steps[0].description, /跨 Run/);
@@ -339,7 +339,7 @@ test('v11 adds the impurity solver milestone to an unchanged model DMFT template
   seed.pragma('user_version = 10');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('triqs-model-dmft') as { data: string };
     const migrated = JSON.parse(row.data) as { steps: Array<{ id: string; order: number }> };
     assert.equal(migrated.steps.length, 20);
@@ -369,11 +369,84 @@ test('v11 preserves a customized model DMFT template', () => {
   seed.pragma('user_version = 10');
   try {
     runMigrations(seed, dbPath);
-    assert.equal(seed.pragma('user_version', { simple: true }), 14);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
     const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('triqs-model-dmft') as { data: string };
     const migrated = JSON.parse(row.data) as typeof customized;
     assert.equal(migrated.steps[0].description, '研究者保留的自定义模型 DMFT 步骤');
     assert.ok(!migrated.steps.some(step => step.id === 'model-dmft-formulation-solver'));
+  } finally {
+    seed.close();
+    try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }
+  }
+});
+
+test('v15 upgrades only unchanged model DMFT validation guidance', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-model-dmft-validation-migration-'));
+  const dbPath = path.join(tempRoot, 'migration.db');
+  const seed = new Database(dbPath);
+  seed.exec("CREATE TABLE workflow_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '', data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL);");
+
+  const builtIn = WORKFLOWS.find(workflow => workflow.id === 'triqs-model-dmft');
+  assert.ok(builtIn);
+  const previous = JSON.parse(JSON.stringify({ stages: builtIn.stages, steps: builtIn.steps })) as {
+    stages: Array<{ id: string; description: string }>;
+    steps: Array<{ id: string; name: string; description: string }>;
+  };
+  const validationStage = previous.stages.find(stage => stage.id === 'validation');
+  assert.ok(validationStage);
+  validationStage.description = '验证数值可靠性、物理一致性和规定的对照';
+
+  const oldGuidance = new Map([
+    ['model-dmft-validation-01', {
+      name: '验证计算收敛与数值可靠性',
+      description: '按研究方案验证自洽收敛、统计质量和数值稳定性，确认主要结论不由未控制的数值误差造成。',
+    }],
+    ['model-dmft-validation-02', {
+      name: '验证物理一致性',
+      description: '检查结果应满足的物理约束、内部一致性和适用条件；具体检查项目由模型与研究目标决定。',
+    }],
+    ['model-dmft-validation-03', {
+      name: '完成研究方案规定的对照验证',
+      description: '完成研究方案要求的基准、极限、不同分支或替代设置对照，并记录对中心结论的影响。',
+    }],
+  ]);
+  for (const step of previous.steps) {
+    const old = oldGuidance.get(step.id);
+    if (old) Object.assign(step, old);
+  }
+  const customized = previous.steps.find(step => step.id === 'model-dmft-validation-02');
+  assert.ok(customized);
+  customized.description = '保留研究者自定义的物理一致性检查';
+
+  seed.prepare('INSERT INTO workflow_templates (id, name, description, data, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run('triqs-model-dmft', '模型 DMFT（TRIQS）', 'built-in', JSON.stringify(previous), new Date().toISOString());
+  seed.pragma('user_version = 14');
+  try {
+    runMigrations(seed, dbPath);
+    assert.equal(seed.pragma('user_version', { simple: true }), 15);
+    const row = seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('triqs-model-dmft') as { data: string };
+    const migrated = JSON.parse(row.data) as typeof previous;
+    assert.equal(
+      migrated.stages.find(stage => stage.id === 'validation')?.description,
+      builtIn.stages.find(stage => stage.id === 'validation')?.description,
+    );
+    assert.equal(
+      migrated.steps.find(step => step.id === 'model-dmft-validation-01')?.description,
+      builtIn.steps.find(step => step.id === 'model-dmft-validation-01')?.description,
+    );
+    assert.equal(
+      migrated.steps.find(step => step.id === 'model-dmft-validation-02')?.description,
+      '保留研究者自定义的物理一致性检查',
+    );
+    assert.equal(
+      migrated.steps.find(step => step.id === 'model-dmft-validation-03')?.name,
+      builtIn.steps.find(step => step.id === 'model-dmft-validation-03')?.name,
+    );
+    assert.ok(fs.existsSync(path.join(tempRoot, 'migration.before-model-dmft-validation-v15.db')));
+
+    const once = row.data;
+    runMigrations(seed, dbPath);
+    assert.equal((seed.prepare('SELECT data FROM workflow_templates WHERE id = ?').get('triqs-model-dmft') as { data: string }).data, once);
   } finally {
     seed.close();
     try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch { /* Windows may retain a transient handle. */ }

@@ -1,9 +1,9 @@
 @echo off
-title DFT+DMFT Workbench
+title Computational Physics Workbench
 setlocal EnableDelayedExpansion
 
 echo ============================================
-echo   DFT+DMFT Workbench
+echo   Computational Physics Workbench
 echo ============================================
 echo.
 
@@ -57,7 +57,7 @@ if defined PORT_PID (
     echo   [WARNING] Port %PORT% is in use ^(PID: !PORT_PID!^)
     echo ============================================
     echo.
-    echo  Another DFT+DMFT Workbench instance may be running.
+    echo  Another Computational Physics Workbench instance may be running.
     echo.
     set /p "KILL_CHOICE=Kill old process and restart? (Y/N): "
     if /i "!KILL_CHOICE!"=="Y" (

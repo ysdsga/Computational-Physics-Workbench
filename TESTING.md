@@ -1,7 +1,7 @@
 # TESTING.md — 应用主体测试基线（D 盘根）
 
 > 最后更新：2026-08-16（Essential Workbench V3 / schema v6）
-> 本文件描述 DFT+DMFT Workbench **应用主体**（D 盘根）的测试现状与命令。
+> 本文件描述 Computational Physics Workbench **应用主体**（D 盘根）的测试现状与命令。
 
 ## 现状
 
@@ -15,7 +15,7 @@
 ## 命令
 
 ```bash
-cd "<path-to-dft-dmft-workbench>"
+cd "<path-to-computational-physics-workbench>"
 npm test              # node --test --import tsx "tests/**/*.test.ts"
 npm run lint          # oxlint（0 errors，10 个历史 warnings）
 npm run typecheck     # 前端与后端 TypeScript

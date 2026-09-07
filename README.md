@@ -1,4 +1,4 @@
-# DFT+DMFT Workbench
+# Computational Physics Workbench
 
 [English](README.en.md) | 简体中文
 
@@ -20,6 +20,16 @@ DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边�
 
 Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适配方向，当前尚未正式支持。Workbench 的 CLI、HTTP API、执行边界和科研账本按可移植核心设计，但客户端 Skill、Hook、长作业唤醒以及调度器命令仍需要对应 adapter。为了避免误提交，当前版本会明确拒绝非 LSF 调度器配置。
 
+## Codex Skills
+
+仓库按照 [Codex 官方 Skills 约定](https://developers.openai.com/codex/skills/) 在项目级发现目录 [`.agents/skills`](.agents/skills) 中提供三个互补 Skill。使用 Codex 从本仓库或其子目录开始任务时会自动发现它们，无需复制到个人配置目录：
+
+- [`workbench-agent`](.agents/skills/workbench-agent/SKILL.md)：真实研究任务的恢复、边界确认、执行、HPC 监控、证据与经验记录；
+- [`literature-research`](.agents/skills/literature-research/SKILL.md)：系统文献调研、证据矩阵、最近邻工作与创新性审计；
+- [`theory-derivation`](.agents/skills/theory-derivation/SKILL.md)：透明的理论推导以及符号、群论、算符和数值独立校验。
+
+前者是 Workbench 执行协议；后两者是内置理论研究与物理文献复现工作流调用的科学能力。它们会先探测当前环境，不假设作者的本机路径或专有软件已经存在。
+
 ## 核心思想
 
 传统科研软件通常要求人在图形界面或脚本之间手动组织任务。本项目把工作中心放在研究者与 Agent 的对话协作上：
@@ -29,12 +39,12 @@ Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适
 - **Workbench 负责边界和记忆**：强制目录与权限范围，记录 Run、Action、Job、Artifact、Evidence 和可复用经验。
 - **Web 界面负责审阅**：展示已经记录的研究状态，但不充当隐藏的 Agent 或远程执行入口。
 
-完整关系见[交互式系统架构图](doc/dft-dmft-workbench-architecture.html)。
+完整关系见[交互式系统架构图](doc/computational-physics-workbench-architecture.html)。
 
 ## 主要功能
 
 - 项目与计算任务管理
-- One-shot DFT+DMFT、TRIQS 模型 DMFT 与通用理论研究工作流，以及交互式流程图
+- One-shot DFT+DMFT、TRIQS 模型 DMFT、通用理论研究与物理文献复现工作流，以及交互式流程图
 - 创建任务时复制模板；每个任务拥有可独立增删、修改的工作流
 - 步骤进度、笔记、自定义命令与文件关联
 - 工作流模板持久化、可视化编辑和重置；模板修改只影响之后创建的任务
@@ -158,7 +168,7 @@ npm run test:e2e
 
 当前建议引用为：
 
-> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
 
 ## 许可证
 

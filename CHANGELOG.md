@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- A claim-driven physics-literature-reproduction workflow for analytical theory, model numerics, and materials calculations.
+- Repository-level Codex skills for Workbench execution, literature research, and theory derivation under .agents/skills.
+
+### Changed
+
+- Renamed the project and repository references to Computational Physics Workbench.
+- Refined model-DMFT validation into complete-iteration review, final self-energy/Green-function checks, and anomaly-triggered extended diagnostics.
+- Made bundled scientific skills portable by removing author-specific tool paths and treating optional external tools as environment-dependent.
+
 ## [0.1.1] - 2026-09-07
 
 ### Fixed

@@ -1,6 +1,6 @@
 ---
 name: workbench-agent
-description: Operate real DFT+DMFT Workbench research Tasks from the Codex project conversation through a confirmed Task session and the logging `workbench` transport. Use when Codex needs to discuss or correct a Research Plan/core Workflow, create and confirm a Task Spec, recover or continue a Research Run, execute or diagnose local/SSH/LSF work, monitor jobs, manage evidence/pending items, or capture reusable experience. The WebUI is observation and metadata management only.
+description: Operate real Computational Physics Workbench research Tasks from the Codex project conversation through a confirmed Task session and the logging `workbench` transport. Use when Codex needs to discuss or correct a Research Plan/core Workflow, create and confirm a Task Spec, recover or continue a Research Run, execute or diagnose local/SSH/LSF work, monitor jobs, manage evidence/pending items, or capture reusable experience. The WebUI is observation and metadata management only.
 ---
 
 # Workbench Agent

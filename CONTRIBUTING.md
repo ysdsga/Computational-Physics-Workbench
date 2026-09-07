@@ -1,4 +1,4 @@
-# Contributing to DFT+DMFT Workbench
+# Contributing to Computational Physics Workbench
 
 感谢你愿意参与建设。这个项目正在从 DFT+DMFT 工作台发展为一个面向计算物理与理论物理的 Agent 协作研究系统：Agent 负责计划和执行，研究者负责科学承诺、关键判断与证据审阅。
 

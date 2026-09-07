@@ -1,4 +1,4 @@
-# DFT+DMFT Workbench V3：Codex 自主执行闭环精要化计划
+# Computational Physics Workbench V3：Codex 自主执行闭环精要化计划
 
 > 状态：已实施；2026-08-16 补齐长作业跨回合监控与重试预算
 > 日期：2026-08-16  
@@ -58,7 +58,7 @@ WebUI 展示真实状态，不代替 Codex 决策或执行
 - 数据模型与迁移：`server/migrations.ts`、`server/db.ts`。
 - Run/Action/Job：`server/services/agentCore.ts`、`agentActions.ts`、`actionExecutor.ts`、`remote.ts`、`agentActions.ts` 对应路由。
 - Task 与路径：`server/routes/tasks.ts`、`server/routes/remote.ts`、项目/任务文件 API。
-- Codex 唯一入口：`bin/workbench.js`、`skills/workbench-agent/SKILL.md`、`AGENTS.md`。
+- Codex 唯一入口：`bin/workbench.js`、`.agents/skills/workbench-agent/SKILL.md`、`AGENTS.md`。
 - 前后端契约：`src/types/index.ts`、`src/api/client.ts`。
 - Web 观察面：Agent Run、任务工作流、待沟通、证据、经验、超算和文件浏览页面。
 - 回归与文档：`tests/`、`TESTING.md`、`README.md`、`docs/`、`doc/`。

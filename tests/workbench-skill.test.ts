@@ -6,9 +6,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const skillsRoot = path.join(root, '.agents', 'skills');
 
 test('workbench-agent uses one Envelope confirmation and preserves Codex autonomy', () => {
-  const skill = fs.readFileSync(path.join(root, 'skills', 'workbench-agent', 'SKILL.md'), 'utf8');
+  const skill = fs.readFileSync(path.join(skillsRoot, 'workbench-agent', 'SKILL.md'), 'utf8');
   const rules = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   for (const required of [
     'Codex project conversation as the planning and execution Agent',
@@ -33,6 +34,29 @@ test('workbench-agent uses one Envelope confirmation and preserves Codex autonom
   assert.match(rules, /不再逐命令或逐 Action 请求研究者确认/);
   assert.match(rules, /连接、认证、超时、建目录、检查和传输失败只写 event/);
   assert.match(rules, /不得硬编码进执行器、路由或 CLI/);
+});
+
+test('repository bundles every skill referenced by built-in scientific workflows', () => {
+  const bundledSkills = ['workbench-agent', 'literature-research', 'theory-derivation'];
+  for (const skillName of bundledSkills) {
+    assert.ok(fs.existsSync(path.join(skillsRoot, skillName, 'SKILL.md')), `${skillName} should provide SKILL.md`);
+    assert.ok(fs.existsSync(path.join(skillsRoot, skillName, 'agents', 'openai.yaml')), `${skillName} should provide agents/openai.yaml`);
+  }
+
+  const workflows = fs.readFileSync(path.join(root, 'src', 'data', 'workflows.ts'), 'utf8');
+  for (const match of workflows.matchAll(/\$([a-z][a-z0-9-]+)/g)) {
+    assert.ok(fs.existsSync(path.join(skillsRoot, match[1], 'SKILL.md')), `workflow-referenced skill ${match[1]} should be bundled`);
+  }
+
+  const portableFiles = [
+    path.join(skillsRoot, 'workbench-agent', 'SKILL.md'),
+    path.join(skillsRoot, 'literature-research', 'SKILL.md'),
+    path.join(skillsRoot, 'literature-research', 'references', 'coverage-protocol.md'),
+    path.join(skillsRoot, 'theory-derivation', 'SKILL.md'),
+    path.join(skillsRoot, 'theory-derivation', 'references', 'tool-routing.md'),
+  ];
+  const portableText = portableFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+  assert.doesNotMatch(portableText, /C:\\Users\\pikaqiu|\/home\/pika|D:\\DFT\+DMFT workbench/i);
 });
 
 test('documented workbench-agent commands are exposed by the CLI', () => {

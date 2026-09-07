@@ -1,0 +1,4 @@
+interface:
+  display_name: "Theory Derivation"
+  short_description: "为理论物理推导选择并调用符号、群论、算符与数值验证工具"
+  default_prompt: "使用 $theory-derivation 选择合适工具完成并独立验证这项理论物理推导。"

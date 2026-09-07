@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software in research, please cite it using the metadata below."
-title: "DFT+DMFT Workbench"
+title: "Computational Physics Workbench"
 abstract: >-
   A local-first, agent-operated and human-reviewed research workbench for
   computational and theoretical physics. It provides traceable research
@@ -13,8 +13,8 @@ authors:
     given-names: "Shuai"
     orcid: "https://orcid.org/0000-0002-3105-1973"
 version: 0.1.1
-repository-code: "https://github.com/ysdsga/DFT-DMFT-Workbench"
-url: "https://github.com/ysdsga/DFT-DMFT-Workbench"
+repository-code: "https://github.com/ysdsga/Computational-Physics-Workbench"
+url: "https://github.com/ysdsga/Computational-Physics-Workbench"
 license: Apache-2.0
 keywords:
   - computational physics

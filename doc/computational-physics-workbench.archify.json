@@ -2,11 +2,11 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "DFT+DMFT Workbench 系统架构",
+    "title": "Computational Physics Workbench 系统架构",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "repository": {
-      "url": "https://github.com/ysdsga/DFT-DMFT-Workbench.git",
+      "url": "https://github.com/ysdsga/Computational-Physics-Workbench.git",
       "revision": "afb5dc491334a271e90c7bf7e89037fdec2d17b5"
     },
     "viewBox": [1380, 660],
@@ -99,7 +99,7 @@
       "sublabel": "研究规划、诊断、执行与证据判断",
       "sources": [
         { "path": "docs/ARCHITECTURE.md", "line": 3, "end_line": 28, "label": "Agent 本体与入口" },
-        { "path": "skills/workbench-agent/SKILL.md", "line": 1, "label": "项目 Agent skill" }
+        { "path": ".agents/skills/workbench-agent/SKILL.md", "line": 1, "label": "项目 Agent skill" }
       ],
       "pos": [235, 400],
       "size": [190, 68]
@@ -170,7 +170,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "本地 DFT+DMFT Workbench",
+      "label": "本地 Computational Physics Workbench",
       "wraps": ["react-ui", "web-api", "sqlite-db", "project-files", "workbench-cli", "agent-api", "task-root"],
       "pad": 32
     },

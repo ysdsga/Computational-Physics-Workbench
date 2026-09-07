@@ -1,5 +1,5 @@
 {
-  "name": "dft-dmft-workbench",
+  "name": "computational-physics-workbench",
   "private": true,
   "version": "0.1.1",
   "description": "An agent-operated, human-reviewed research workbench for computational and theoretical physics.",
@@ -7,12 +7,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ysdsga/DFT-DMFT-Workbench.git"
+    "url": "git+https://github.com/ysdsga/Computational-Physics-Workbench.git"
   },
   "bugs": {
-    "url": "https://github.com/ysdsga/DFT-DMFT-Workbench/issues"
+    "url": "https://github.com/ysdsga/Computational-Physics-Workbench/issues"
   },
-  "homepage": "https://github.com/ysdsga/DFT-DMFT-Workbench#readme",
+  "homepage": "https://github.com/ysdsga/Computational-Physics-Workbench#readme",
   "keywords": [
     "computational-physics",
     "theoretical-physics",

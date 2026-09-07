@@ -1,4 +1,4 @@
-// === Core Types for DFT+DMFT Workbench ===
+// === Core Types for Computational Physics Workbench ===
 
 export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 export type TaskStatus = 'active' | 'paused' | 'completed' | 'archived';

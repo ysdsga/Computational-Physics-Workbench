@@ -1,10 +1,10 @@
-# DFT+DMFT Workbench
+# Computational Physics Workbench
 
 English | [简体中文](README.md)
 
 > An agent-operated, human-reviewed research workbench for computational and theoretical physics.
 
-DFT+DMFT Workbench is a local-first research collaboration system. A researcher defines the scientific objective, confirms the execution boundary, and reviews decisive evidence. A Codex agent plans and executes the work, diagnoses failures, monitors remote jobs, and maintains a traceable research record.
+Computational Physics Workbench is a local-first research collaboration system. A researcher defines the scientific objective, confirms the execution boundary, and reviews decisive evidence. A Codex agent plans and executes the work, diagnoses failures, monitors remote jobs, and maintains a traceable research record.
 
 DFT+DMFT is the first and currently most complete use case, not the boundary of the system. The core is intended for broader computational and theoretical physics workflows.
 
@@ -20,6 +20,16 @@ This public preview provides one complete reference path:
 
 Slurm, PBS, Claude Code, WorkBuddy, and DeepSeek Harness are planned adapter targets and are not officially supported yet. The CLI, HTTP API, execution boundaries, and research ledger are designed as a portable core, while client skills, hooks, long-job wake-ups, and scheduler commands still require host-specific adapters. To prevent accidental submission through the wrong scheduler, this version rejects non-LSF scheduler configurations.
 
+## Codex skills
+
+Following the [official Codex Skills convention](https://developers.openai.com/codex/skills/), the repository provides three complementary skills in the project discovery directory [`.agents/skills`](.agents/skills). Codex discovers them automatically when a task starts in this repository or one of its subdirectories; no copy into personal configuration is required:
+
+- [`workbench-agent`](.agents/skills/workbench-agent/SKILL.md) handles recovery, boundary confirmation, execution, HPC monitoring, evidence, and experience for real Workbench tasks.
+- [`literature-research`](.agents/skills/literature-research/SKILL.md) performs systematic literature mapping, claim-level evidence matrices, closest-prior-work comparison, and novelty audits.
+- [`theory-derivation`](.agents/skills/theory-derivation/SKILL.md) supports transparent derivations and independent symbolic, group-theoretic, operator, or numerical checks.
+
+The first skill is the Workbench execution protocol. The other two provide scientific capabilities invoked by the built-in theoretical-research and physics-literature-reproduction workflows. They discover the current host's tools instead of assuming the author's private paths or licensed software.
+
 ## Why this project exists
 
 Most research software leaves the researcher to coordinate scripts, interfaces, HPC sessions, intermediate results, and scientific decisions manually. This project makes the researcher-agent conversation the center of that collaboration:
@@ -29,12 +39,12 @@ Most research software leaves the researcher to coordinate scripts, interfaces, 
 - **The workbench owns boundaries and memory:** filesystem and permission constraints plus a traceable ledger of runs, actions, jobs, artifacts, evidence, and reusable experience.
 - **The web application supports review:** it shows recorded state but is not a hidden agent or remote execution surface.
 
-See the [interactive architecture diagram](doc/dft-dmft-workbench-architecture.html) for the complete system model.
+See the [interactive architecture diagram](doc/computational-physics-workbench-architecture.html) for the complete system model.
 
 ## Current capabilities
 
 - Project, task, and editable scientific workflow management
-- DFT+DMFT, model-DMFT, and general theoretical-research workflow templates
+- DFT+DMFT, model-DMFT, general theoretical-research, and physics-literature-reproduction workflow templates
 - A confirmed Task Spec plus an agent-maintained Working Plan
 - Append-only Run → Action → Job → Artifact/Evidence provenance
 - Research notes, reflection loops, evidence indexing, and reusable experience
@@ -77,7 +87,7 @@ This is an early-stage volunteer project with no guaranteed response time. Small
 
 If the workbench contributes to research planning, execution, evidence management, or reproducibility, cite the software version in addition to the physical methods and scientific software used. Citation metadata is available in [CITATION.cff](CITATION.cff).
 
-> Yan, Shuai. (2026). DFT+DMFT Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/DFT-DMFT-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
 
 A version DOI will be added after the first release is archived with Zenodo.
 
@@ -85,4 +95,4 @@ A version DOI will be added after the first release is archived with Zenodo.
 
 Do not include credentials, private HPC information, unpublished data, or local databases in issues or test fixtures. Report vulnerabilities according to [SECURITY.md](SECURITY.md).
 
-DFT+DMFT Workbench is licensed under the [Apache License 2.0](LICENSE).
+Computational Physics Workbench is licensed under the [Apache License 2.0](LICENSE).
