@@ -61,14 +61,23 @@ npm install
 npm run dev:full
 ```
 
-Open <http://127.0.0.1:3001>. For a production-style local build:
+Open the URL printed by Vite (by default <http://127.0.0.1:5173>). For a production-style local build:
 
 ```shell
 npm run build
 npm start
 ```
 
+Then open <http://127.0.0.1:3001>.
+
 The SQLite runtime database, real research inputs and outputs, credentials, and local environment files are intentionally excluded from Git.
+
+## User documentation
+
+- [First use: from a project to a controlled Research Run](docs/GETTING_STARTED.md) (Chinese)
+- [Usage guide: planning layers, execution ledger, workflow design, and long-running research](docs/USAGE_GUIDE.md) (Chinese)
+
+The guides also clarify the distinction between Codex projects/chats and Workbench Projects/Tasks. Full Codex transcripts are not committed to this repository by default.
 
 ## Important limitations
 

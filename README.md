@@ -73,7 +73,7 @@ npm install
 npm run dev:full
 ```
 
-开发模式下，Vite 前端会把 `/api` 请求代理到 `http://127.0.0.1:3001`。
+开发模式下，请打开 Vite 在终端显示的地址（默认 `http://127.0.0.1:5173`）；前端会把 `/api` 请求代理到 `http://127.0.0.1:3001`。
 
 生产式本地运行：
 
@@ -83,6 +83,13 @@ npm start
 ```
 
 然后访问 <http://127.0.0.1:3001>。服务默认只监听回环地址，并只允许已配置的本地开发源跨域访问。
+
+## 第一次使用
+
+- [第一次使用：从项目到受控 Research Run](docs/GETTING_STARTED.md)：从 Codex 打开项目、创建 Workbench Project/Task、绑定工作流、撰写 Research Plan，到审阅并确认 Envelope。
+- [使用指南：规划层、执行账本与长时间研究技巧](docs/USAGE_GUIDE.md)：解释 Action、边界、里程碑和时间线，介绍 AI 辅助工作流设计与 Codex Goal mode。
+
+教程也说明了 Codex 对话与 Git 仓库的关系：完整对话默认不会进入仓库；Workbench 只保存必要的摘要、哈希、时间和可选对话引用。
 
 ## Agent CLI
 
