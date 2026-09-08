@@ -218,7 +218,7 @@ V4 的 Policy、Context、Review 和 Promotion 表先从运行路径退役。v5 
 
 ### 步骤 7：正式启用与真实任务就绪验收
 
-实施：运行全套测试和两个异构 Workflow 演练；重新构建生产 Web；停服务、备份、迁移正式库到 v5并执行 doctor/context。随后在 Codex 对话中为“CaCrO3 非磁 QE → Wannier90 → 自发磁性 One-shot DMFT”生成最终 Research Plan + Task Spec，展示 Envelope 和资源摘要，等待一次确认后即可进入真实任务，不再改产品代码。
+实施：运行全套测试和两个异构 Workflow 演练；重新构建生产 Web；停服务、备份、迁移正式库到 v5并执行 doctor/context。随后在 Codex 对话中为一个代表性 DFT+DMFT 任务生成最终 Research Plan + Task Spec，展示 Envelope 和资源摘要，等待一次确认后即可进入真实任务，不再改产品代码。
 
 完成标准：测试、typecheck、lint、build、API/E2E、迁移完整性和恢复演练通过；正式库无未解释 drift；Web 可旁路看到 Run/Stage/Action/Job/Evidence；真实 pilot 的唯一剩余门是研究者对最终 Task Spec 和实际 HPC 资源的一次确认。
 

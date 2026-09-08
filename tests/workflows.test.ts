@@ -8,7 +8,7 @@ import {
 } from '../src/data/workflows.js';
 
 test('theoretical research is a complete non-computational built-in workflow', () => {
-  assert.equal(WORKFLOWS.length, 6);
+  assert.equal(WORKFLOWS.length, 4);
 
   const workflow = getWorkflow('theoretical-research');
   assert.ok(workflow);

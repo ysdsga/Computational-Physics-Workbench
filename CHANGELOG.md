@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - Refined model-DMFT validation into complete-iteration review, final self-energy/Green-function checks, and anomaly-triggered extended diagnostics.
 - Made bundled scientific skills portable by removing author-specific tool paths and treating optional external tools as environment-dependent.
 
+### Removed
+
+- Withheld two unvalidated specialized DFT+DMFT templates from the public built-in workflow registry.
+
 ## [0.1.1] - 2026-09-07
 
 ### Fixed

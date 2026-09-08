@@ -77,7 +77,7 @@ async function createFixture(name: string): Promise<Fixture> {
   const workingDir = path.join(tmpRoot, name); fs.mkdirSync(workingDir, { recursive: true });
   const projectResult = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name, material: name, working_dir: workingDir }) });
   assert.equal(projectResult.response.status, 201); const project = projectResult.payload as any;
-  const taskResult = await api(`/api/projects/${project.id}/tasks`, { method: 'POST', body: JSON.stringify({ name: `${name}-task`, workflow_id: 'qe-w90-triqs-spontaneous-magnetic-oneshot' }) });
+  const taskResult = await api(`/api/projects/${project.id}/tasks`, { method: 'POST', body: JSON.stringify({ name: `${name}-task`, workflow_id: 'dft-dmft-oneshot' }) });
   assert.equal(taskResult.response.status, 201); const task = taskResult.payload as any;
   const taskRoot = path.join(workingDir, task.task_root_rel);
   const stages = task.workflow.stages.map((item: any) => item.id) as string[];
@@ -108,7 +108,7 @@ async function createFixture(name: string): Promise<Fixture> {
 }
 
 test('workflow template CLI can patch and reset templates and task snapshots', async () => {
-  const workflowId = 'qe-w90-triqs-spontaneous-magnetic-oneshot';
+  const workflowId = 'dft-dmft-oneshot';
   const shown = await runCli(['workflow', 'template-show', '--workflow', workflowId]);
   assert.equal(shown.code, 0, shown.stderr);
   const originalTemplate = JSON.parse(shown.stdout);
