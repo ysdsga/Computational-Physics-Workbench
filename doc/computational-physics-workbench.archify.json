@@ -99,7 +99,7 @@
       "sublabel": "研究规划、诊断、执行与证据判断",
       "sources": [
         { "path": "docs/ARCHITECTURE.md", "line": 3, "end_line": 28, "label": "Agent 本体与入口" },
-        { "path": ".agents/skills/workbench-agent/SKILL.md", "line": 1, "label": "项目 Agent skill" }
+        { "path": "skills/workbench-agent/SKILL.md", "line": 1, "label": "项目 Agent skill" }
       ],
       "pos": [235, 400],
       "size": [190, 68]

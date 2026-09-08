@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const skillsRoot = path.join(root, '.agents', 'skills');
+const skillsRoot = path.join(root, 'skills');
 
 test('workbench-agent uses one Envelope confirmation and preserves Codex autonomy', () => {
   const skill = fs.readFileSync(path.join(skillsRoot, 'workbench-agent', 'SKILL.md'), 'utf8');

@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - A claim-driven physics-literature-reproduction workflow for analytical theory, model numerics, and materials calculations.
-- Repository-level Codex skills for Workbench execution, literature research, and theory derivation under .agents/skills.
+- Project-local skills for Workbench execution, literature research, and theory derivation under `skills/`.
 
 ### Changed
 

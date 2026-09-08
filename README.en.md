@@ -20,13 +20,13 @@ This public preview provides one complete reference path:
 
 Slurm, PBS, Claude Code, WorkBuddy, and DeepSeek Harness are planned adapter targets and are not officially supported yet. The CLI, HTTP API, execution boundaries, and research ledger are designed as a portable core, while client skills, hooks, long-job wake-ups, and scheduler commands still require host-specific adapters. To prevent accidental submission through the wrong scheduler, this version rejects non-LSF scheduler configurations.
 
-## Codex skills
+## Agent skills
 
-Following the [official Codex Skills convention](https://developers.openai.com/codex/skills/), the repository provides three complementary skills in the project discovery directory [`.agents/skills`](.agents/skills). Codex discovers them automatically when a task starts in this repository or one of its subdirectories; no copy into personal configuration is required:
+The repository provides three complementary skills under the project-local [`skills/`](skills) directory and treats these files as the single versions distributed with the source code and on GitHub. `AGENTS.md` routes real Workbench tasks to the corresponding project skill, so `workbench-agent` does not need to be copied into personal configuration:
 
-- [`workbench-agent`](.agents/skills/workbench-agent/SKILL.md) handles recovery, boundary confirmation, execution, HPC monitoring, evidence, and experience for real Workbench tasks.
-- [`literature-research`](.agents/skills/literature-research/SKILL.md) performs systematic literature mapping, claim-level evidence matrices, closest-prior-work comparison, and novelty audits.
-- [`theory-derivation`](.agents/skills/theory-derivation/SKILL.md) supports transparent derivations and independent symbolic, group-theoretic, operator, or numerical checks.
+- [`workbench-agent`](skills/workbench-agent/SKILL.md) handles recovery, boundary confirmation, execution, HPC monitoring, evidence, and experience for real Workbench tasks.
+- [`literature-research`](skills/literature-research/SKILL.md) performs systematic literature mapping, claim-level evidence matrices, closest-prior-work comparison, and novelty audits.
+- [`theory-derivation`](skills/theory-derivation/SKILL.md) supports transparent derivations and independent symbolic, group-theoretic, operator, or numerical checks.
 
 The first skill is the Workbench execution protocol. The other two provide scientific capabilities invoked by the built-in theoretical-research and physics-literature-reproduction workflows. They discover the current host's tools instead of assuming the author's private paths or licensed software.
 

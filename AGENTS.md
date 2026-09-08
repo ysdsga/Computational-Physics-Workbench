@@ -103,7 +103,7 @@ npm run build
 ## Codex Agent 执行边界
 
 - Agent 本体是本项目中的 Codex 对话，不是 Web 页面、Express 后台 worker 或数据库进程。Agent 运行、评价、证据和远程作业的 Web 页面只能展示已记录状态，不得成为启动、授权、提交、取消或对账入口。
-- 处理真实 Workbench 研究任务时必须使用项目 `workbench-agent` skill。`workbench` 负责状态、边界、自动日志、传输、作业和监控，不是逐命令审批门；Codex 可在本地 Task 根直接使用终端，并可通过 `workbench remote exec` 在已确认远程边界内执行任意诊断和任务命令。禁止直接读写 SQLite、直接调用 Agent 写 API，或绕过记录通道提交/取消作业。
+- 处理真实 Workbench 研究任务时必须读取并使用项目内的 `skills/workbench-agent/SKILL.md`。`workbench` 负责状态、边界、自动日志、传输、作业和监控，不是逐命令审批门；Codex 可在本地 Task 根直接使用终端，并可通过 `workbench remote exec` 在已确认远程边界内执行任意诊断和任务命令。禁止直接读写 SQLite、直接调用 Agent 写 API，或绕过记录通道提交/取消作业。
 - `workbench remote exec/upload/download` 是透明的 SSH/SFTP 会话封装：自动推导 host/root 并写入事件日志，不创建 Action。封装自身故障时，Codex 可用直接 `ssh`/`sftp` 诊断或修复同一已登记 Task 边界并补记 event，但不得由此直接 `bsub`/`bkill`。远程写入仍只允许 Task 写根；用户根和项目根只读。
 - 每个新 Codex 会话或中断恢复后，先运行 `workbench doctor` 和默认紧凑的 `workbench context --task <id> --allow-blocked --pretty`，只检查 Envelope 哈希/边界、Working Plan 当前阶段、待沟通事项和 active/uncertain Job。仅在明确需要某字段时用 `--full`；不要反复读取项目架构、完整工作流、全部历史 Action/证据/经验。提交响应不确定时只能按已记录作业身份对账，不能重提。
 - 每个 `job.submit` 规格必须由 Codex 根据计算规模、阶段、历史耗时、资源和 wall-time 写入本 Job 的预计耗时、首次检查、RUN/PEND 检查间隔与依据；不得用全局固定轮询表代替 Agent 判断。首次出现非终态 Job 后，Codex 按 `workbench monitor directive` 创建或复用当前任务 heartbeat，确认其真实为 ACTIVE 后再 attach。Workbench 保存 `next_check_at`、实际 cadence 和 heartbeat lease；Stop Hook 同时阻止未监控、心跳过期和终态未删除自动化。所有 Job 终态且无后续 Job 时必须删除自动化，并用 `workbench monitor close` 回写删除成功。

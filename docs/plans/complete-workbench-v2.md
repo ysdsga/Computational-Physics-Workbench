@@ -47,7 +47,7 @@ V1 已把合同、上下文、policy、账本、评价和受控 OpenSSH/LSF 原�
 
 - 数据与迁移：`server/db.ts`、`server/migrations.ts`。
 - Agent/执行服务：`server/services/agentCore.ts`、`agentActions.ts`、`actionExecutor.ts`、`remote.ts`、`pathSafety.ts`；不新增材料或软件栈专用 adapter。
-- Codex 工具入口：`bin/workbench.js`、`.agents/skills/workbench-agent/SKILL.md`、`.agents/skills/workbench-agent/agents/openai.yaml`，以及必要的只读/写入 API。
+- Codex 工具入口：`bin/workbench.js`、`skills/workbench-agent/SKILL.md`、`skills/workbench-agent/agents/openai.yaml`，以及必要的只读/写入 API。
 - Web 读模型：`src/types/index.ts`、`src/api/client.ts`、`AgentRunsPage.tsx`、`ReviewCenterPage.tsx`、`ExperiencePage.tsx`、任务工作流组件。
 - 验证与说明：`tests/`、`TESTING.md`、`README.md`、`docs/`、`doc/`、`AGENTS.md`。不进行无关的全仓 DAO 或视觉系统重构。
 

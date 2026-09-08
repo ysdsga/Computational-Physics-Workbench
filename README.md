@@ -20,13 +20,13 @@ DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边�
 
 Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适配方向，当前尚未正式支持。Workbench 的 CLI、HTTP API、执行边界和科研账本按可移植核心设计，但客户端 Skill、Hook、长作业唤醒以及调度器命令仍需要对应 adapter。为了避免误提交，当前版本会明确拒绝非 LSF 调度器配置。
 
-## Codex Skills
+## Agent Skills
 
-仓库按照 [Codex 官方 Skills 约定](https://developers.openai.com/codex/skills/) 在项目级发现目录 [`.agents/skills`](.agents/skills) 中提供三个互补 Skill。使用 Codex 从本仓库或其子目录开始任务时会自动发现它们，无需复制到个人配置目录：
+仓库在项目目录 [`skills/`](skills) 中提供三个互补 Skill，并将这里作为随源码和 GitHub 仓库分发的唯一版本。`AGENTS.md` 会把真实 Workbench 任务路由到对应的项目 Skill，不需要把 `workbench-agent` 复制到个人配置目录：
 
-- [`workbench-agent`](.agents/skills/workbench-agent/SKILL.md)：真实研究任务的恢复、边界确认、执行、HPC 监控、证据与经验记录；
-- [`literature-research`](.agents/skills/literature-research/SKILL.md)：系统文献调研、证据矩阵、最近邻工作与创新性审计；
-- [`theory-derivation`](.agents/skills/theory-derivation/SKILL.md)：透明的理论推导以及符号、群论、算符和数值独立校验。
+- [`workbench-agent`](skills/workbench-agent/SKILL.md)：真实研究任务的恢复、边界确认、执行、HPC 监控、证据与经验记录；
+- [`literature-research`](skills/literature-research/SKILL.md)：系统文献调研、证据矩阵、最近邻工作与创新性审计；
+- [`theory-derivation`](skills/theory-derivation/SKILL.md)：透明的理论推导以及符号、群论、算符和数值独立校验。
 
 前者是 Workbench 执行协议；后两者是内置理论研究与物理文献复现工作流调用的科学能力。它们会先探测当前环境，不假设作者的本机路径或专有软件已经存在。
 
