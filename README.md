@@ -1,5 +1,7 @@
 # Computational Physics Workbench
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22652970.svg)](https://doi.org/10.5281/zenodo.22652970)
+
 [English](README.en.md) | 简体中文
 
 > An agent-operated, human-reviewed research workbench for computational and theoretical physics.
@@ -194,11 +196,11 @@ npm run test:e2e
 2. 研究中实际使用的物理方法、求解器和上游科学软件；
 3. 使用该工具得到的物理成果论文（如果已经发表）。
 
-软件引用元数据见 [CITATION.cff](CITATION.cff)。GitHub 会据此生成 APA 和 BibTeX 引用；首个正式 release 归档到 Zenodo 后，将在这里补充版本 DOI。
+软件引用元数据见 [CITATION.cff](CITATION.cff)。GitHub 会据此生成 APA 和 BibTeX 引用。请使用 `v0.2.0` 的[版本 DOI](https://doi.org/10.5281/zenodo.22653039) 精确引用本次发布；[概念 DOI](https://doi.org/10.5281/zenodo.22652970) 会始终指向本项目的版本集合。
 
 当前建议引用为：
 
-> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22653039
 
 ## 许可证
 

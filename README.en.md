@@ -1,5 +1,7 @@
 # Computational Physics Workbench
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22652970.svg)](https://doi.org/10.5281/zenodo.22652970)
+
 English | [简体中文](README.md)
 
 > An agent-operated, human-reviewed research workbench for computational and theoretical physics.
@@ -119,9 +121,9 @@ See the [roadmap](ROADMAP.md) for current priorities: reliable long-running rese
 
 If the workbench contributes to research planning, execution, evidence management, or reproducibility, cite the software version in addition to the physical methods and scientific software used. Citation metadata is available in [CITATION.cff](CITATION.cff).
 
-> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.22653039
 
-A version DOI will be added after the first release is archived with Zenodo.
+Use the [version DOI](https://doi.org/10.5281/zenodo.22653039) to cite this exact release. The [concept DOI](https://doi.org/10.5281/zenodo.22652970) always resolves to the complete version series.
 
 ## Security and license
 
