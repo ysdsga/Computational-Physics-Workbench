@@ -8,6 +8,8 @@ Computational Physics Workbench is a local-first research collaboration system. 
 
 DFT+DMFT is the first and currently most complete use case, not the boundary of the system. The core is intended for broader computational and theoretical physics workflows.
 
+Designed for AI for Science and scientific computing, it brings editable research workflows, HPC jobs, evidence provenance, and human–agent execution boundaries into one local-first system for DFT, DMFT, many-body computation, numerical simulation, and theoretical derivation.
+
 > **Status:** This is an early research preview. Interfaces and data models may change. We welcome physicists, research-software engineers, HPC users, and scientific-agent researchers who want to shape the system through concrete workflows and evidence.
 
 ## Interface preview
@@ -94,6 +96,16 @@ The guides also clarify the distinction between Codex projects/chats and Workben
 - Remote execution currently targets OpenSSH/SFTP and LSF environments.
 - Built-in physics workflows are starting structures, not universal scientific protocols. Users remain responsible for method choice, parameters, convergence, uncertainty, and interpretation.
 - The project does not replace citations for the physical methods, solvers, or upstream scientific software used in a study.
+
+## Community
+
+Join the **AI4Physics QQ group** to discuss AI for Science, computational and theoretical physics, scientific agents, HPC workflows, and open-source contributions.
+
+<p align="center">
+  <img src="docs/images/community-ai4physics-qq.jpg" alt="QR code for the AI4Physics QQ group" width="360">
+</p>
+
+The group is not an official support channel. Do not share passwords, private keys, complete HPC login details, or unpublished research data. Reproducible bugs and feature proposals should still be filed as GitHub Issues.
 
 ## Contributing
 

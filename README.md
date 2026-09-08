@@ -8,6 +8,8 @@
 
 DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边界。核心系统面向一般计算物理和理论物理研究，强调 Agent 自主执行、人类关键审阅、科研数据安全以及全过程可追溯。
 
+它面向 AI for Science 与 scientific computing 场景，把可编辑科研工作流、HPC 作业、证据来源和人机协作边界放进同一套本地优先系统；适用于 DFT、DMFT、多体计算、数值模拟和理论推导等研究。
+
 > **Project status:** This is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
 
 ## 界面预览
@@ -155,6 +157,16 @@ npm run test:e2e
 `data/` 中的 SQLite 数据库以及 `repository/` 中的真实科研输入输出不会提交到 Git。它们属于本地用户数据，应单独备份和管理。
 
 项目协作与安全约定见 [AGENTS.md](AGENTS.md)，历史进度见 [progress.md](progress.md)。任务行为、架构变化和设计决定见 [docs/TASKS.md](docs/TASKS.md)、[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和 [docs/DECISIONS.md](docs/DECISIONS.md)；接口、数据字典和完整架构图见 [doc/](doc/)。
+
+## 交流社区
+
+我们建立了 **AI4Physics 交流群（QQ）**，欢迎对 AI for Science、计算物理、理论物理、科研 Agent、HPC 工作流或开源贡献感兴趣的朋友加入交流。
+
+<p align="center">
+  <img src="docs/images/community-ai4physics-qq.jpg" alt="AI4Physics QQ 交流群二维码" width="360">
+</p>
+
+交流群不是正式技术支持渠道。请不要在群内发送密码、私钥、完整 HPC 登录信息或尚未公开的科研数据；可复现的软件问题和功能建议仍推荐提交 GitHub Issue。
 
 ## 参与贡献
 
