@@ -76,6 +76,7 @@ The SQLite runtime database, real research inputs and outputs, credentials, and 
 
 - [First use: from a project to a controlled Research Run](docs/GETTING_STARTED.md) (Chinese)
 - [Usage guide: planning layers, execution ledger, workflow design, and long-running research](docs/USAGE_GUIDE.md) (Chinese)
+- [Remote compute: connection, transfer, and agent collaboration](docs/REMOTE_COMPUTE.md) (Chinese)
 
 The guides also clarify the distinction between Codex projects/chats and Workbench Projects/Tasks. Full Codex transcripts are not committed to this repository by default.
 

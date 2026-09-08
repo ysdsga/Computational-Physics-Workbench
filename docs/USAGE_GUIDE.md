@@ -222,6 +222,8 @@ Task 是研究容器；Run 需要 Codex 读取方案与工作流、草拟 Task S
 
 这是执行边界的一部分。Web 只观察和管理普通元数据；提交、取消、确认和对账通过 Codex 对话及 `workbench` CLI 完成，防止出现第二条无记录的执行通道。
 
+如果 Web 不能完成文件、远程或 Run 操作，直接在 Codex 对话中说明具体目标，让 Agent 先核对 Envelope 后通过受控 CLI 完成。`Origin is not allowed by Workbench` 是浏览器来源白名单问题，不是超算权限；配置方法和不能绕过的边界见[远程计算与连接指南](REMOTE_COMPUTE.md)。
+
 ## 推荐的日常节奏
 
 1. 在一个 Codex 对话中明确本轮结果；
@@ -234,4 +236,4 @@ Task 是研究容器；Run 需要 Codex 读取方案与工作流、草拟 Task S
 8. 结束时确认监控已关闭、证据可定位、结论没有超过证据；
 9. 把真正可复用的经验沉淀为带适用边界的候选经验。
 
-更底层的数据层级和状态机见 [任务、工作流与研究运行](TASKS.md) 与[架构说明](ARCHITECTURE.md)。
+远程设备、传输和 CORS 故障见[远程计算与连接指南](REMOTE_COMPUTE.md)；更底层的数据层级和状态机见 [任务、工作流与研究运行](TASKS.md) 与[架构说明](ARCHITECTURE.md)。

@@ -196,6 +196,12 @@ Web 是审阅面，不提供 Run 启动、Envelope 确认、Job 提交/取消或
 
 因此，换对话后的恢复来源是 Workbench 账本、Research Plan、Task 文件和 Git 文档，而不是要求新对话“记住”旧聊天。若要公开某次研究过程，建议整理一份去除隐私和密钥的研究摘要，不要直接提交完整聊天记录。
 
+## 10. 需要超算时再配置远程设备
+
+当前版本通过本机 OpenSSH/SFTP 连接远程设备，并正式支持 IBM LSF。最简单的做法是把登录地址、用户名、认证方式、用户根、项目根和 Task 告诉 Codex，让 Agent 检查或生成 SSH alias，并通过 CLI 登记设备与 Task 映射。你只需亲自核对首次 host key、完成密码/MFA，并确认包含远程能力和资源上限的 Task Spec。
+
+Web 没有上传、提交或取消按钮是预期设计：把具体操作告诉 Codex，Agent 会通过受控 CLI 完成并记录。如果 Web 报 `Origin is not allowed by Workbench`，它是浏览器来源白名单问题，不等于 SSH 或科研目录没有权限；CLI 仍可能可用。完整配置、传输命令、故障判断和安全提醒见[远程计算设备：连接、传输与 Agent 协作](REMOTE_COMPUTE.md)。
+
 ## 第一次 Run 的完成清单
 
 - [ ] Codex 项目以本仓库为主文件夹，并能访问科研工作目录；

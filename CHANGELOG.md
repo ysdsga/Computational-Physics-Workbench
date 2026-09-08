@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - A claim-driven physics-literature-reproduction workflow for analytical theory, model numerics, and materials calculations.
 - Project-local skills for Workbench execution, literature research, and theory derivation under `skills/`.
-- A first-run tutorial and usage guide covering Project/Task setup, Research Plans, confirmed execution boundaries, workflow co-design, Codex Goal mode, and the execution ledger.
+- A first-run tutorial, usage guide, and remote-compute guide covering Project/Task setup, Research Plans, confirmed execution boundaries, workflow co-design, Codex Goal mode, OpenSSH/LSF setup, bounded file transfer, and the execution ledger.
 
 ### Changed
 

@@ -82,12 +82,13 @@ npm run build
 npm start
 ```
 
-然后访问 <http://127.0.0.1:3001>。服务默认只监听回环地址，并只允许已配置的本地开发源跨域访问。
+然后访问 <http://127.0.0.1:3001>。服务默认只监听回环地址。当前默认 CORS 白名单只包含本地开发页的 `5173` 来源；若生产页出现 `Origin is not allowed by Workbench`，请按[远程计算与连接指南](docs/REMOTE_COMPUTE.md#origin-is-not-allowed-by-workbench)配置完整来源，或暂用开发模式。
 
 ## 第一次使用
 
 - [第一次使用：从项目到受控 Research Run](docs/GETTING_STARTED.md)：从 Codex 打开项目、创建 Workbench Project/Task、绑定工作流、撰写 Research Plan，到审阅并确认 Envelope。
 - [使用指南：规划层、执行账本与长时间研究技巧](docs/USAGE_GUIDE.md)：解释 Action、边界、里程碑和时间线，介绍 AI 辅助工作流设计与 Codex Goal mode。
+- [远程计算设备：连接、传输与 Agent 协作](docs/REMOTE_COMPUTE.md)：优先让 Agent 配置 OpenSSH/LSF、Task 远程边界、文件传输与监控，并区分 Web 限制、CORS 和真正的授权错误。
 
 教程也说明了 Codex 对话与 Git 仓库的关系：完整对话默认不会进入仓库；Workbench 只保存必要的摘要、哈希、时间和可选对话引用。
 
@@ -118,7 +119,7 @@ CLI 默认连接 `http://127.0.0.1:3001`，可通过 `WORKBENCH_URL` 指向另�
 
 Task Spec 保存在 Workbench 账本中。研究方案与核心 Workflow 仍可纠错；改变 Confirmed Envelope 时才需要新的研究者确认。每个 Task 同时最多有一个开放 Run。
 
-真实远程能力默认关闭。项目连接、Task 目录映射和一次确认的 Task Spec 必须一致，Workbench 才会调用系统 OpenSSH/LSF。用户根只读，只有当前 Task 写根允许上传和作业操作；执行器不按材料名、Task ID、Workflow step 或软件栈选择路线。Codex 根据研究方案生成通用 Action spec，Workbench 只负责建立不可变快照并强制边界。响应不确定时只按已记录身份对账；长作业通过当前 Codex 任务的 Scheduled Task 恢复，不在 Web 或 Express 内另建 Agent。Workbench 不提供任意远程 shell，不保存密码或私钥，也不自动接受 host key。真实科学作业仍需先确认 Task Spec，复现边界见 [TESTING.md](TESTING.md)。
+保存远程连接元数据不会自动获得执行授权。项目连接、Task 目录映射和一次确认的 Task Spec 必须一致，Workbench 才会调用系统 OpenSSH/LSF。用户根只读，只有当前 Task 写根允许上传和作业操作；执行器不按材料名、Task ID、Workflow step 或软件栈选择路线。Codex 根据研究方案生成通用 Action spec，Workbench 只负责建立不可变快照并强制边界。响应不确定时只按已记录身份对账；长作业通过当前 Codex 任务的 Scheduled Task 恢复，不在 Web 或 Express 内另建 Agent。Workbench 不保存密码或私钥，也不自动接受 host key。真实科学作业仍需先确认 Task Spec；配置步骤见[远程计算与连接指南](docs/REMOTE_COMPUTE.md)，复现边界见 [TESTING.md](TESTING.md)。
 
 ## 模板与任务工作流
 
