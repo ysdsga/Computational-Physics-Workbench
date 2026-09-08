@@ -10,6 +10,12 @@ DFT+DMFT 是项目最早、目前最完整的应用场景，但不是能力边�
 
 > **Project status:** This is an early research preview. Interfaces and data models may change. The project is looking for physicists, research-software engineers, HPC users, and agent-system researchers who want to shape the system with concrete workflows and evidence.
 
+## 界面预览
+
+![Computational Physics Workbench 工作流界面](docs/images/workflow-overview.png)
+
+工作流页面展示可选择、可编辑的计算与理论物理研究骨架；Web 用于审阅状态，实际研究执行由 Codex Agent 驱动。
+
 ## 当前支持范围
 
 这个公开预览版提供一条完整的参考路径：
@@ -38,6 +44,8 @@ Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适
 - **Agent 负责执行和闭环**：制定 Working Plan、调用本地或远程能力、监控作业、诊断失败、整理产物和证据。
 - **Workbench 负责边界和记忆**：强制目录与权限范围，记录 Run、Action、Job、Artifact、Evidence 和可复用经验。
 - **Web 界面负责审阅**：展示已经记录的研究状态，但不充当隐藏的 Agent 或远程执行入口。
+
+![Computational Physics Workbench 系统架构](docs/images/system-architecture.png)
 
 完整关系见[交互式系统架构图](doc/computational-physics-workbench-architecture.html)。
 

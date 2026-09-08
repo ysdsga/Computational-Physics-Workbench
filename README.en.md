@@ -10,6 +10,12 @@ DFT+DMFT is the first and currently most complete use case, not the boundary of 
 
 > **Status:** This is an early research preview. Interfaces and data models may change. We welcome physicists, research-software engineers, HPC users, and scientific-agent researchers who want to shape the system through concrete workflows and evidence.
 
+## Interface preview
+
+![Computational Physics Workbench workflow interface](docs/images/workflow-overview.png)
+
+The workflow view presents selectable and editable structures for computational and theoretical physics research. The web application is a review surface; research execution is driven by the Codex agent.
+
 ## Supported reference path
 
 This public preview provides one complete reference path:
@@ -38,6 +44,8 @@ Most research software leaves the researcher to coordinate scripts, interfaces, 
 - **The agent owns execution and closure:** working plans, local and remote operations, job monitoring, failure diagnosis, and evidence collection.
 - **The workbench owns boundaries and memory:** filesystem and permission constraints plus a traceable ledger of runs, actions, jobs, artifacts, evidence, and reusable experience.
 - **The web application supports review:** it shows recorded state but is not a hidden agent or remote execution surface.
+
+![Computational Physics Workbench system architecture](docs/images/system-architecture.png)
 
 See the [interactive architecture diagram](doc/computational-physics-workbench-architecture.html) for the complete system model.
 
