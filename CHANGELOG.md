@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Project-local skills for Workbench execution, literature research, and theory derivation under `skills/`.
 - A first-run tutorial, usage guide, and remote-compute guide covering Project/Task setup, Research Plans, confirmed execution boundaries, workflow co-design, Codex Goal mode, OpenSSH/LSF setup, bounded file transfer, and the execution ledger.
 - README screenshots showing the workflow interface and the researcher–Agent–Workbench–HPC architecture.
+- A public roadmap prioritizing reliable long-running execution, scientific memory, portable adapters, file-based workflow cards, and expanded physics capabilities.
 
 ### Changed
 

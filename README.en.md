@@ -101,6 +101,8 @@ Focused contributions are welcome, especially for new physics workflows, reprodu
 
 This is an early-stage volunteer project with no guaranteed response time. Small, coherent contributions with reproducible evidence are the easiest to review.
 
+See the [roadmap](ROADMAP.md) for current priorities: reliable long-running research, scientific claims and memory, scheduler and agent adapters, file-based workflow cards, and deeper theoretical and many-body capabilities. (Chinese)
+
 ## Citation
 
 If the workbench contributes to research planning, execution, evidence management, or reproducibility, cite the software version in addition to the physical methods and scientific software used. Citation metadata is available in [CITATION.cff](CITATION.cff).

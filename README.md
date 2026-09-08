@@ -168,6 +168,8 @@ npm run test:e2e
 
 开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。这是一个志愿维护的早期项目，不承诺固定响应时间；小而完整、带验证证据的贡献最容易被审阅。
 
+近期优先方向见[未来路线图](ROADMAP.md)：可靠长任务、科学主张与经验记忆、调度器/Agent adapter、卡片式工作流，以及更强的理论与多体物理能力。
+
 ## 安全与隐私
 
 不要在 Issue、日志或测试夹具中提交真实密钥、HPC 地址、用户名、私钥、未公开科研数据或本地数据库。安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
