@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
 ### Added
 
 - A claim-driven physics-literature-reproduction workflow for analytical theory, model numerics, and materials calculations.

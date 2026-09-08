@@ -119,7 +119,7 @@ See the [roadmap](ROADMAP.md) for current priorities: reliable long-running rese
 
 If the workbench contributes to research planning, execution, evidence management, or reproducibility, cite the software version in addition to the physical methods and scientific software used. Citation metadata is available in [CITATION.cff](CITATION.cff).
 
-> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
 
 A version DOI will be added after the first release is archived with Zenodo.
 

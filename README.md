@@ -198,7 +198,7 @@ npm run test:e2e
 
 当前建议引用为：
 
-> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.1.1) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
+> Yan, Shuai. (2026). Computational Physics Workbench (Version 0.2.0) [Computer software]. https://github.com/ysdsga/Computational-Physics-Workbench
 
 ## 许可证
 

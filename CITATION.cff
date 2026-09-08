@@ -12,7 +12,8 @@ authors:
   - family-names: "Yan"
     given-names: "Shuai"
     orcid: "https://orcid.org/0000-0002-3105-1973"
-version: 0.1.1
+version: 0.2.0
+date-released: 2026-09-08
 repository-code: "https://github.com/ysdsga/Computational-Physics-Workbench"
 url: "https://github.com/ysdsga/Computational-Physics-Workbench"
 license: Apache-2.0
