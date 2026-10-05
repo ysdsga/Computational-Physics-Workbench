@@ -1,3 +1,5 @@
+import { t, getLocale } from '../i18n';
+import { localizeWorkflow } from '../data/workflow-localization';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Edit3, Info } from 'lucide-react';
@@ -33,10 +35,10 @@ export default function TaskWorkflowPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  if (!task) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">加载中...</div>;
+  if (!task) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">{t("加载中...", "Loading...")}</div>;
 
   const workflow = task.workflow;
-  if (!workflow) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">未知工作流: {task.workflow_id}</div>;
+  if (!workflow) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">{t("未知工作流:", "Unknown workflow:")} {task.workflow_id}</div>;
 
   const saveTaskWorkflow = async (nextWorkflow: WorkflowTemplate) => {
     const saved = await tasksApi.updateWorkflow(task.id, nextWorkflow);
@@ -62,21 +64,21 @@ export default function TaskWorkflowPage() {
       <div className="px-5 py-3 border-b border-[#2d2d44]">
         <button onClick={() => navigate(`/project/${task.project_id}`)}
           className="flex items-center gap-1 text-xs text-[#6b6b80] hover:text-white mb-1.5">
-          <ArrowLeft size={12} /> 返回项目
+          <ArrowLeft size={12} /> {t("返回项目", "Back to project")}
         </button>
         <div className="flex items-center gap-3">
           <h2 className="text-base font-semibold text-white">{task.name}</h2>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6]/80 border border-[#8b5cf6]/20">
-            {workflow.name}
+            {localizeWorkflow(workflow, getLocale()).name}
           </span>
           <button onClick={() => setShowEditor(true)}
             className="ml-auto flex items-center gap-1.5 px-2.5 py-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa] hover:bg-[#3b82f6]/10 rounded-lg transition-colors">
-            <Edit3 size={11} /> 编辑任务流程
+            <Edit3 size={11} /> {t("编辑任务流程", "Edit task workflow")}
           </button>
         </div>
         {task.description && <p className="text-xs text-[#6b6b80] mt-1">{task.description}</p>}
-        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>STAGE {agentContext.run.current_stage_id ?? '—'}</span><span>{agentContext.recentActions.length} milestones</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">普通会话命令见 Agent 时间线</span></div>}
-        <div className="mt-2 flex items-start gap-2 text-[10px] leading-5 text-[#85859c]"><Info size={12} className="mt-0.5 shrink-0 text-[#67c9b5]"/><p>这里是任务的核心科学骨架。普通命令、连接、传输和临时诊断只记 Event；提交、科学重试、批次和证据验证才作为里程碑 Action。只有改变关键阶段、检查点或完成证据时才修改工作流。</p></div>
+        {agentContext?.run && <div className="mt-2 flex flex-wrap items-center gap-3 border-l-2 border-[#67c9b5] bg-[#13211f] px-3 py-1.5 font-mono text-[9px] text-[#9acdc1]"><span>CODEX RUN {agentContext.run.status}</span><span>STAGE {agentContext.run.current_stage_id ?? '—'}</span><span>{agentContext.recentActions.length} milestones</span><span>{agentContext.recentJobs.length} jobs</span><span>{agentContext.recentEvidenceChecks.length} evidence</span><span className="text-[#657570]">{t("普通会话命令见 Agent 时间线", "See the Agent timeline for routine session commands")}</span></div>}
+        <div className="mt-2 flex items-start gap-2 text-[10px] leading-5 text-[#85859c]"><Info size={12} className="mt-0.5 shrink-0 text-[#67c9b5]"/><p>{t("这里是任务的核心科学骨架。普通命令、连接、传输和临时诊断只记 Event；提交、科学重试、批次和证据验证才作为里程碑 Action。只有改变关键阶段、检查点或完成证据时才修改工作流。", "This is the task's core scientific workflow. Routine commands, connections, transfers, and temporary diagnostics are recorded as Events. Submissions, scientific retries, batches, and evidence validation are milestone Actions. Modify the workflow only when key stages, checkpoints, or completion evidence change.")}</p></div>
       </div>
 
       {/* Progress bar */}

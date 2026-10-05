@@ -369,6 +369,8 @@ export interface RunAction {
   executor: 'codex';
   spec: Record<string, unknown>;
   spec_sha256: string;
+  /** Localized display copy; the canonical preview remains in the immutable spec. */
+  executionPreview?: { transport: string; commands: string[]; note: string };
   idempotency_key: string;
   conversation_ref: string | null;
   started_at: string | null;

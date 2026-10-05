@@ -1,3 +1,4 @@
+import { generatedText } from './language.js';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -275,7 +276,7 @@ function registerReceipt(action: RunAction, spec: ExecutionSpec, receipt: Record
 }
 
 function codexFailure(action: RunAction, code: string, message: string, extra: Record<string, unknown> = {}) {
-  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, audience: 'codex', kind: 'action_failure', title: `${action.action_type} 需要 Codex 诊断`, detail: { code, message, ...extra, blocksRun: false }, idempotencyKey: `action-failure:${action.id}:${code}`, source: 'workbench', conversationRef: action.conversation_ref });
+  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, audience: 'codex', kind: 'action_failure', title: generatedText(`${action.action_type} requires Codex diagnosis`, `${action.action_type} 需要 Codex 诊断`), detail: { code, message, ...extra, blocksRun: false }, idempotencyKey: `action-failure:${action.id}:${code}`, source: 'workbench', conversationRef: action.conversation_ref });
 }
 
 async function executeLocal(action: RunAction, spec: ExecutionSpec) {

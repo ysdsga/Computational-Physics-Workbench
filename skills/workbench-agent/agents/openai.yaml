@@ -1,4 +1,4 @@
 interface:
   display_name: "Computational Physics Workbench Agent"
-  short_description: "Run and monitor bounded research from Codex"
-  default_prompt: "Use $workbench-agent to recover this Task, agree the Research Plan, core Workflow, and Task Spec with me once, then execute, monitor long HPC jobs, and diagnose autonomously inside the confirmed boundary."
+  short_description: "Run and monitor bounded research | 受控科研执行与监控"
+  default_prompt: "Use $workbench-agent to recover this Task, agree the Research Plan, core Workflow, and Task Spec with me once, then execute, monitor long HPC jobs, and diagnose autonomously inside the confirmed boundary. Respond in the language of our conversation (English or Chinese)."

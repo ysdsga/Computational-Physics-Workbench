@@ -1,3 +1,4 @@
+import { t, resolveCopy, useLocalizedMessage, type LocalizedCopy } from '../i18n';
 import { useState, useCallback, useEffect } from 'react';
 import { ChevronRight, Folder, FileText, ArrowLeft, Plus, Eye, X } from 'lucide-react';
 import { filesApi } from '../api/client';
@@ -13,10 +14,10 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [exists, setExists] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [viewingFile, setViewingFile] = useState<{ name: string; content: string } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ name: string; content: LocalizedCopy } | null>(null);
   const [showMkdir, setShowMkdir] = useState(false);
   const [mkdirName, setMkdirName] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useLocalizedMessage();
 
   const load = useCallback(async () => {
     if (!workingDir) { setExists(false); return; }
@@ -50,7 +51,7 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
       const res = await filesApi.read(projectId, entry.relativePath);
       setViewingFile({ name: res.name, content: res.content });
     } catch (e) {
-      setViewingFile({ name: entry.name, content: `[无法读取文件: ${(e as Error).message}]` });
+      setViewingFile({ name: entry.name, content: () => `[${t('无法读取文件', 'Unable to read file')}: ${(e as Error).message}]` });
     }
   };
 
@@ -61,7 +62,7 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
       await filesApi.mkdir(projectId, currentPath, mkdirName.trim());
       setMkdirName(''); setShowMkdir(false); load();
     } catch (e) {
-      setError(`创建文件夹失败: ${(e as Error).message}`);
+      setError(() => `${t('创建文件夹失败', 'Failed to create folder')}: ${(e as Error).message}`);
     }
   };
 
@@ -72,8 +73,8 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <Folder size={40} className="mx-auto text-[#383850] mb-3" />
-          <p className="text-sm text-[#6b6b80] mb-2">未设置工作目录</p>
-          <p className="text-xs text-[#4a4a60]">请在项目设置中配置工作目录路径</p>
+          <p className="text-sm text-[#6b6b80] mb-2">{t("未设置工作目录", "No working directory configured")}</p>
+          <p className="text-xs text-[#4a4a60]">{t("请在项目设置中配置工作目录路径", "Configure a working directory path in project settings.")}</p>
         </div>
       </div>
     );
@@ -88,7 +89,7 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
             <ArrowLeft size={14} />
           </button>
         )}
-        <button onClick={() => setCurrentPath('')} className="text-xs text-[#9898b0] hover:text-white">根目录</button>
+        <button onClick={() => setCurrentPath('')} className="text-xs text-[#9898b0] hover:text-white">{t("根目录", "Root")}</button>
         {pathParts.map((part, i) => (
           <div key={i} className="flex items-center gap-1">
             <ChevronRight size={12} className="text-[#4a4a60]" />
@@ -99,7 +100,7 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
         <div className="flex-1" />
         <button onClick={() => setShowMkdir(!showMkdir)}
           className="flex items-center gap-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa]">
-          <Plus size={11} /> 新建文件夹
+          <Plus size={11} /> {t("新建文件夹", "New folder")}
         </button>
       </div>
 
@@ -109,9 +110,9 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
           <input value={mkdirName} onChange={e => setMkdirName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleMkdir()}
             className="flex-1 bg-[#252536] border border-[#383850] rounded px-2 py-1.5 text-xs text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]"
-            placeholder="文件夹名称" autoFocus />
-          <button onClick={handleMkdir} className="px-3 py-1.5 bg-[#3b82f6] text-white text-xs rounded hover:bg-[#2563eb]">创建</button>
-          <button onClick={() => { setShowMkdir(false); setMkdirName(''); setError(''); }} className="px-2 py-1.5 text-[#6b6b80] text-xs rounded hover:text-white hover:bg-[#2d2d44]">取消</button>
+            placeholder={t("文件夹名称", "Folder name")} autoFocus />
+          <button onClick={handleMkdir} className="px-3 py-1.5 bg-[#3b82f6] text-white text-xs rounded hover:bg-[#2563eb]">{t("创建", "Create")}</button>
+          <button onClick={() => { setShowMkdir(false); setMkdirName(''); setError(''); }} className="px-2 py-1.5 text-[#6b6b80] text-xs rounded hover:text-white hover:bg-[#2d2d44]">{t("取消", "Cancel")}</button>
         </div>
       )}
 
@@ -126,15 +127,15 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
       {/* File list */}
       <div className="flex-1 overflow-y-auto p-3">
         {loading ? (
-          <div className="text-center py-8 text-sm text-[#6b6b80]">加载中...</div>
+          <div className="text-center py-8 text-sm text-[#6b6b80]">{t("加载中...", "Loading...")}</div>
         ) : !exists ? (
           <div className="text-center py-8">
             <Folder size={36} className="mx-auto text-[#383850] mb-2" />
-            <p className="text-sm text-[#6b6b80]">目录不存在</p>
+            <p className="text-sm text-[#6b6b80]">{t("目录不存在", "Directory does not exist")}</p>
             <p className="text-xs text-[#4a4a60] mt-1 font-mono">{workingDir}/{currentPath}</p>
           </div>
         ) : entries.length === 0 ? (
-          <div className="text-center py-8 text-sm text-[#6b6b80]">空目录</div>
+          <div className="text-center py-8 text-sm text-[#6b6b80]">{t("空目录", "Empty directory")}</div>
         ) : (
           <div className="space-y-0.5">
             {entries.map((entry, i) => (
@@ -174,7 +175,7 @@ export default function FileBrowser({ projectId, workingDir }: Props) {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
-              <pre className="text-xs text-[#e2e2f0] font-mono whitespace-pre-wrap break-all">{viewingFile.content}</pre>
+              <pre className="text-xs text-[#e2e2f0] font-mono whitespace-pre-wrap break-all">{resolveCopy(viewingFile.content)}</pre>
             </div>
           </div>
         </div>

@@ -1,9 +1,11 @@
 ---
 name: literature-research
-description: Systematically research scholarly literature, map evidence and competing explanations, identify the closest prior work, and audit scientific novelty. Use for 文献调研、研究现状、相关工作、创新性检查、最近邻文献、引文追踪、理论或实验约束综述; do not use for casual recommendations or a single known-paper summary.
+description: Systematically research scholarly literature, map evidence and competing explanations, identify the closest prior work, and audit scientific novelty. Use for literature reviews, related work, novelty checks, citation tracing, theoretical or experimental constraints, 文献调研、研究现状、相关工作、创新性检查、最近邻文献、引文追踪、理论或实验约束综述; do not use for casual recommendations or a single known-paper summary.
 ---
 
 # Literature Research
+
+Respond in the researcher's requested/current language, including English or Chinese. Keep paper titles, citations, identifiers and quoted source text faithful to the originals; distinguish your translations. Language choice never changes evidence standards or source-access limitations.
 
 Aim for **decision-complete coverage**, not an impossible claim that every paper has been found. The result must be sufficient to constrain the scientific problem, expose competing explanations, and justify or revise each proposed novelty claim.
 

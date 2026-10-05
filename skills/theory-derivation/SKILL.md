@@ -1,16 +1,18 @@
 ---
 name: theory-derivation
-description: Assist theoretical-physics derivations with symbolic algebra, group theory, complex analysis, operator algebra, constraint solving, and numerical cross-checks. Use for 理论推导、公式验证、群论、复变函数、算符代数、费曼图相关代数或可计算的理论一致性检查; do not use for routine DFT/DMFT production calculations without a derivation task.
+description: Assist theoretical-physics derivations with symbolic algebra, group theory, complex analysis, operator algebra, constraint solving, and numerical cross-checks. Use for theoretical derivations, formula verification, group theory, complex analysis, operator or Feynman-diagram algebra, 理论推导、公式验证、群论、复变函数、算符代数、费曼图相关代数或可计算的理论一致性检查; do not use for routine DFT/DMFT production calculations without a derivation task.
 ---
 
 # Theory Derivation
+
+Respond in the researcher's requested/current language, including English or Chinese. Preserve mathematical notation, assumptions, units, identifiers and reproducible tool inputs; translate explanations without changing the claim or its verification standard.
 
 Use computational tools as assistants to a transparent theoretical argument. Choose the smallest backend that materially improves the derivation or its verification; do not run every available tool by default.
 
 ## Workflow
 
 1. State the mathematical object, assumptions, parameter domain, conventions, and the claim to derive or test before encoding it.
-2. Read [references/tool-routing.md](references/tool-routing.md) and select a primary backend from the task type. Use the documented WSL environment as the default execution entry.
+2. Read [references/tool-routing.md](references/tool-routing.md), discover available tools on the current host, and select a primary backend from the task type. Prefer the project's existing reproducible environment; do not assume WSL or the author's environment is installed.
 3. Keep the human-readable derivation primary. Preserve the equations and reasoning needed to understand why the result follows; a computer output alone is not a proof.
 4. For a conclusion that materially supports the research claim, perform at least one independent check when feasible: another backend, an alternative representation, an exact or controlled limit, a high-precision numerical spot check, or direct substitution.
 5. Save reusable inputs and outputs as evidence when working inside a research task: source script or notebook, relevant output, assumptions, tool/version information, and an interpretation of what was and was not established.

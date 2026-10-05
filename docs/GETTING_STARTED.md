@@ -1,5 +1,7 @@
 # 第一次使用：从项目到受控 Research Run
 
+[English](GETTING_STARTED.en.md) | 中文
+
 这份教程面向第一次接触 Computational Physics Workbench 的研究者。完成后，你会拥有一个 Project、一个绑定工作流的 Task、一份研究方案，以及一个经过你明确确认边界的 Research Run。
 
 Workbench 不是靠 Web 页面自动替你做物理。它把职责拆成三部分：
@@ -33,7 +35,7 @@ Codex 官方的项目与对话说明见 [Projects and chats](https://learn.chatg
 
 ## 2. 启动 Workbench
 
-先确认本机安装了 Node.js 22+ 和 npm。
+先确认本机安装了 Node.js 22.12+ 和 npm。
 
 按照 [README 的本地运行说明](../README.md#本地运行)安装依赖并启动开发模式：
 
@@ -42,9 +44,11 @@ npm install
 npm run dev:full
 ```
 
-开发模式请打开 Vite 在终端显示的地址，默认为 <http://127.0.0.1:5173>。如果你使用生产式本地运行，应先执行 `npm run build`，再执行 `npm start`，然后打开 <http://127.0.0.1:3001>。
+开发模式请打开 Vite 在终端显示的地址，默认为 <http://127.0.0.1:5173>。如果你使用生产式本地运行，应先执行 `npm run build`，再执行 `npm start`，然后打开 <http://127.0.0.1:3001>。原有默认来源白名单只包含两个 5173 来源；3001 页面可以加载，但浏览器写请求需要显式来源配置。初次使用建议开发模式；一次性验收可参考下方隔离演示，仅在该终端进程配置精确回环来源，不修改全局或生产策略。
 
 `npm link` 可以把 `workbench` 注册为本机命令；未注册时，Codex 也可以使用 `node bin/workbench.js ...`。正常情况下，这些 CLI 命令由 Codex 根据项目 Skill 调用，不需要研究者逐条输入。
+
+侧栏可切换 English / 简体中文，选择保存在当前浏览器中；切换不改写已有科研内容。没有有效保存值时，先读取 `navigator.languages[0]`，缺失或为空时回退到 `navigator.language`；中文浏览器语言（包括 zh-TW）使用简体中文，其他或不可用语言回退英文。不检测 IP 或系统地区。CLI 可指定 `--lang zh-CN` 或 `--lang en`。首次体验可参考[隔离数据库的本地演示](examples/local-first-run.en.md)，不需要集群账号，也不会连接远程设备。
 
 ## 3. 创建 Workbench Project
 

@@ -1,10 +1,12 @@
+import { t, getLocale } from '../i18n';
+import { localizeWorkflow } from '../data/workflow-localization';
 import { useState } from 'react';
 import { getStagesOf, getStepsForStageOf } from '../contexts/WorkflowContext';
 import type { WorkflowTemplate, WorkflowStep, StepStatus, StepProgress } from '../types';
 
-const STEP_WIDTH = 170;
+const STEP_WIDTH = 240;
 const STEP_HEIGHT = 72;
-const STAGE_LABEL_WIDTH = 130;
+const STAGE_LABEL_WIDTH = 170;
 const H_GAP = 24;
 const V_GAP = 12;
 const STAGE_HEADER_H = 36;
@@ -26,7 +28,8 @@ interface Props {
   selectedStepId: string | null;
 }
 
-export default function Flowchart({ workflow, progressMap, observationMap = {}, onSelectStep, selectedStepId }: Props) {
+export default function Flowchart({ workflow: rawWorkflow, progressMap, observationMap = {}, onSelectStep, selectedStepId }: Props) {
+  const workflow = localizeWorkflow(rawWorkflow, getLocale());
   const [hoveredStep, setHoveredStep] = useState<string | null>(null);
 
   const stages = getStagesOf(workflow);
@@ -35,7 +38,7 @@ export default function Flowchart({ workflow, progressMap, observationMap = {}, 
     steps: getStepsForStageOf(workflow, stage.id),
   }));
 
-  const maxSteps = Math.max(...stageLayouts.map(s => s.steps.length));
+  const maxSteps = Math.max(0, ...stageLayouts.map(s => s.steps.length));
   const svgWidth = PADDING_X * 2 + STAGE_LABEL_WIDTH + maxSteps * (STEP_WIDTH + H_GAP) + 20;
   const svgHeight = PADDING_Y * 2 +
     stageLayouts.length * (STAGE_HEADER_H + V_GAP + STEP_HEIGHT + V_GAP * 2);
@@ -86,7 +89,8 @@ export default function Flowchart({ workflow, progressMap, observationMap = {}, 
                 fontSize={12}
                 fontWeight={600}
               >
-                {stage.name}
+                <title>{stage.name}</title>
+                {stage.name.length > 22 ? stage.name.slice(0, 22) + '…' : stage.name}
               </text>
               <text
                 x={PADDING_X + STAGE_LABEL_WIDTH + 12}
@@ -115,7 +119,7 @@ export default function Flowchart({ workflow, progressMap, observationMap = {}, 
                     observation={observationMap[step.id]}
                     isSelected={isSelected}
                     isHovered={isHovered}
-                    onSelect={() => onSelectStep(step)}
+                    onSelect={() => onSelectStep(rawWorkflow.steps.find(candidate => candidate.id === step.id) ?? step)}
                     onHover={(h) => setHoveredStep(h ? step.id : null)}
                   />
                 );
@@ -153,6 +157,7 @@ function StepNode({
   const strokeColor = isSelected ? '#60a5fa' : colors.stroke;
   const fillColor = isHovered ? '#2d2d44' : colors.fill;
   const opacity = status === 'skipped' ? 0.5 : 1;
+  const nameLimit = getLocale() === 'en' ? (step.optional ? 22 : 30) : (step.optional ? 13 : 18);
 
   return (
     <g
@@ -162,26 +167,27 @@ function StepNode({
       style={{ cursor: 'pointer' }}
       opacity={opacity}
     >
+      <title>{step.name}</title>
       <rect x={x} y={y} width={STEP_WIDTH} height={STEP_HEIGHT} rx={8}
         fill={fillColor} stroke={strokeColor} strokeWidth={strokeW} className="transition-all" />
       <circle cx={x + 14} cy={y + 18} r={5} fill={isHovered ? strokeColor : colors.stroke} />
       <text x={x + 26} y={y + 20} fill={isHovered ? '#e2e2f0' : colors.text}
         fontSize={11.5} fontWeight={isSelected ? 600 : 500} style={{ userSelect: 'none' }}>
-        {step.name.length > 10 ? step.name.slice(0, 10) + '…' : step.name}
+        {step.name.length > nameLimit ? step.name.slice(0, nameLimit) + '…' : step.name}
       </text>
       {step.optional && (
         <>
-          <rect x={x + STEP_WIDTH - 36} y={y + 6} width={26} height={14} rx={3} fill="#2d2d44" />
-          <text x={x + STEP_WIDTH - 23} y={y + 14} fill="#6b6b80" fontSize={8}
-            textAnchor="middle" dominantBaseline="central">可选</text>
+          <rect x={x + STEP_WIDTH - 52} y={y + 6} width={46} height={14} rx={3} fill="#2d2d44" />
+          <text x={x + STEP_WIDTH - 29} y={y + 14} fill="#6b6b80" fontSize={8}
+            textAnchor="middle" dominantBaseline="central">{t("可选", "Optional")}</text>
         </>
       )}
       <text x={x + 14} y={y + 42} fill="#6b6b80" fontSize={10} style={{ userSelect: 'none' }}>
-        {status === 'completed' ? '✓ 已完成' : status === 'in_progress' ? '● 进行中' : status === 'skipped' ? '— 已跳过' : '○ 待开始'}
+        {status === 'completed' ? t("✓ 已完成", "✓ Completed") : status === 'in_progress' ? t("● 进行中", "● In progress") : status === 'skipped' ? t("— 已跳过", "— Skipped") : t("○ 待开始", "○ Pending")}
       </text>
       {(step.inputFiles && step.inputFiles.length > 0) && (
         <text x={x + STEP_WIDTH - 14} y={y + 42} fill="#4a4a60" fontSize={9} textAnchor="end" style={{ userSelect: 'none' }}>
-          {step.inputFiles.length} 文件
+          {t(`${step.inputFiles.length} 文件`, `${step.inputFiles.length} ${step.inputFiles.length === 1 ? 'file' : 'files'}`)}
         </text>
       )}
       {observation && (observation.actions > 0 || observation.jobs > 0 || observation.evidence > 0) && (

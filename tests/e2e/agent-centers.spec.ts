@@ -6,6 +6,7 @@ import type { Server } from 'node:http';
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-playwright-'));
 let server: Server;
+test.use({ locale: 'zh-CN' });
 
 test.beforeAll(async () => {
   process.env.WORKBENCH_DB_PATH = path.join(tempRoot, 'e2e.db');
@@ -117,6 +118,16 @@ test('Web observes a confirmed Task Spec and pending item without issuing Agent 
   expect(runResponse.status()).toBe(201);
   const run = await runResponse.json() as { id: string };
   expect((await request.post(`/api/agent/v1/runs/${run.id}/confirm`, { data: { summary: 'fixture confirmed', source: 'codex_conversation' } })).ok()).toBeTruthy();
+  // Metadata-only fixture: scientific.test is never executed and is not physical evidence.
+  const canonicalNote = 'Codex 在 Task 根内运行已记录脚本；输入哈希变化时生成新 Action。';
+  const actionResponse = await request.post(`/api/agent/v1/runs/${run.id}/actions`, {
+    data: {
+      actionType: 'scientific.test', stageId: stageIds[0], idempotencyKey: 'ui-readonly-localized-preview',
+      spec: { executionPreview: { transport: 'local', commands: [], note: canonicalNote } },
+    },
+  });
+  expect(actionResponse.status()).toBe(201);
+  const action = await actionResponse.json() as { id: string; spec_sha256: string };
   const reviewResponse = await request.post(`/api/agent/v1/runs/${run.id}/pending-items`, {
     data: {
       stageId: stageIds[0], audience: 'researcher', kind: 'ui_acceptance',
@@ -151,6 +162,18 @@ test('Web observes a confirmed Task Spec and pending item without issuing Agent 
   await expect(page.getByLabel('远程作业记录列表')).toHaveCSS('overflow-y', 'auto');
   await expect(page.getByLabel('证据检查记录列表')).toHaveCSS('overflow-y', 'auto');
   await expect(page.getByLabel('执行时间线记录列表')).toHaveCSS('overflow-y', 'auto');
+
+  const milestone = page.locator('article').filter({ has: page.getByRole('heading', { name: 'scientific.test', exact: true }) });
+  await milestone.locator('summary').click();
+  await expect(milestone.locator('details p')).toHaveText(canonicalNote);
+  await page.getByRole('combobox', { name: 'Language / 语言' }).selectOption('en');
+  await expect(milestone.locator('details p')).toHaveText('Codex runs the recorded script within the Task root; changed input hashes require a new Action.');
+  await expect(milestone.locator('details pre').last()).toContainText(canonicalNote);
+  const canonicalAction = await request.get(`/api/agent/v1/actions/${action.id}`).then(response => response.json());
+  expect(canonicalAction.spec.executionPreview.note).toBe(canonicalNote);
+  expect(canonicalAction.spec_sha256).toBe(action.spec_sha256);
+  await page.getByRole('combobox', { name: 'Language / 语言' }).selectOption('zh-CN');
+  await expect(milestone.locator('details p')).toHaveText(canonicalNote);
 
   await page.goto('/#/reviews');
   await expect(page.getByText('是否确认 UI 验收结论？')).toBeVisible();
@@ -221,7 +244,8 @@ test('supercomputer view records user, project and Task roots without remote exe
   await page.getByLabel('OpenSSH 别名').fill('pilot');
   await page.getByLabel('用户只读根').fill('/public/home/tester');
   await page.getByLabel('远程项目根').fill('/public/home/tester/pj001_fixture');
-  await page.getByLabel('调度器').fill('LSF');
+  await expect(page.getByLabel('调度器')).toHaveValue('LSF');
+  await expect(page.getByLabel('调度器')).toBeDisabled();
   await page.getByRole('button', { name: '保存连接元数据' }).click();
   await expect(page.getByText('/public/home/tester/pj001_fixture').first()).toBeVisible();
   await page.getByLabel('任务目录名').fill('tk001_fixture');

@@ -1,4 +1,4 @@
 interface:
   display_name: "Literature Research"
-  short_description: "系统调研学术文献并完成证据矩阵、最近邻工作与创新性审计"
-  default_prompt: "使用 $literature-research 系统调研这个科学问题并审计其创新性。"
+  short_description: "Literature evidence and novelty | 文献与创新性审计"
+  default_prompt: "Use $literature-research to investigate this scientific question systematically, map the evidence and closest prior work, and audit novelty. Respond in the language of our conversation (English or Chinese)."

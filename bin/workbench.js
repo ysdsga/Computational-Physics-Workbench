@@ -7,6 +7,7 @@ function parse(argv) {
   const positionals = []; const flags = {};
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
+    if (value === '-h' || value === '--help') { flags.help = true; continue; }
     if (!value.startsWith('--')) { positionals.push(value); continue; }
     const [key, inline] = value.slice(2).split('=', 2);
     if (inline !== undefined) flags[key] = inline;
@@ -17,6 +18,7 @@ function parse(argv) {
 }
 
 const { positionals, flags } = parse(process.argv.slice(2));
+const language = flags.lang ?? process.env.WORKBENCH_LANG ?? 'en';
 const baseUrl = String(process.env.WORKBENCH_URL ?? 'http://127.0.0.1:3001').replace(/\/$/, '');
 
 function usage(message, code = EXIT.usage) {
@@ -79,6 +81,10 @@ function usage(message, code = EXIT.usage) {
   monitor pause --run <id> --automation-ref <id> --automation-state paused
   monitor close --run <id> --automation-ref <id> --automation-state <deleted|missing>
 
+Global options: --help, -h, --pretty, --lang <en|zh-CN>
+Environment: WORKBENCH_URL (default http://127.0.0.1:3001), WORKBENCH_LANG (default en).
+Language selects newly generated server prose; stored research content is preserved.
+
 JSON is the default output. Web pages are observation/metadata surfaces and never authorize or launch Agent work.\n`);
   process.exit(code);
 }
@@ -122,7 +128,7 @@ const BLOCKED_CODES = new Set([
 
 async function request(method, pathname, body) {
   let response;
-  try { response = await fetch(`${baseUrl}${pathname}`, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); }
+  try { response = await fetch(`${baseUrl}${pathname}`, { method, headers: { 'Accept-Language': language, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) }); }
   catch (error) { const item = new Error(`Cannot reach Workbench at ${baseUrl}: ${error.message}`); item.exitCode = EXIT.transport; throw item; }
   const text = await response.text();
   let payload; try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text || `HTTP ${response.status}` }; }
@@ -202,7 +208,8 @@ function commandInput() {
 
 async function main() {
   const [group, action] = positionals;
-  if (!group && (flags.help || flags.h)) usage(undefined, EXIT.ok);
+  if (flags.help || flags.h || group === 'help') usage(undefined, EXIT.ok);
+  if (!['en', 'zh-CN'].includes(language)) usage('Language must be en or zh-CN (--lang or WORKBENCH_LANG)');
   if (!group) usage();
   if (group === 'doctor') {
     const started = Date.now(); const projects = await request('GET', '/api/projects'); const execution = await request('GET', '/api/agent/v1/execution-contract');

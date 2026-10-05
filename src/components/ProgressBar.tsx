@@ -1,3 +1,5 @@
+import { t, getLocale } from '../i18n';
+import { localizeWorkflow } from '../data/workflow-localization';
 import { getStagesOf, getStepsForStageOf, getTotalRequiredStepsOf } from '../contexts/WorkflowContext';
 import type { StepProgress, WorkflowTemplate } from '../types';
 
@@ -6,7 +8,8 @@ interface Props {
   progressMap: Record<string, StepProgress>;
 }
 
-export default function ProgressBar({ workflow, progressMap }: Props) {
+export default function ProgressBar({ workflow: rawWorkflow, progressMap }: Props) {
+  const workflow = localizeWorkflow(rawWorkflow, getLocale());
   const stages = getStagesOf(workflow);
 
   const stats = stages.map(stage => {
@@ -24,7 +27,7 @@ export default function ProgressBar({ workflow, progressMap }: Props) {
   return (
     <div className="px-5 py-3 border-b border-[#2d2d44] bg-[#1a1a2e]">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-[#9898b0]">总体进度</span>
+        <span className="text-xs font-medium text-[#9898b0]">{t("总体进度", "Overall progress")}</span>
         <span className="text-xs font-semibold text-white">{overallPct}%</span>
       </div>
       <div className="h-2 bg-[#252536] rounded-full overflow-hidden mb-3">

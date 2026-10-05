@@ -4,11 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import React, { createElement } from 'react';
 import TheoryResearchPanel from '../src/components/TheoryResearchPanel';
 import type { ResearchMap } from '../src/types';
+import { setLocale } from '../src/i18n';
 
 // The root test tsconfig uses classic JSX while Vite uses the automatic runtime.
 Object.assign(globalThis, { React });
 
 test('theory panel keeps partial goals and failed learning visible, including legacy caveat', () => {
+  setLocale('zh-CN');
   const map: ResearchMap = { scientificGoal: { question: 'Original physical question', successCriteria: ['Derive the mechanism'], insufficientOutcomes: ['Only diagnostics'], acceptedAnswerTypes: ['explanation'] }, goalSha256: 'hash', goalRunId: 'run-1', routes: [{ id: 'failed-route', idea: 'A scalar mechanism', significance: 'Mechanism test', disposition: 'falsified', reason: 'Symmetry forbids the response', evidenceRefs: ['proof.md'], learning: 'Only the scalar limit is excluded', nextQuestion: 'Try an orbital-resolved model', runId: 'run-1', stageId: 'model', eventId: 'event-1', historyEventIds: ['event-1'] }], searches: [] };
   const html = renderToStaticMarkup(createElement(TheoryResearchPanel, { map, assessment: { goalSha256: 'hash', status: 'partial', answer: 'Only a necessary condition', answerType: 'conditional', criteria: [], remainingGaps: ['Missing causal source'] } }));
   assert.match(html, /Original physical question/);

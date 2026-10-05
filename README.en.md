@@ -16,7 +16,7 @@ Designed for AI for Science and scientific computing, it brings editable researc
 
 ## Interface preview
 
-![Computational Physics Workbench workflow interface](docs/images/workflow-overview.png)
+![Computational Physics Workbench workflow interface in English](docs/images/workflow-overview.en.png)
 
 The workflow view presents selectable and editable structures for computational and theoretical physics research. The web application is a review surface; research execution is driven by the Codex agent.
 
@@ -51,7 +51,7 @@ Most research software leaves the researcher to coordinate scripts, interfaces, 
 
 ![Computational Physics Workbench system architecture](docs/images/system-architecture.png)
 
-See the [interactive architecture diagram](doc/computational-physics-workbench-architecture.html) for the complete system model.
+Read the [English architecture guide](docs/ARCHITECTURE.en.md) for the system model. The architecture image above and the [interactive architecture diagram](doc/computational-physics-workbench-architecture.html) currently use Chinese labels.
 
 ## Current capabilities
 
@@ -66,10 +66,10 @@ See the [interactive architecture diagram](doc/computational-physics-workbench-a
 
 ## Quick start
 
-Requirements: Node.js 22+ and npm.
+Requirements: Node.js 22.12+ and npm. Use a source checkout and run commands from its root.
 
 ```shell
-npm install
+npm ci
 npm run dev:full
 ```
 
@@ -80,17 +80,32 @@ npm run build
 npm start
 ```
 
-Then open <http://127.0.0.1:3001>.
+Then open <http://127.0.0.1:3001>. The unchanged origin policy allows only the two development origins on port 5173 by default. Browser writes from the built page require an explicit allowed origin; use the [disposable local preview](docs/examples/local-first-run.en.md) for an exact, process-local loopback configuration. This language upgrade does not alter production access policy.
+
+Select English or 简体中文 in the sidebar. Your choice is saved in this browser; otherwise the browser language is used with English fallback. Language changes preserve researcher-authored notes, identifiers, scientific data and recorded provenance.
+
+The CLI needs no global installation. In another terminal while the service is running:
+
+```shell
+node bin/workbench.js --help
+node bin/workbench.js doctor --lang en --pretty
+```
+
+Use `--lang zh-CN` for Chinese generated service prose, or set `WORKBENCH_LANG`. CLI help and many technical errors remain English. See [configuration](docs/REMOTE_COMPUTE.en.md#local-service-configuration) for a custom service URL, database or browser origin. Try the [local-only example](docs/examples/local-first-run.en.md) with a disposable database before using real research data.
 
 The SQLite runtime database, real research inputs and outputs, credentials, and local environment files are intentionally excluded from Git.
 
 ## User documentation
 
-- [First use: from a project to a controlled Research Run](docs/GETTING_STARTED.md) (Chinese)
-- [Usage guide: planning layers, execution ledger, workflow design, and long-running research](docs/USAGE_GUIDE.md) (Chinese)
-- [Remote compute: connection, transfer, and agent collaboration](docs/REMOTE_COMPUTE.md) (Chinese)
+- [First use: from a project to a controlled Research Run](docs/GETTING_STARTED.en.md)
+- [Usage guide: planning layers, execution ledger, workflow design, and long-running research](docs/USAGE_GUIDE.en.md)
+- [Remote compute: connection, transfer, and agent collaboration](docs/REMOTE_COMPUTE.en.md)
+- [Task and Run model](docs/TASKS.en.md), [architecture](docs/ARCHITECTURE.en.md), and [testing](TESTING.en.md)
+- [English agent project guide](AGENTS.en.md) and [local-only runnable example](docs/examples/local-first-run.en.md)
+- [API reference](doc/API_REFERENCE.en.md) and [current schema data dictionary](doc/DATA_DICTIONARY.en.md)
+- [Physics paper reproduction workflow](doc/PAPER_REPRODUCTION_WORKFLOW.en.md), [design decisions](docs/DECISIONS.en.md), and [roadmap](ROADMAP.en.md)
 
-The guides also clarify the distinction between Codex projects/chats and Workbench Projects/Tasks. Full Codex transcripts are not committed to this repository by default.
+Each guide and current technical reference links to its Chinese counterpart. They clarify the distinction between Codex projects/chats and Workbench Projects/Tasks. Full Codex transcripts are not committed to this repository by default. Historical design plans and old release notes remain in their original language; the current API, schema, design decisions, roadmap and paper-reproduction guidance have English counterparts checked against the implementation.
 
 ## Important limitations
 
@@ -115,7 +130,7 @@ Focused contributions are welcome, especially for new physics workflows, reprodu
 
 This is an early-stage volunteer project with no guaranteed response time. Small, coherent contributions with reproducible evidence are the easiest to review.
 
-See the [roadmap](ROADMAP.md) for current priorities: reliable long-running research, scientific claims and memory, scheduler and agent adapters, file-based workflow cards, and deeper theoretical and many-body capabilities. (Chinese)
+See the [roadmap](ROADMAP.en.md) for current priorities: reliable long-running research, scientific claims and memory, scheduler and agent adapters, file-based workflow cards, and deeper theoretical and many-body capabilities.
 
 ## Citation
 

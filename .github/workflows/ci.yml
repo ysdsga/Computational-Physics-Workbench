@@ -35,3 +35,7 @@ jobs:
         run: npm test
       - name: Build
         run: npm run build
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser regression
+        run: npm run test:e2e

@@ -33,6 +33,7 @@ coverage/
 .vite/
 /test-results/
 /playwright-report/
+/.review/
 /tmp/
 /.tmp/
 /.codex_patch_probe

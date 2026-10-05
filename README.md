@@ -80,8 +80,10 @@ Slurm、PBS、Claude Code、WorkBuddy 和 DeepSeek Harness 属于计划中的适
 
 ## 本地运行
 
+要求 Node.js 22.12+ 和 npm；在源码仓库根目录运行。
+
 ```powershell
-npm install
+npm ci
 npm run dev:full
 ```
 
@@ -94,13 +96,17 @@ npm run build
 npm start
 ```
 
-然后访问 <http://127.0.0.1:3001>。服务默认只监听回环地址。当前默认 CORS 白名单只包含本地开发页的 `5173` 来源；若生产页出现 `Origin is not allowed by Workbench`，请按[远程计算与连接指南](docs/REMOTE_COMPUTE.md#origin-is-not-allowed-by-workbench)配置完整来源，或暂用开发模式。
+然后访问 <http://127.0.0.1:3001>。服务默认只监听回环地址。保持原有 CORS 默认策略：仅允许 localhost/127.0.0.1 的开发端口 5173；内置生产页面虽可加载，携带 3001 来源的浏览器写请求仍需显式配置。一次性检查可按[隔离本地演示](docs/examples/local-first-run.en.md)只在该进程中设置精确回环来源；本次语言适配不改变全局或生产访问策略。详见[来源配置说明](docs/REMOTE_COMPUTE.md#origin-is-not-allowed-by-workbench)。
+
+侧栏可切换 English / 简体中文并记住选择；没有保存值时按浏览器语言选择，其他语言回退英文。切换语言保留用户笔记、科研数据、标识符和证据来源。无需全局安装 CLI，可用 `node bin/workbench.js doctor --lang zh-CN --pretty`；`--lang en` 或 `WORKBENCH_LANG` 可选择生成说明的语言。
 
 ## 第一次使用
 
 - [第一次使用：从项目到受控 Research Run](docs/GETTING_STARTED.md)：从 Codex 打开项目、创建 Workbench Project/Task、绑定工作流、撰写 Research Plan，到审阅并确认 Envelope。
 - [使用指南：规划层、执行账本与长时间研究技巧](docs/USAGE_GUIDE.md)：解释 Action、边界、里程碑和时间线，介绍 AI 辅助工作流设计与 Codex Goal mode。
 - [远程计算设备：连接、传输与 Agent 协作](docs/REMOTE_COMPUTE.md)：优先让 Agent 配置 OpenSSH/LSF、Task 远程边界、文件传输与监控，并区分 Web 限制、CORS 和真正的授权错误。
+- [English documentation](README.en.md#user-documentation)：英文入门、配置、使用指南、架构、测试与 Agent 规范；各指南保留中文互链。
+- [本地隔离演示（English）](docs/examples/local-first-run.en.md)：临时数据库与无需集群的可运行数值示例，明确区分演示与真实科学验收。
 
 教程也说明了 Codex 对话与 Git 仓库的关系：完整对话默认不会进入仓库；Workbench 只保存必要的摘要、哈希、时间和可选对话引用。
 

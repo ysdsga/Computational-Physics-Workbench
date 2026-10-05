@@ -17,7 +17,7 @@ On Windows/WSL combinations, convert paths explicitly and prefer a saved script 
 | Task | Primary choice | Escalation or independent check | Important cautions |
 |---|---|---|---|
 | Transparent symbolic algebra, differentiation, series, elementary integrals, equation manipulation | SymPy | Mathematica or direct substitution/high-precision sampling | Declare symbol assumptions; inspect unevaluated conditions and piecewise results. |
-| Difficult symbolic integrals, special functions, differential equations, aggressive simplification | Mathematica | SymPy, mpmath, or controlled limits | Track `$Assumptions`, branches, conditions, and Mathematica 11.1 compatibility. |
+| Difficult symbolic integrals, special functions, differential equations, aggressive simplification | Mathematica | SymPy, mpmath, or controlled limits | Track `$Assumptions`, branches, conditions, and compatibility with the installed Mathematica version. |
 | Exact rings, fields, polynomials, algebraic numbers, number theory | SageMath / python-flint | Mathematica or independent exact substitution | Prefer exact rationals and algebraic objects over floating-point coercion. |
 | Abstract groups, representations, character tables, cosets, finite-group enumeration | GAP through SageMath or standalone GAP | Hand checks for generators/relations and low-order cases | Record group presentation, representation basis, and convention for characters. |
 | Crystallographic space-group operations | spglib, then Sage/GAP for abstract structure | Explicit operation multiplication and symmetry action on the model | Distinguish crystal operations from the magnetic group and antiunitary extensions. |
@@ -27,7 +27,7 @@ On Windows/WSL combinations, convert paths explicitly and prefer a saved script 
 | Finite Hilbert-space quantum dynamics, master equations, small exact diagonalization | QuTiP with NumPy/SciPy | Symmetry blocks, conservation checks, or an independent matrix construction | State basis ordering, truncation, solver tolerance, and open-system convention. |
 | Logical constraints, discrete case splits, finite enumeration, consistency of assumptions | Z3 | Direct enumeration or constructive proof | Z3 does not prove general continuous analytic claims unless they are faithfully encoded in a supported theory. |
 | Graph structure, dependency graphs, diagram topology, derivation maps | NetworkX; Graphviz for rendering | Manual inspection of small graphs | A graph visualization is explanatory evidence, not a physical derivation. |
-| Reproducible exploration and teaching derivations | Jupyter kernel `Python (theory_derivation_env, WSL)` | Export the decisive calculation to a small script for regression checking | Keep notebook execution order clean and record environment versions. |
+| Reproducible exploration and teaching derivations | An existing project-compatible Jupyter kernel | Export the decisive calculation to a small script for regression checking | Discover and record the kernel/environment; keep notebook execution order clean and record versions. |
 
 ## Physics-specific routing
 

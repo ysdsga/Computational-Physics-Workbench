@@ -1,3 +1,4 @@
+import { executionPreviewForDisplay } from './language.js';
 import crypto from 'crypto';
 import fs from 'fs';
 import db from '../db.js';
@@ -47,7 +48,11 @@ function fileSha256(filePath: string): string {
 
 function serializeAction(row: any): RunAction {
   const { spec_json, result_json, error_json, ...rest } = row;
-  return { ...rest, spec: JSON.parse(spec_json), result: JSON.parse(result_json), error: JSON.parse(error_json) } as RunAction;
+  const spec = JSON.parse(spec_json);
+  const preview = spec?.executionPreview;
+  return { ...rest, spec, result: JSON.parse(result_json), error: JSON.parse(error_json),
+    ...(preview && typeof preview === 'object' && !Array.isArray(preview) ? { executionPreview: executionPreviewForDisplay(preview) } : {}),
+  } as RunAction;
 }
 
 function serializeArtifact(row: any): RunArtifact {

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { executionPreviewForDisplay } from './language.js';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
@@ -849,7 +850,13 @@ export function buildAgentContext(taskId: string): AgentContext {
   const pending = run ? listPendingItems({ runId: run.id, status: 'open' }) : [];
   if (pending.some(item => item.audience === 'researcher' && item.detail.blocksRun === true)) blockers.push({ code: 'RESEARCHER_INPUT_REQUIRED', message: 'A material correction or boundary change is waiting for researcher input' });
   const actions = run ? (db.prepare('SELECT * FROM run_actions WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
-    .map(({ spec_json, result_json, error_json, ...action }) => ({ ...action, spec: JSON.parse(spec_json), result: JSON.parse(result_json), error: JSON.parse(error_json) })) : [];
+    .map(({ spec_json, result_json, error_json, ...action }) => {
+      const spec = JSON.parse(spec_json);
+      const preview = spec?.executionPreview;
+      return { ...action, spec, result: JSON.parse(result_json), error: JSON.parse(error_json),
+        ...(preview && typeof preview === 'object' && !Array.isArray(preview) ? { executionPreview: executionPreviewForDisplay(preview) } : {}),
+      };
+    }) : [];
   const jobs = run ? (db.prepare('SELECT * FROM remote_jobs WHERE run_id = ? ORDER BY created_at DESC').all(run.id) as any[])
     .map(({ submission_spec_json, resources_json, last_observation_json, ...job }) => ({ ...job, submission_spec: JSON.parse(submission_spec_json), resources: JSON.parse(resources_json), last_observation: JSON.parse(last_observation_json) })) : [];
   if (jobs.some(job => job.status === 'submission_uncertain')) blockers.push({ code: 'SUBMISSION_UNCERTAIN', message: 'A recorded submission has an uncertain response and must be reconciled before another submission' });

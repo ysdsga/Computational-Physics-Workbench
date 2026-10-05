@@ -1,3 +1,5 @@
+import { t, getLocale, resolveCopy, type LocalizedCopy } from '../i18n';
+import { localizeWorkflow } from '../data/workflow-localization';
 import { useState, useEffect, useCallback } from 'react';
 import { X, CheckCircle2, Circle, SkipForward, PlayCircle, Save, Plus, Trash2, FileText, Folder, Eye, Link2, Unlink, Edit3 } from 'lucide-react';
 import type { WorkflowTemplate, WorkflowStep, StepStatus, StepProgress, StepFile, FileEntry } from '../types';
@@ -15,7 +17,9 @@ interface Props {
   onProgressChanged: () => void;
 }
 
-export default function StepDetail({ step, taskId, workflow, projectId, taskName, progress, onClose, onProgressChanged }: Props) {
+export default function StepDetail({ step: rawStep, taskId, workflow: rawWorkflow, projectId, taskName, progress, onClose, onProgressChanged }: Props) {
+  const workflow = localizeWorkflow(rawWorkflow, getLocale());
+  const step = workflow.steps.find(candidate => candidate.id === rawStep.id) ?? rawStep;
   const stage = getStageForStepOf(workflow, step.id);
   const [editingNotes, setEditingNotes] = useState(false);
   const [noteDraft, setNoteDraft] = useState(progress?.notes ?? '');
@@ -32,7 +36,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
   const [folderEntries, setFolderEntries] = useState<FileEntry[]>([]);
   const [folderExists, setFolderExists] = useState(true);
   const [associatedFiles, setAssociatedFiles] = useState<StepFile[]>([]);
-  const [viewingFile, setViewingFile] = useState<{ name: string; content: string } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ name: string; content: LocalizedCopy } | null>(null);
 
   const loadStepData = useCallback(async () => {
     // Load associated files
@@ -56,10 +60,10 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
   useEffect(() => { loadStepData(); }, [loadStepData]);
 
   const statusActions: { status: StepStatus; icon: typeof CheckCircle2; label: string; color: string }[] = [
-    { status: 'pending',    icon: Circle,      label: '待开始', color: '#6b6b80' },
-    { status: 'in_progress',icon: PlayCircle,   label: '进行中', color: '#3b82f6' },
-    { status: 'completed',  icon: CheckCircle2, label: '已完成', color: '#22c55e' },
-    { status: 'skipped',    icon: SkipForward,  label: '跳过',   color: '#6b6b80' },
+    { status: 'pending',    icon: Circle,      label: t("待开始", "Pending"), color: '#6b6b80' },
+    { status: 'in_progress',icon: PlayCircle,   label: t("进行中", "In progress"), color: '#3b82f6' },
+    { status: 'completed',  icon: CheckCircle2, label: t("已完成", "Completed"), color: '#22c55e' },
+    { status: 'skipped',    icon: SkipForward,  label: t("跳过", "Skip"),   color: '#6b6b80' },
   ];
 
   const handleSetStatus = async (status: StepStatus) => {
@@ -110,7 +114,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
       const res = await filesApi.read(projectId, entry.relativePath);
       setViewingFile({ name: res.name, content: res.content });
     } catch (e) {
-      setViewingFile({ name: entry.name, content: `[无法读取文件: ${(e as Error).message}]` });
+      setViewingFile({ name: entry.name, content: () => `[${t('无法读取文件', 'Unable to read file')}: ${(e as Error).message}]` });
     }
   };
 
@@ -128,7 +132,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
           )}
           <h3 className="text-sm font-semibold text-white truncate">{step.name}</h3>
           {step.optional && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2d2d44] text-[#6b6b80] flex-shrink-0">可选</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2d2d44] text-[#6b6b80] flex-shrink-0">{t("可选", "Optional")}</span>
           )}
         </div>
         <button onClick={onClose} className="text-[#6b6b80] hover:text-white p-1 rounded hover:bg-[#2d2d44]">
@@ -139,7 +143,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Status */}
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-2 block">状态</label>
+          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-2 block">{t("状态", "Status")}</label>
           <div className="grid grid-cols-4 gap-1.5">
             {statusActions.map(({ status, icon: Icon, label, color }) => (
               <button key={status} onClick={() => handleSetStatus(status)}
@@ -157,14 +161,14 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
 
         {/* Description */}
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">说明</label>
+          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("说明", "Description")}</label>
           <p className="text-sm text-[#9898b0] leading-relaxed bg-[#252536] rounded-lg p-3">{step.description}</p>
         </div>
 
         {/* Input/Output Files (template hints) */}
         {step.inputFiles && step.inputFiles.length > 0 && (
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">需要准备的文件</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("需要准备的文件", "Required input files")}</label>
             <div className="space-y-1">
               {step.inputFiles.map((f, i) => (
                 <div key={i} className="text-xs text-[#9898b0] bg-[#252536] rounded px-3 py-1.5 font-mono">{f}</div>
@@ -174,7 +178,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
         )}
         {step.outputFiles && step.outputFiles.length > 0 && (
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">预期输出文件</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("预期输出文件", "Expected output files")}</label>
             <div className="space-y-1">
               {step.outputFiles.map((f, i) => (
                 <div key={i} className="text-xs text-[#22c55e]/70 bg-[#1a2e1a]/30 rounded px-3 py-1.5 font-mono">{f}</div>
@@ -187,12 +191,12 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-[10px] uppercase tracking-wider text-[#6b6b80]">
-              Shell 命令
-              {hasCustomCommands && <span className="ml-1.5 text-[#f59e0b]">(已自定义)</span>}
+              {t("Shell 命令", "Shell commands")}
+              {hasCustomCommands && <span className="ml-1.5 text-[#f59e0b]">{t("(已自定义)", "(customized)")}</span>}
             </label>
             {!editingCmds && effectiveCommands.length > 0 && (
               <button onClick={startEditCmds} className="flex items-center gap-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa]">
-                <Edit3 size={10} /> 编辑
+                <Edit3 size={10} /> {t("编辑", "Edit")}
               </button>
             )}
           </div>
@@ -211,15 +215,15 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
               ))}
               <button onClick={() => setCmdDraft(prev => [...prev, ''])}
                 className="flex items-center gap-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa]">
-                <Plus size={11} /> 添加命令
+                <Plus size={11} /> {t("添加命令", "Add command")}
               </button>
               <div className="flex gap-2">
                 <button onClick={handleSaveCmds}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb]">
-                  <Save size={12} /> 保存
+                  <Save size={12} /> {t("保存", "Save")}
                 </button>
                 <button onClick={() => setEditingCmds(false)}
-                  className="px-3 py-1.5 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44]">取消</button>
+                  className="px-3 py-1.5 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44]">{t("取消", "Cancel")}</button>
               </div>
             </div>
           ) : effectiveCommands.length > 0 ? (
@@ -232,7 +236,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
             </div>
           ) : (
             <button onClick={startEditCmds} className="flex items-center gap-1 text-[10px] text-[#3b82f6] hover:text-[#60a5fa]">
-              <Plus size={11} /> 添加命令
+              <Plus size={11} /> {t("添加命令", "Add command")}
             </button>
           )}
         </div>
@@ -240,7 +244,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
         {/* Tips */}
         {step.tips && (
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">提示</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("提示", "Tips")}</label>
             <p className="text-xs text-[#f59e0b]/80 bg-[#f59e0b]/5 rounded-lg p-3 border border-[#f59e0b]/10 leading-relaxed">{step.tips}</p>
           </div>
         )}
@@ -248,7 +252,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
         {/* Substeps */}
         {step.substeps && step.substeps.length > 0 && (
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">子步骤</label>
+            <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("子步骤", "Substeps")}</label>
             <div className="space-y-2">
               {step.substeps.map(sub => (
                 <div key={sub.id} className="bg-[#252536] rounded-lg p-3">
@@ -270,15 +274,15 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
         {/* Step folder files — linked to file repository */}
         <div>
           <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">
-            阶段文件夹
+            {t("阶段文件夹", "Stage folder")}
           </label>
           <div className="text-[10px] text-[#6b6b80] font-mono bg-[#252536] rounded px-2 py-1 mb-2 break-all">
-            {stageFolderPath || '(未确定)'}
+            {stageFolderPath || t("(未确定)", "(not determined)")}
           </div>
           {!folderExists ? (
-            <p className="text-xs text-[#4a4a60] italic">文件夹尚未创建（创建任务时自动生成）</p>
+            <p className="text-xs text-[#4a4a60] italic">{t("文件夹尚未创建；任务内目录由 Agent 按工作计划安排。", "Folder has not been created yet. The agent arranges task directories according to the Working Plan.")}</p>
           ) : folderEntries.length === 0 ? (
-            <p className="text-xs text-[#4a4a60] italic">空文件夹，将计算文件放入此目录后会自动显示</p>
+            <p className="text-xs text-[#4a4a60] italic">{t("空文件夹，将计算文件放入此目录后会自动显示", "Empty folder. Calculation files placed here will appear automatically.")}</p>
           ) : (
             <div className="space-y-0.5">
               {folderEntries.map((entry, i) => {
@@ -300,7 +304,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
                         </span>
                         <button onClick={() => handleToggleAssociate(entry)}
                           className={`p-1 rounded hover:bg-[#383850] ${linked ? 'text-[#22c55e]' : 'text-[#6b6b80] hover:text-[#3b82f6]'}`}
-                          title={linked ? '取消关联' : '关联到此步骤'}>
+                          title={linked ? t("取消关联", "Unlink file") : t("关联到此步骤", "Link to this step")}>
                           {linked ? <Unlink size={12} /> : <Link2 size={12} />}
                         </button>
                         <button onClick={() => handleViewFile(entry)}
@@ -317,7 +321,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
           {/* Show associated files that may not be in the folder */}
           {associatedFiles.length > 0 && (
             <div className="mt-2">
-              <div className="text-[10px] text-[#6b6b80] mb-1">已关联文件 ({associatedFiles.length})</div>
+              <div className="text-[10px] text-[#6b6b80] mb-1">{t('已关联文件', 'Linked files')} ({associatedFiles.length})</div>
               <div className="space-y-0.5">
                 {associatedFiles.map(f => (
                   <div key={f.id} className="flex items-center gap-2 bg-[#1a2e1a]/30 rounded px-2 py-1 group">
@@ -336,31 +340,31 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
 
         {/* Notes */}
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">笔记</label>
+          <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1.5 block">{t("笔记", "Notes")}</label>
           {editingNotes ? (
             <div className="space-y-2">
               <textarea value={noteDraft} onChange={e => setNoteDraft(e.target.value)}
                 className="w-full bg-[#252536] border border-[#383850] rounded-lg p-3 text-sm text-[#e2e2f0] resize-none focus:outline-none focus:border-[#3b82f6] placeholder-[#4a4a60]"
-                rows={4} placeholder="记录这一步的注意事项、遇到的问题..." />
+                rows={4} placeholder={t("记录这一步的注意事项、遇到的问题...", "Record notes, cautions, or issues for this step...")} />
               <div className="flex gap-2">
                 <button onClick={handleSaveNote}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb]">
-                  <Save size={12} /> 保存
+                  <Save size={12} /> {t("保存", "Save")}
                 </button>
                 <button onClick={() => { setNoteDraft(progress?.notes ?? ''); setEditingNotes(false); }}
-                  className="px-3 py-1.5 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44]">取消</button>
+                  className="px-3 py-1.5 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44]">{t("取消", "Cancel")}</button>
               </div>
             </div>
           ) : (
             <div onClick={() => setEditingNotes(true)}
               className="text-sm text-[#9898b0] bg-[#252536] rounded-lg p-3 cursor-pointer hover:bg-[#2d2d44] min-h-[40px]">
-              {progress?.notes || <span className="text-[#4a4a60] italic">点击添加笔记...</span>}
+              {progress?.notes || <span className="text-[#4a4a60] italic">{t("点击添加笔记...", "Click to add notes...")}</span>}
             </div>
           )}
         </div>
 
         {progress?.updated_at && (
-          <div className="text-[10px] text-[#4a4a60]">最后更新: {new Date(progress.updated_at).toLocaleString('zh-CN')}</div>
+          <div className="text-[10px] text-[#4a4a60]">{t('最后更新', 'Last updated')}: {new Date(progress.updated_at).toLocaleString(getLocale())}</div>
         )}
       </div>
 
@@ -378,7 +382,7 @@ export default function StepDetail({ step, taskId, workflow, projectId, taskName
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
-              <pre className="text-xs text-[#e2e2f0] font-mono whitespace-pre-wrap break-all">{viewingFile.content}</pre>
+              <pre className="text-xs text-[#e2e2f0] font-mono whitespace-pre-wrap break-all">{resolveCopy(viewingFile.content)}</pre>
             </div>
           </div>
         </div>

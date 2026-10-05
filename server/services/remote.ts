@@ -1,3 +1,4 @@
+import { generatedText } from './language.js';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -402,7 +403,7 @@ function markSubmissionRejected(action: RunAction, jobId: string, detail: Record
   if (update.changes === 0) return false;
   scheduleNewJob(action.run_id, jobId, 'preparation_failed', observedAt);
   const reconciledAbsent = classification === 'reconciled_not_submitted';
-  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: reconciledAbsent ? 'submission_not_found' : 'submission_rejected', title: reconciledAbsent ? '提交超时经重复对账确认未进入调度器' : '调度器在接收作业前拒绝提交，等待 Codex 修正后重试', detail: { ...detail, classification, blocksRun: false, consumesScientificRetry: false }, idempotencyKey: `submission-rejected:${jobId}`, source: 'workbench' });
+  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: reconciledAbsent ? 'submission_not_found' : 'submission_rejected', title: reconciledAbsent ? generatedText('Repeated reconciliation confirmed that the timed-out submission did not reach the scheduler', '提交超时经重复对账确认未进入调度器') : generatedText('The scheduler rejected the submission before accepting the job; Codex must correct it before retrying', '调度器在接收作业前拒绝提交，等待 Codex 修正后重试'), detail: { ...detail, classification, blocksRun: false, consumesScientificRetry: false }, idempotencyKey: `submission-rejected:${jobId}`, source: 'workbench' });
   appendEvent(action.run_id, { category: 'fact', eventType: 'remote.job_not_submitted', actorType: 'system', payload: { remoteJobId: jobId, actionId: action.id, ...detail } });
   return true;
 }
@@ -411,7 +412,7 @@ function markSubmissionUncertain(action: RunAction, jobId: string, detail: Recor
   const observedAt = now();
   db.prepare("UPDATE remote_jobs SET status = 'submission_uncertain', last_observation_json = ?, reconciled_at = ? WHERE id = ?").run(stableJson({ ...detail, observedAt }), observedAt, jobId);
   scheduleNewJob(action.run_id, jobId, 'submission_uncertain', observedAt);
-  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: 'submission_uncertain', title: '远程提交响应不确定，必须先按唯一作业名对账', detail: { ...detail, blocksRun: false, recovery: 'reconcile_by_job_name_never_resubmit' }, idempotencyKey: `submission-uncertain:${jobId}`, source: 'workbench' });
+  createPendingItem(action.run_id, { stageId: action.stage_id, actionId: action.id, remoteJobId: jobId, audience: 'codex', kind: 'submission_uncertain', title: generatedText('The remote submission response is uncertain; reconcile by the unique job name first', '远程提交响应不确定，必须先按唯一作业名对账'), detail: { ...detail, blocksRun: false, recovery: 'reconcile_by_job_name_never_resubmit' }, idempotencyKey: `submission-uncertain:${jobId}`, source: 'workbench' });
 }
 
 export async function submitAuthorizedLsfAction(action: RunAction, input: LsfActionSubmission): Promise<RemoteJob> {
@@ -539,7 +540,7 @@ async function observeJob(row: any) {
     if (parsed.status === 'DONE') transitionAction(row.action_id, { status: 'succeeded', result: { remoteJobId: row.id, schedulerStatus: parsed.status } });
     else if (['EXIT', 'ZOMBI', 'UNKWN'].includes(parsed.status)) {
       transitionAction(row.action_id, { status: 'waiting_codex', error: { code: 'REMOTE_JOB_FAILED', remoteJobId: row.id, schedulerStatus: parsed.status } });
-      createPendingItem(row.run_id, { stageId: action.stage_id, actionId: row.action_id, remoteJobId: row.id, audience: 'codex', kind: 'remote_job_failed', title: '远程作业失败，等待 Codex 诊断和边界内重试', detail: { schedulerStatus: parsed.status, blocksRun: false }, idempotencyKey: `remote-job-failed:${row.id}`, source: 'workbench' });
+      createPendingItem(row.run_id, { stageId: action.stage_id, actionId: row.action_id, remoteJobId: row.id, audience: 'codex', kind: 'remote_job_failed', title: generatedText('The remote job failed; Codex must diagnose it and retry within the confirmed boundary', '远程作业失败，等待 Codex 诊断和边界内重试'), detail: { schedulerStatus: parsed.status, blocksRun: false }, idempotencyKey: `remote-job-failed:${row.id}`, source: 'workbench' });
     } else if (action.status === 'waiting_codex') {
       transitionAction(row.action_id, { status: 'executing', result: { remoteJobId: row.id, reconciled: true } });
       transitionAction(row.action_id, { status: 'waiting_remote', result: { remoteJobId: row.id, schedulerStatus: parsed.status } });

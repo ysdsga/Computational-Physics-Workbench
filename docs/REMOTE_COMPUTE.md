@@ -1,5 +1,7 @@
 # 远程计算设备：连接、传输与 Agent 协作
 
+[English](REMOTE_COMPUTE.en.md) | 中文
+
 这份指南面向第一次把 Workbench 连接到超算的研究者。**推荐做法不是自己逐项配置，而是把必要信息告诉 Codex，让 Agent 代你检查和配置。** 当前公开版本的参考路径是本机 OpenSSH/SFTP + IBM LSF；Slurm 和 PBS 尚未正式支持，配置时会被拒绝，不能只把调度器名称改掉就使用。
 
 Workbench 不保存密码、私钥或一次性验证码。Web 只保存连接元数据、Task 目录映射并展示已经记录的状态；真正的连接、传输、提交、监控和对账由当前 Codex 对话中的 Agent 通过 `workbench` CLI 完成。
@@ -170,26 +172,26 @@ workbench remote exec/upload/download 完成并记录 Event。如果不在边界
 
 ## `Origin is not allowed by Workbench`
 
-这个错误来自浏览器的来源白名单，不代表科研目录、SSH 或超算账号没有权限。当前版本的默认白名单只包含开发页面：
+这个错误来自浏览器的来源白名单，不代表科研目录、SSH 或超算账号没有权限。保持原有默认白名单，仅包含以下两个开发来源，后端端口不会自动加入：
 
 ```text
 http://localhost:5173
 http://127.0.0.1:5173
 ```
 
-因此，生产式页面 `http://localhost:3001` 或 `http://127.0.0.1:3001` 在某些浏览器请求中可能被服务拒绝。这个默认值目前保留不改。可选处理方式有两种：
+因此，默认开发页面可以读写元数据；生产页面可以加载，但来自后端端口（默认 3001）的浏览器写请求仍需显式配置。这是保留的原有策略，不由语言适配扩大。如果使用其他浏览器来源或显式覆盖了默认值，可选择：
 
 1. 使用 `npm run dev:full`，并打开终端显示的 `5173` 地址；
 2. 启动服务前显式配置所有允许的完整 Origin。
 
-PowerShell 示例：
+一次性回环验收的 PowerShell 示例（只作用于当前终端及其子进程）：
 
 ```powershell
-$env:WORKBENCH_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3001,http://127.0.0.1:3001"
+$env:WORKBENCH_ALLOWED_ORIGINS="http://127.0.0.1:3001"
 npm start
 ```
 
-该变量会**替换**默认列表，不是追加；请一次列出需要的全部来源。Origin 必须精确匹配协议、主机名和端口，不要为了省事使用任意公网来源。修改环境变量后需要重启服务。
+该变量会**替换**默认列表，不是追加；请一次列出需要的全部来源。Origin 必须精确匹配协议、主机名和端口，不要为了省事使用任意公网来源。修改环境变量后需要重启服务。验收后关闭该终端；不要为此修改全局或生产访问策略。
 
 如果 Web 因 CORS 暂时无法操作，但本地 Workbench 服务仍在运行，可以把具体任务告诉 Codex Agent。CLI 默认直接连接 `http://127.0.0.1:3001`，不受浏览器 CORS 限制；Agent 可以在已确认边界内继续读取状态和执行受控操作。若连 CLI 也显示服务不可达，则应先恢复 Workbench 服务，而不是继续远程提交。
 
@@ -208,3 +210,9 @@ npm start
 | Web 没有操作入口 | 改在 Codex 对话中下达具体任务 | Web 是审阅面，Agent 是执行者 |
 
 返回[第一次使用教程](GETTING_STARTED.md)，或继续阅读[使用指南](USAGE_GUIDE.md)。
+
+## 语言与本地配置
+
+界面侧栏可切换 English / 简体中文，选择保存在浏览器的 `workbench.locale`；无保存值时使用浏览器语言，其他语言回退英文。CLI 可用 `node bin/workbench.js ... --lang zh-CN` 或 `--lang en`，也可设置 `WORKBENCH_LANG`；无需全局 `npm link`。CLI 帮助及许多技术错误保持英文。语言只改变界面和新生成的说明，不翻译或改写用户科研内容、ID、哈希及不可变 Action spec。
+
+`WORKBENCH_DB_PATH` 可指定隔离数据库，`WORKBENCH_URL` 指定 CLI 服务地址。完整环境变量、英文操作说明与故障对照见[英文配置指南](REMOTE_COMPUTE.en.md#local-service-configuration)。

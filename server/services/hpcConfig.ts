@@ -1,3 +1,4 @@
+import { generatedText } from './language.js';
 import type { HpcConfig, HpcProfile, HpcTaskBinding } from '../../src/types/index.js';
 import { AgentCoreError, normalizeRemoteRoot } from './agentCore.js';
 
@@ -117,11 +118,14 @@ export function normalizeHpcConfig(input: unknown, allowedTaskIds?: Set<string>)
     const host = optionalText(raw.host);
     profileInputs = [{
       id: 'legacy-default',
-      name: '原有配置',
+      name: generatedText('Legacy configuration', '原有配置'),
       sshAlias: host,
       remoteRoot: raw.remotePath,
       scheduler: 'LSF',
-      notes: `${optionalText(raw.user) ? `原用户名：${optionalText(raw.user)}。` : ''}旧版单根目录配置；需要登记用户根和项目根后才能用于新的远程任务。`,
+      notes: generatedText(
+        `${optionalText(raw.user) ? `Original username: ${optionalText(raw.user)}. ` : ''}Legacy single-root configuration; register separate user and project roots before using it for new remote tasks.`,
+        `${optionalText(raw.user) ? `原用户名：${optionalText(raw.user)}。` : ''}旧版单根目录配置；需要登记用户根和项目根后才能用于新的远程任务。`,
+      ),
     }];
   }
   const profiles = profileInputs.map(normalizeProfile);
