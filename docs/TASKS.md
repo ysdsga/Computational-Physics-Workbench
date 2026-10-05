@@ -1,5 +1,7 @@
 # 任务、工作流与研究运行
 
+[English](TASKS.en.md) | 中文
+
 本文记录 schema v8 的当前行为。Task 是 Project 内一次复杂研究任务，不等于单个调度器 Job。
 
 ## Task 与目录边界

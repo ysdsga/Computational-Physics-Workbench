@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import db from './db.js';
+import { languageMiddleware, serverText } from './services/language.js';
 import projectsRouter from './routes/projects.js';
 import tasksRouter from './routes/tasks.js';
 import progressRouter from './routes/progress.js';
@@ -31,6 +32,7 @@ export function createApp() {
       callback(new Error('Origin is not allowed by Workbench'));
     },
   }));
+  app.use(languageMiddleware);
   app.use(express.json({ limit: '10mb' }));
 
   // Routes
@@ -92,7 +94,7 @@ const server = app.listen(PORT, HOST, () => {
   if (!address || typeof address === 'string') return;
   const actualPort = address.port;
   console.log(`[Computational Physics Workbench] Server running at http://${HOST}:${actualPort}`);
-  console.log(`[Computational Physics Workbench] 按 Ctrl+C 停止服务`);
+  console.log(serverText('[Computational Physics Workbench] Press Ctrl+C to stop the server', '[Computational Physics Workbench] 按 Ctrl+C 停止服务'));
 });
 
 // Exported for tests (smoke tests import this module and manage the server)
@@ -102,23 +104,23 @@ server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
     console.error('');
     console.error('============================================');
-    console.error(`  [错误] 端口 ${PORT} 已被占用！`);
+    console.error(serverText(`  [Error] Port ${PORT} is already in use.`, `  [错误] 端口 ${PORT} 已被占用！`));
     console.error('============================================');
-    console.error('  可能原因：另一个 Computational Physics Workbench 实例正在运行。');
-    console.error('  解决方法：关闭其他实例后重试。');
+    console.error(serverText('  Another Computational Physics Workbench instance may be running.', '  可能原因：另一个 Computational Physics Workbench 实例正在运行。'));
+    console.error(serverText('  Stop the other instance, or set WORKBENCH_PORT to an available port.', '  解决方法：关闭其他实例，或将 WORKBENCH_PORT 设为可用端口。'));
     console.error('');
   } else {
-    console.error(`[错误] 服务器启动失败: ${err.message}`);
+    console.error(serverText(`[Error] Server failed to start: ${err.message}`, `[错误] 服务器启动失败: ${err.message}`));
   }
   process.exit(1);
 });
 
 // 捕获未处理的异常，防止静默崩溃
 process.on('uncaughtException', (err) => {
-  console.error('[致命错误] 未捕获的异常:', err.message);
+  console.error(serverText('[Fatal] Uncaught exception:', '[致命错误] 未捕获的异常:'), err.message);
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[致命错误] 未处理的 Promise 拒绝:', reason);
+  console.error(serverText('[Fatal] Unhandled Promise rejection:', '[致命错误] 未处理的 Promise 拒绝:'), reason);
   process.exit(1);
 });

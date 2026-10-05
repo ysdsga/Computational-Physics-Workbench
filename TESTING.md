@@ -1,7 +1,8 @@
-# TESTING.md — 应用主体测试基线（D 盘根）
+# TESTING.md — 应用主体测试指南
 
-> 最后更新：2026-08-16（Essential Workbench V3 / schema v6）
-> 本文件描述 Computational Physics Workbench **应用主体**（D 盘根）的测试现状与命令。
+[English](TESTING.en.md) | 中文
+
+本文件描述当前源码检出的测试入口；覆盖范围和通过情况以实际测试输出为准，不依赖作者机器的盘符。要求 Node.js 22.12+。英文指南补充了本地隔离演示、语言回归、浏览器配置和真实集群验收边界。
 
 ## 现状
 
@@ -17,12 +18,14 @@
 ```bash
 cd "<path-to-computational-physics-workbench>"
 npm test              # node --test --import tsx "tests/**/*.test.ts"
-npm run lint          # oxlint（0 errors，10 个历史 warnings）
+npm run lint          # oxlint；以本次输出为准
 npm run typecheck     # 前端与后端 TypeScript
 npm run build         # typecheck + Vite 单文件构建
 npm run test:e2e      # 临时数据库启动服务并验证 UI
 npm start             # 生产运行，http://127.0.0.1:3001
 ```
+
+浏览器测试使用已构建的 `dist/`，先运行 `npm run build`；默认使用 Playwright Chromium，可用 `WORKBENCH_BROWSER_CHANNEL=msedge` 选择已安装的 Edge。请保持测试端口空闲，避免与开发服务冲突。不要未经授权安装或替换用户浏览器。中英文界面测试应确认切换语言后，标识符、用户笔记和已有科研内容仍保持原样。无集群演示见[本地示例](docs/examples/local-first-run.en.md)。
 
 ## 自动隔离测试覆盖
 
@@ -41,7 +44,7 @@ npm start             # 生产运行，http://127.0.0.1:3001
 13. **Action 与证据链**：不可变 spec、状态图、artifact/evidence 归属、回执恢复和有效性纠错。
 14. **材料无关执行器**：通用 `local.process` 与 `job.submit`；单次提交、响应不确定后只对账不重提，并有静态无硬编码检查。
 15. **重试预算**：`retry_of_action_id` 单链、禁止分叉、超过 `maxAutomaticRetries` 失败关闭。
-16. **长作业监控**：Run monitor attach/guard/tick、PEND 10/30/60 退避、RUN 15 分钟、终态停止、Stop Hook 单次守门且服务不可用时 fail open。
+16. **长作业监控**：Run monitor attach/guard/tick、基于每个 Job 规格的检查间隔、heartbeat lease、终态清理、Stop Hook 单次守门且服务不可用时 fail open。
 17. **schema v6 迁移**：临时库从空状态到 v6、专用备份、外键和完整性检查。
 18. **Web 观察面**：静态门禁保证 Agent 页面不发起执行；显示 monitor、排队原因、最后进展和下次检查。
 
@@ -59,7 +62,7 @@ $env:WORKBENCH_TEST_SPEC_FILE='<由 Codex 准备的 JSON spec>'
 npm run test:remote:prepare
 ```
 
-`prepare` 创建一个 `ready` Action，建立不可变 spec、输入快照和命令预览，不执行。Envelope 一次确认后不再逐 Action 授权；执行时仍重新检查路径、输入哈希、资源和 capability。首次记录非终态 Job 后必须创建/复用当前 Codex 任务 Scheduled Task，并通过 `workbench monitor attach` 绑定真实 reference。未提供 pilot 参数时命令明确输出 `SKIP`。
+`prepare` 创建一个 `ready` Action，建立不可变 spec、输入快照和命令预览，不执行。Envelope 一次确认后不再逐 Action 授权；执行时仍重新检查路径、输入哈希、资源和 capability。首次记录非终态 Job 后必须创建/复用当前 Codex 任务 Scheduled Task，并通过 `workbench monitor attach` 绑定真实 reference。未提供 pilot 参数时命令明确输出 `SKIP`；退出码为零不代表真实集群测试通过。准备、mock、文件存在和应用回归均不能证明真实 DFT+DMFT 物理正确。
 
 ## 已知限制
 

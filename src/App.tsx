@@ -1,4 +1,6 @@
 import { HashRouter, Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useLocale } from './i18n';
 import { WorkflowProvider } from './contexts/WorkflowContext';
 import Sidebar from './components/Sidebar';
 import ProjectsPage from './pages/ProjectsPage';
@@ -13,6 +15,8 @@ import AgentRunsPage from './pages/AgentRunsPage';
 import ReviewCenterPage from './pages/ReviewCenterPage';
 
 export default function App() {
+  const [locale] = useLocale();
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   return (
     <WorkflowProvider>
       <HashRouter>

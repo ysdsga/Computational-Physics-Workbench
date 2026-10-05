@@ -1,5 +1,9 @@
 # Computational Physics Workbench — Codex 项目指南
 
+[English project guide](AGENTS.en.md) | 中文
+
+Language routing / 语言约定：按研究者当前使用或明确指定的语言交流，英文与中文均可；英文会话请同时阅读 `AGENTS.en.md`。项目内 Skills 可用于两种语言的请求，不因现有笔记语言而改变回复语言。保留标识符、API 字段、哈希、命令、科学符号和用户原文；切换语言不改变授权、确认、路径、监控与证据要求。
+
 ## 项目目标
 
 这是一个本地运行的 DFT+DMFT 科研工作台，用于管理材料计算项目、计算任务、工作流步骤、输入/输出文件、计算经验和 HPC/LSF 提交脚本。

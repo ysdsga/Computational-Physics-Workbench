@@ -1,11 +1,13 @@
 import type { Project, Task, StepProgress, StepFile, Experience, FileEntry, WorkflowTemplate, ResearchPlan, ResearchPlanStatus, AgentContext, PendingItem, RunEvent, RunAction, RunArtifact, EvidenceCheck, EvidenceLibraryItem, RemoteJob, ResearchRun, TaskSpec, WorkingPlan, ConfirmedEnvelope } from '../types';
 
+import { getLocale } from '../i18n';
+
 const BASE = '/api';
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { 'Content-Type': 'application/json', 'Accept-Language': getLocale(), ...options?.headers },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));

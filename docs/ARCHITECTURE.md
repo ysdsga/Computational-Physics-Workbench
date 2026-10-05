@@ -1,5 +1,7 @@
 # 架构说明
 
+[English](ARCHITECTURE.en.md) | 中文
+
 当前版本为 Essential Workbench V3 / SQLite schema v8。Agent 本体是项目内的 Codex 对话；Express、SQLite 和 WebUI 是边界、记录与观察设施。
 
 ## 总体数据流
@@ -89,6 +91,6 @@ Codex 可取消当前 Run 自己创建的错误/已替代 Job，前提是 Envelo
 
 ## 远程与数据安全
 
-服务默认绑定 `127.0.0.1`，CORS 默认只允许 `localhost:5173` 与 `127.0.0.1:5173` 两个本机 Vite 来源；生产页或自定义端口需要用 `WORKBENCH_ALLOWED_ORIGINS` 显式列出全部允许来源。已确认 Envelope 与 Task binding 是执行授权；远程通道默认可用，可用 `WORKBENCH_REMOTE_DISABLED=1` 或 `WORKBENCH_REMOTE_SUBMIT_DISABLED=1` 紧急停用。连接使用严格 host key、BatchMode、无 agent forwarding、超时和输出上限；Workbench 不保存密码或私钥。
+服务默认绑定 `127.0.0.1`，CORS 默认只允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`；后端端口不会自动加入来源列表。其他来源可用原有 `WORKBENCH_ALLOWED_ORIGINS` 显式列出，该变量完全替换默认值。本次语言适配不改变该访问策略。已确认 Envelope 与 Task binding 是执行授权；远程通道默认可用，可用 `WORKBENCH_REMOTE_DISABLED=1` 或 `WORKBENCH_REMOTE_SUBMIT_DISABLED=1` 紧急停用。连接使用严格 host key、BatchMode、无 agent forwarding、超时和输出上限；Workbench 不保存密码或私钥。
 
 数据库迁移前创建 `*.before-essential-v3.db`，v6 创建 `*.before-job-monitor-v6.db`，v7/v8 分别备份理论探索和阶段反思模板迁移前状态。正式库迁移必须先停用旧服务；自动化测试通过 `WORKBENCH_DB_PATH` 使用临时库。Project、Task、Plan 有 Run 历史后只能归档，Event 和科学来源链不提供破坏性清理接口。

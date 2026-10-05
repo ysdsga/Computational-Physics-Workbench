@@ -23,6 +23,9 @@
     "dmft"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "bin": {
     "workbench": "bin/workbench.js"
   },

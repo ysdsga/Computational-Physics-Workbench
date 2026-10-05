@@ -5,6 +5,10 @@ description: Operate real Computational Physics Workbench research Tasks from th
 
 # Workbench Agent
 
+Respond in the researcher's requested/current language, including English or Chinese. Preserve identifiers, hashes, commands, scientific notation and researcher-authored content. Use the root project guide ([English](../../AGENTS.en.md), [中文](../../AGENTS.md)); language choice never changes authorization, path boundaries, monitoring or evidence standards.
+
+From the repository root, `node bin/workbench.js` is equivalent to the `workbench` command below; global installation is optional. `--lang en` / `--lang zh-CN` or `WORKBENCH_LANG` selects generated CLI service prose without translating stored content. Inspect `workbench execution contract` and the actual Task workflow before generating a Task Spec or capability spec; do not copy another material's IDs or scripts.
+
 Treat the Codex project conversation as the planning and execution Agent. Use the WebUI only to observe records and manage ordinary metadata. Never ask the researcher to start, authorize, submit, cancel, or reconcile Agent work in Web.
 
 Use `workbench` as the state, boundary, logged-SSH, transfer, scheduler, and monitoring interface. It is a transparent Agent tool, not a per-command approval gate. Codex may use the normal local terminal directly inside the local Task root. Do not write Agent state through direct HTTP/SQLite access.

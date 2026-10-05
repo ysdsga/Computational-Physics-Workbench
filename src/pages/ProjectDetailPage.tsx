@@ -1,19 +1,21 @@
+import { t, getLocale, useLocalizedMessage } from '../i18n';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Edit3, Play, FolderOpen, FileText, ChevronRight } from 'lucide-react';
 import { projectsApi, tasksApi, researchPlansApi } from '../api/client';
 import { useWorkflowList } from '../contexts/WorkflowContext';
 import type { Project, Task, ResearchPlan, ResearchPlanStatus } from '../types';
+import { localizeWorkflow } from '../data/workflow-localization';
 import FileBrowser from '../components/FileBrowser';
 
-const PLAN_STATUS_LABEL: Record<ResearchPlanStatus, string> = {
-  draft: '草稿', active: '进行中', completed: '已完成', archived: '已归档',
-};
 const PLAN_STATUS_COLOR: Record<ResearchPlanStatus, string> = {
   draft: '#6b6b80', active: '#22c55e', completed: '#3b82f6', archived: '#f59e0b',
 };
 
 export default function ProjectDetailPage() {
+  const PLAN_STATUS_LABEL: Record<ResearchPlanStatus, string> = {
+    draft: t("草稿", "Draft"), active: t("进行中", "Active"), completed: t("已完成", "Completed"), archived: t("已归档", "Archived"),
+  };
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
@@ -25,7 +27,7 @@ export default function ProjectDetailPage() {
   const [taskName, setTaskName] = useState('');
   const [taskDesc, setTaskDesc] = useState('');
   const [taskWorkflow, setTaskWorkflow] = useState('');
-  const [taskFormError, setTaskFormError] = useState('');
+  const [taskFormError, setTaskFormError] = useLocalizedMessage();
   const [taskSaving, setTaskSaving] = useState(false);
   const workflows = useWorkflowList();
 
@@ -60,16 +62,16 @@ export default function ProjectDetailPage() {
 
   const handleCreateTask = async () => {
     if (!projectId) {
-      setTaskFormError('项目信息缺失，请刷新页面后重试。');
+      setTaskFormError(() => t("项目信息缺失，请刷新页面后重试。", "Project information is missing. Refresh the page and try again."));
       return;
     }
     const name = taskName.trim();
     if (!name) {
-      setTaskFormError('请输入任务名称。');
+      setTaskFormError(() => t("请输入任务名称。", "Enter a task name."));
       return;
     }
     if (!editingTask && !taskWorkflow) {
-      setTaskFormError('工作流模板尚未加载，请稍后重试。');
+      setTaskFormError(() => t("工作流模板尚未加载，请稍后重试。", "Workflow templates have not loaded yet. Try again shortly."));
       return;
     }
 
@@ -84,32 +86,32 @@ export default function ProjectDetailPage() {
       resetTaskForm();
       await load();
     } catch (error) {
-      const message = error instanceof Error ? error.message : '未知错误';
-      setTaskFormError(`${editingTask ? '保存失败' : '创建失败'}：${message}`);
+      const detail = error instanceof Error ? error.message : null;
+      setTaskFormError(() => `${editingTask ? t("保存失败", "Save failed") : t("创建失败", "Creation failed")}${t("：", ": ")}${detail ?? t("未知错误", "Unknown error")}`);
     } finally {
       setTaskSaving(false);
     }
   };
 
   const handleDeleteTask = async (id: string) => {
-    if (!confirm('确定删除此任务？所有进度数据将一并删除。')) return;
+    if (!confirm(t("确定删除此任务？所有进度数据将一并删除。", "Delete this task? All its progress data will also be deleted."))) return;
     try { await tasksApi.delete(id); }
     catch (error) {
       const item = error as Error & { code?: string };
-      if (item.code !== 'RUN_HISTORY_PROTECTED') return alert(`删除失败：${item.message}`);
-      if (!confirm('该任务已有研究运行记录，不能物理删除。是否改为归档？')) return;
+      if (item.code !== 'RUN_HISTORY_PROTECTED') return alert(t(`删除失败：${item.message}`, `Deletion failed: ${item.message}`));
+      if (!confirm(t("该任务已有研究运行记录，不能物理删除。是否改为归档？", "This task has research run records and cannot be permanently deleted. Archive it instead?"))) return;
       await tasksApi.update(id, { status: 'archived' });
     }
     load();
   };
 
-  if (!project) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">加载中...</div>;
+  if (!project) return <div className="flex items-center justify-center h-full text-[#6b6b80] text-sm">{t("加载中...", "Loading...")}</div>;
 
   const taskStatusColors: Record<string, string> = {
     active: '#22c55e', paused: '#f59e0b', completed: '#3b82f6', archived: '#6b6b80',
   };
   const taskStatusLabels: Record<string, string> = {
-    active: '进行中', paused: '已暂停', completed: '已完成', archived: '已归档',
+    active: t("进行中", "Active"), paused: t("已暂停", "Paused"), completed: t("已完成", "Completed"), archived: t("已归档", "Archived"),
   };
 
   return (
@@ -117,7 +119,7 @@ export default function ProjectDetailPage() {
       {/* Header */}
       <div className="px-5 py-4 border-b border-[#2d2d44]">
         <button onClick={() => navigate('/')} className="flex items-center gap-1 text-xs text-[#6b6b80] hover:text-white mb-2">
-          <ArrowLeft size={12} /> 返回项目列表
+          <ArrowLeft size={12} /> {t("返回项目列表", "Back to projects")}
         </button>
         <div className="flex items-center justify-between">
           <div>
@@ -134,15 +136,15 @@ export default function ProjectDetailPage() {
       <div className="flex gap-1 px-5 py-2 border-b border-[#2d2d44]">
         <button onClick={() => setTab('tasks')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${tab === 'tasks' ? 'bg-[#2d2d44] text-white' : 'text-[#6b6b80] hover:text-white hover:bg-[#252536]'}`}>
-          <Play size={13} /> 任务 ({tasks.length})
+          <Play size={13} /> {t("任务 (", "Tasks (")}{tasks.length})
         </button>
         <button onClick={() => setTab('plans')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${tab === 'plans' ? 'bg-[#2d2d44] text-white' : 'text-[#6b6b80] hover:text-white hover:bg-[#252536]'}`}>
-          <FileText size={13} /> 研究方案 ({plans.length})
+          <FileText size={13} /> {t("研究方案 (", "Research plans (")}{plans.length})
         </button>
         <button onClick={() => setTab('files')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${tab === 'files' ? 'bg-[#2d2d44] text-white' : 'text-[#6b6b80] hover:text-white hover:bg-[#252536]'}`}>
-          <FolderOpen size={13} /> 文件仓库
+          <FolderOpen size={13} /> {t("文件仓库", "Project files")}
         </button>
       </div>
 
@@ -151,40 +153,40 @@ export default function ProjectDetailPage() {
         {tab === 'tasks' ? (
           <div className="h-full overflow-y-auto p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium text-[#9898b0]">计算任务</h3>
+              <h3 className="text-sm font-medium text-[#9898b0]">{t("计算任务", "Calculation tasks")}</h3>
               <button onClick={() => { resetTaskForm(); setShowTaskForm(true); }}
                 className="flex items-center gap-1.5 px-3 py-2 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb]">
-                <Plus size={14} /> 新建任务
+                <Plus size={14} /> {t("新建任务", "New task")}
               </button>
             </div>
 
             {tasks.length === 0 ? (
               <div className="text-center py-12">
                 <Play size={36} className="mx-auto text-[#383850] mb-3" />
-                <p className="text-sm text-[#6b6b80]">暂无任务，创建一个开始计算</p>
+                <p className="text-sm text-[#6b6b80]">{t("暂无任务，创建一个开始计算", "No tasks yet. Create one to start a calculation.")}</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {tasks.map(t => {
-                  const wf = t.workflow ?? workflows.find(w => w.id === t.workflow_id);
+                {tasks.map(task => {
+                  const wf = task.workflow ?? workflows.find(w => w.id === task.workflow_id);
                   return (
-                    <div key={t.id} className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl p-4 hover:border-[#383850] transition-colors group">
+                    <div key={task.id} className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl p-4 hover:border-[#383850] transition-colors group">
                       <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/task/${t.id}`)}>
+                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => navigate(`/task/${task.id}`)}>
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: taskStatusColors[t.status] }} />
-                            <h4 className="text-sm font-medium text-white truncate">{t.name}</h4>
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: taskStatusColors[task.status] }} />
+                            <h4 className="text-sm font-medium text-white truncate">{task.name}</h4>
                           </div>
                           <div className="flex items-center gap-2 ml-4">
-                            {wf && <span className="text-[10px] text-[#8b5cf6]/70 bg-[#8b5cf6]/5 px-1.5 py-0.5 rounded">{wf.name}</span>}
-                            <span className="text-[10px] text-[#6b6b80]">{taskStatusLabels[t.status]}</span>
-                            <span className="text-[10px] text-[#4a4a60]">{new Date(t.updated_at).toLocaleString('zh-CN')}</span>
+                            {wf && <span className="text-[10px] text-[#8b5cf6]/70 bg-[#8b5cf6]/5 px-1.5 py-0.5 rounded">{localizeWorkflow(wf, getLocale()).name}</span>}
+                            <span className="text-[10px] text-[#6b6b80]">{taskStatusLabels[task.status]}</span>
+                            <span className="text-[10px] text-[#4a4a60]">{new Date(task.updated_at).toLocaleString(getLocale())}</span>
                           </div>
                         </div>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditingTask(t); setTaskName(t.name); setTaskDesc(t.description); setShowTaskForm(true); }}
+                          <button aria-label={t("编辑任务", "Edit task")} onClick={() => { setEditingTask(task); setTaskName(task.name); setTaskDesc(task.description); setShowTaskForm(true); }}
                             className="p-1 text-[#6b6b80] hover:text-white rounded hover:bg-[#2d2d44]"><Edit3 size={13} /></button>
-                          <button onClick={() => handleDeleteTask(t.id)}
+                          <button aria-label={t("删除任务", "Delete task")} onClick={() => handleDeleteTask(task.id)}
                             className="p-1 text-[#6b6b80] hover:text-red-400 rounded hover:bg-[#2d2d44]"><Trash2 size={13} /></button>
                         </div>
                       </div>
@@ -197,18 +199,18 @@ export default function ProjectDetailPage() {
         ) : tab === 'plans' ? (
           <div className="h-full overflow-y-auto p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium text-[#9898b0]">研究方案</h3>
+              <h3 className="text-sm font-medium text-[#9898b0]">{t("研究方案", "Research plans")}</h3>
               <button onClick={() => navigate('/research-plans')}
                 className="flex items-center gap-1.5 px-3 py-2 bg-[#8b5cf6] text-white text-xs rounded-lg hover:bg-[#7c3aed]">
-                <Plus size={14} /> 管理研究方案
+                <Plus size={14} /> {t("管理研究方案", "Manage research plans")}
               </button>
             </div>
 
             {plans.length === 0 ? (
               <div className="text-center py-12">
                 <FileText size={36} className="mx-auto text-[#383850] mb-3" />
-                <p className="text-sm text-[#6b6b80]">该项目暂无研究方案</p>
-                <p className="text-xs text-[#4a4a60] mt-1">前往"研究方案"页面导入或创建，并关联到本项目</p>
+                <p className="text-sm text-[#6b6b80]">{t("该项目暂无研究方案", "This project has no research plans yet")}</p>
+                <p className="text-xs text-[#4a4a60] mt-1">{t("前往\"研究方案\"页面导入或创建，并关联到本项目", "Create or import a plan on the Research plans page and link it to this project")}</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -228,7 +230,7 @@ export default function ProjectDetailPage() {
                             <h4 className="text-sm font-medium text-white truncate">{p.title}</h4>
                           </div>
                           <div className="text-[10px] text-[#6b6b80] font-mono ml-1">{p.file_name}</div>
-                          <div className="text-[10px] text-[#4a4a60] mt-1 ml-1">更新于 {new Date(p.updated_at).toLocaleString('zh-CN')}</div>
+                          <div className="text-[10px] text-[#4a4a60] mt-1 ml-1">{t("更新于", "Updated")} {new Date(p.updated_at).toLocaleString(getLocale())}</div>
                         </div>
                         <ChevronRight size={14} className="text-[#6b6b80] group-hover:text-white flex-shrink-0 mt-1" />
                       </div>
@@ -248,28 +250,28 @@ export default function ProjectDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={resetTaskForm}>
           <div className="bg-[#1a1a2e] border border-[#2d2d44] rounded-xl w-[440px] shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-[#2d2d44]">
-              <h3 className="text-sm font-semibold text-white">{editingTask ? '编辑任务' : '新建任务'}</h3>
+              <h3 className="text-sm font-semibold text-white">{editingTask ? t("编辑任务", "Edit task") : t("新建任务", "New task")}</h3>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">任务名称 *</label>
+                <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">{t("任务名称 *", "Task name *")}</label>
                 <input value={taskName} onChange={e => { setTaskName(e.target.value); setTaskFormError(''); }}
                   aria-invalid={Boolean(taskFormError && !taskName.trim())}
                   className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-2 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]"
-                  placeholder="例如：V2O3 顺磁性 one-shot DMFT" />
+                  placeholder={t("例如：V2O3 顺磁性 one-shot DMFT", "Example: V2O3 paramagnetic one-shot DMFT")} />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">描述</label>
+                <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">{t("描述", "Description")}</label>
                 <textarea value={taskDesc} onChange={e => setTaskDesc(e.target.value)} rows={2}
                   className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-2 text-sm text-[#e2e2f0] resize-none focus:outline-none focus:border-[#3b82f6]"
-                  placeholder="任务简要描述..." />
+                  placeholder={t("任务简要描述...", "Brief task description...")} />
               </div>
               {!editingTask && (
                 <div>
-                  <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">工作流模板</label>
-                  <select value={taskWorkflow} aria-label="工作流模板" onChange={e => { setTaskWorkflow(e.target.value); setTaskFormError(''); }}
+                  <label className="text-[10px] uppercase tracking-wider text-[#6b6b80] mb-1 block">{t("工作流模板", "Workflow template")}</label>
+                  <select value={taskWorkflow} aria-label={t("工作流模板", "Workflow template")} onChange={e => { setTaskWorkflow(e.target.value); setTaskFormError(''); }}
                     className="w-full bg-[#252536] border border-[#383850] rounded-lg px-3 py-2 text-sm text-[#e2e2f0] focus:outline-none focus:border-[#3b82f6]">
-                    {workflows.map(w => <option key={w.id} value={w.id}>{w.name} — {w.description}</option>)}
+                    {workflows.map(w => <option key={w.id} value={w.id}>{localizeWorkflow(w, getLocale()).name} — {localizeWorkflow(w, getLocale()).description}</option>)}
                   </select>
                 </div>
               )}
@@ -280,9 +282,9 @@ export default function ProjectDetailPage() {
               )}
             </div>
             <div className="px-5 py-4 border-t border-[#2d2d44] flex justify-end gap-2">
-              <button onClick={resetTaskForm} disabled={taskSaving} className="px-4 py-2 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44] disabled:cursor-not-allowed disabled:opacity-50">取消</button>
+              <button onClick={resetTaskForm} disabled={taskSaving} className="px-4 py-2 text-xs text-[#6b6b80] hover:text-white rounded-lg hover:bg-[#2d2d44] disabled:cursor-not-allowed disabled:opacity-50">{t("取消", "Cancel")}</button>
               <button onClick={handleCreateTask} disabled={taskSaving} className="px-4 py-2 bg-[#3b82f6] text-white text-xs rounded-lg hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50">
-                {taskSaving ? (editingTask ? '保存中...' : '创建中...') : (editingTask ? '保存修改' : '创建任务')}
+                {taskSaving ? (editingTask ? t("保存中...", "Saving...") : t("创建中...", "Creating...")) : (editingTask ? t("保存修改", "Save changes") : t("创建任务", "Create task"))}
               </button>
             </div>
           </div>

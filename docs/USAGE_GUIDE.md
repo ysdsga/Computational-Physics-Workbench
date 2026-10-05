@@ -1,5 +1,7 @@
 # 使用指南：规划层、执行账本与长时间研究技巧
 
+[English](USAGE_GUIDE.en.md) | 中文
+
 这份指南解释 Workbench 的核心概念、怎样让 AI 辅助设计新工作流，以及怎样使用 Codex Goal mode 推进长时间研究。第一次使用请先完成[从项目到受控 Research Run](GETTING_STARTED.md)。
 
 ## 一张图理解整体关系

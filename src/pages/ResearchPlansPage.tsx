@@ -1,3 +1,4 @@
+import { t, getLocale, useLocalizedMessage } from '../i18n';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -9,12 +10,6 @@ import {
 import { researchPlansApi, projectsApi, tasksApi } from '../api/client';
 import type { ResearchPlan, ResearchPlanStatus, Project, Task } from '../types';
 
-const STATUS_META: Record<ResearchPlanStatus, { label: string; color: string; bg: string; border: string }> = {
-  draft:     { label: '草稿',   color: '#6b6b80', bg: 'rgba(107,107,128,0.10)', border: 'rgba(107,107,128,0.30)' },
-  active:    { label: '进行中', color: '#22c55e', bg: 'rgba(34,197,94,0.10)',   border: 'rgba(34,197,94,0.30)' },
-  completed: { label: '已完成', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)',  border: 'rgba(59,130,246,0.30)' },
-  archived:  { label: '已归档', color: '#f59e0b', bg: 'rgba(245,158,11,0.10)',  border: 'rgba(245,158,11,0.30)' },
-};
 const STATUS_ORDER: ResearchPlanStatus[] = ['draft', 'active', 'completed', 'archived'];
 
 function parseJsonArray<T = string>(s: string | undefined | null, fallback: T[] = []): T[] {
@@ -30,6 +25,12 @@ function parseJsonArray<T = string>(s: string | undefined | null, fallback: T[] 
 type Mode = 'view' | 'edit';
 
 export default function ResearchPlansPage() {
+  const STATUS_META: Record<ResearchPlanStatus, { label: string; color: string; bg: string; border: string }> = {
+    draft:     { label: t("草稿", "Draft"),   color: '#6b6b80', bg: 'rgba(107,107,128,0.10)', border: 'rgba(107,107,128,0.30)' },
+    active:    { label: t("进行中", "Active"), color: '#22c55e', bg: 'rgba(34,197,94,0.10)',   border: 'rgba(34,197,94,0.30)' },
+    completed: { label: t("已完成", "Completed"), color: '#3b82f6', bg: 'rgba(59,130,246,0.10)',  border: 'rgba(59,130,246,0.30)' },
+    archived:  { label: t("已归档", "Archived"), color: '#f59e0b', bg: 'rgba(245,158,11,0.10)',  border: 'rgba(245,158,11,0.30)' },
+  };
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [plans, setPlans] = useState<ResearchPlan[]>([]);
@@ -43,6 +44,7 @@ export default function ResearchPlansPage() {
 
   // content state
   const [content, setContent] = useState('');
+  const [contentError, setContentError] = useLocalizedMessage();
   const [originalContent, setOriginalContent] = useState('');
   const [loadingContent, setLoadingContent] = useState(false);
   const [mode, setMode] = useState<Mode>('view');
@@ -102,6 +104,7 @@ export default function ResearchPlansPage() {
 
   // Load content + metadata when selection changes
   const loadSelected = useCallback(async () => {
+    setContentError('');
     if (!selectedId) {
       setContent(''); setOriginalContent(''); setDirty(false);
       return;
@@ -119,11 +122,14 @@ export default function ResearchPlansPage() {
       const { content: c } = await researchPlansApi.getContent(selectedId);
       setContent(c); setOriginalContent(c);
     } catch (e) {
-      setContent(`# 无法读取\n\n错误：${(e as Error).message}`);
+      const detail = e instanceof Error ? e.message : null;
+      setContent('');
+      setOriginalContent('');
+      setContentError(() => `${t("无法读取", "Unable to read")}${t("：", ": ")}${detail ?? t("未知错误", "Unknown error")}`);
     } finally {
       setLoadingContent(false);
     }
-  }, [selectedId, plans]);
+  }, [selectedId, plans, setContentError]);
 
   useEffect(() => { loadSelected(); }, [loadSelected]);
 
@@ -164,38 +170,38 @@ export default function ResearchPlansPage() {
 
   const handleCreate = async () => {
     if (projectFilter === 'all') {
-      alert('请先在项目筛选中选择研究方案所属项目');
+      alert(t("请先在项目筛选中选择研究方案所属项目", "Select the research plan's project in the project filter first"));
       return;
     }
     const project = projectMap.get(projectFilter);
     if (!project?.working_dir.trim()) {
-      alert('所选项目尚未配置工作目录');
+      alert(t("所选项目尚未配置工作目录", "The selected project has no working directory configured"));
       return;
     }
-    const title = prompt('方案标题：');
+    const title = prompt(t("方案标题：", "Plan title:"));
     if (!title?.trim()) return;
     try {
       const p = await researchPlansApi.create({ title: title.trim(), project_id: project.id });
       setPlans(prev => [p, ...prev]);
       setSelectedId(p.id);
     } catch (e) {
-      alert(`创建失败：${(e as Error).message}`);
+      alert(t(`创建失败：${(e as Error).message}`, `Creation failed: ${(e as Error).message}`));
     }
   };
 
   const handleImport = async () => {
-    if (!importProjectId) return alert('请选择研究方案所属项目');
+    if (!importProjectId) return alert(t("请选择研究方案所属项目", "Select the project this research plan belongs to"));
     try {
       let p: ResearchPlan;
       if (importMode === 'path') {
-        if (!importPath.trim()) return alert('请填路径');
+        if (!importPath.trim()) return alert(t("请填路径", "Enter a path"));
         p = await researchPlansApi.import({
           sourcePath: importPath.trim(),
           fileName: importName.trim() || undefined,
           project_id: importProjectId,
         });
       } else {
-        if (!importContent.trim()) return alert('请粘贴内容');
+        if (!importContent.trim()) return alert(t("请粘贴内容", "Paste the content"));
         p = await researchPlansApi.import({
           content: importContent,
           fileName: importName.trim() || `imported_${Date.now()}.md`,
@@ -207,19 +213,19 @@ export default function ResearchPlansPage() {
       setShowImport(false);
       setImportPath(''); setImportName(''); setImportContent(''); setImportProjectId('');
     } catch (e) {
-      alert(`导入失败：${(e as Error).message}`);
+      alert(t(`导入失败：${(e as Error).message}`, `Import failed: ${(e as Error).message}`));
     }
   };
 
   const handleSaveContent = async () => {
-    if (!selectedId || !dirty) return;
+    if (!selectedId || !dirty || contentError) return;
     try {
       await researchPlansApi.saveContent(selectedId, content);
       setOriginalContent(content);
       setDirty(false);
       setPlans(prev => prev.map(p => p.id === selectedId ? { ...p, updated_at: new Date().toISOString() } : p));
     } catch (e) {
-      alert(`保存失败：${(e as Error).message}`);
+      alert(t(`保存失败：${(e as Error).message}`, `Save failed: ${(e as Error).message}`));
     }
   };
 
@@ -236,22 +242,22 @@ export default function ResearchPlansPage() {
       setPlans(prev => prev.map(p => p.id === updated.id ? updated : p));
       setEditingMeta(false);
     } catch (e) {
-      alert(`保存失败：${(e as Error).message}`);
+      alert(t(`保存失败：${(e as Error).message}`, `Save failed: ${(e as Error).message}`));
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('确定删除此研究方案？文件会一并删除。')) return;
+    if (!confirm(t("确定删除此研究方案？文件会一并删除。", "Delete this research plan? Its file will also be deleted."))) return;
     try {
       await researchPlansApi.delete(id);
       if (selectedId === id) setSelectedId(null);
       setPlans(prev => prev.filter(p => p.id !== id));
     } catch (e) {
       const item = e as Error & { code?: string };
-      if (item.code === 'RUN_HISTORY_PROTECTED' && confirm('该研究方案已有运行记录，不能物理删除。是否改为归档？')) {
+      if (item.code === 'RUN_HISTORY_PROTECTED' && confirm(t("该研究方案已有运行记录，不能物理删除。是否改为归档？", "This research plan has run records and cannot be permanently deleted. Archive it instead?"))) {
         const updated = await researchPlansApi.update(id, { status: 'archived' });
         setPlans(prev => prev.map(plan => plan.id === id ? updated : plan));
-      } else alert(`删除失败：${item.message}`);
+      } else alert(t(`删除失败：${item.message}`, `Deletion failed: ${item.message}`));
     }
   };
 
@@ -274,8 +280,8 @@ export default function ResearchPlansPage() {
         <div className="px-5 py-4 border-b border-[#2d2d44]">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="text-base font-semibold text-white">研究方案</h2>
-              <p className="text-xs text-[#6b6b80] mt-0.5">Markdown 文件 · 保存在所属项目工作目录</p>
+              <h2 className="text-base font-semibold text-white">{t("研究方案", "Research plans")}</h2>
+              <p className="text-xs text-[#6b6b80] mt-0.5">{t("Markdown 文件 · 保存在所属项目工作目录", "Markdown files · Stored in the owning project's working directory")}</p>
             </div>
             <div className="flex gap-1.5">
               <button onClick={() => {
@@ -283,28 +289,28 @@ export default function ResearchPlansPage() {
                 setShowImport(true);
               }}
                 className="flex items-center gap-1 px-2.5 py-2 bg-[#252536] border border-[#383850] text-[#e2e2f0] text-xs rounded-lg hover:bg-[#2d2d44]">
-                <Upload size={13} /> 导入
+                <Upload size={13} /> {t("导入", "Import")}
               </button>
               <button onClick={handleCreate}
                 className="flex items-center gap-1 px-2.5 py-2 bg-[#8b5cf6] text-white text-xs rounded-lg hover:bg-[#7c3aed]">
-                <Plus size={13} /> 新建
+                <Plus size={13} /> {t("新建", "New")}
               </button>
             </div>
           </div>
           <div className="relative mb-2">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6b6b80]" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索标题或标签..."
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t("搜索标题或标签...", "Search titles or tags...")}
               className="w-full bg-[#252536] border border-[#383850] rounded-lg pl-9 pr-3 py-2 text-xs text-[#e2e2f0] placeholder-[#4a4a60] focus:outline-none focus:border-[#8b5cf6]" />
           </div>
           <div className="flex gap-2">
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as ResearchPlanStatus | 'all')}
               className="flex-1 bg-[#252536] border border-[#383850] rounded-lg px-2 py-1.5 text-[11px] text-[#e2e2f0] focus:outline-none focus:border-[#8b5cf6]">
-              <option value="all">全部状态</option>
+              <option value="all">{t("全部状态", "All statuses")}</option>
               {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
             </select>
             <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}
               className="flex-1 bg-[#252536] border border-[#383850] rounded-lg px-2 py-1.5 text-[11px] text-[#e2e2f0] focus:outline-none focus:border-[#8b5cf6]">
-              <option value="all">全部项目</option>
+              <option value="all">{t("全部项目", "All projects")}</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
@@ -315,7 +321,7 @@ export default function ResearchPlansPage() {
             <div className="text-center py-12 px-5">
               <FileText size={36} className="mx-auto text-[#383850] mb-3" />
               <p className="text-xs text-[#6b6b80]">
-                {plans.length === 0 ? '研究方案为空，点击"新建"或"导入"开始' : '没有匹配的方案'}
+                {plans.length === 0 ? t("研究方案为空，点击\"新建\"或\"导入\"开始", "No research plans yet. Select \"New\" or \"Import\" to begin.") : t("没有匹配的方案", "No matching plans")}
               </p>
             </div>
           ) : (
@@ -345,7 +351,7 @@ export default function ResearchPlansPage() {
                       )}
                       {plan.missing && (
                         <span className="text-[9px] text-[#ef4444] flex items-center gap-0.5">
-                          <AlertTriangle size={9} /> 文件丢失
+                          <AlertTriangle size={9} /> {t("文件丢失", "File missing")}
                         </span>
                       )}
                       {tags.length > 0 && tags.slice(0, 2).map((t: string) => (
@@ -368,8 +374,8 @@ export default function ResearchPlansPage() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <FileText size={48} className="mx-auto text-[#383850] mb-3" />
-              <h3 className="text-sm font-medium text-[#9898b0] mb-1">未选择研究方案</h3>
-              <p className="text-xs text-[#6b6b80]">从左侧列表选择，或点击"新建/导入"</p>
+              <h3 className="text-sm font-medium text-[#9898b0] mb-1">{t("未选择研究方案", "No research plan selected")}</h3>
+              <p className="text-xs text-[#6b6b80]">{t("从左侧列表选择，或点击\"新建/导入\"", "Select a plan from the list, or choose \"New\" or \"Import\"")}</p>
             </div>
           </div>
         ) : (
@@ -392,11 +398,11 @@ export default function ResearchPlansPage() {
                       </select>
                       <select value={fProjectId} onChange={e => setFProjectId(e.target.value)}
                         disabled
-                        title="研究方案文件固定保存在创建时选择的项目工作目录中"
+                        title={t("研究方案文件固定保存在创建时选择的项目工作目录中", "The research plan file stays in the project working directory selected when it was created")}
                         className="bg-[#252536] border border-[#383850] rounded px-2 py-1 text-[#9898b0] disabled:cursor-not-allowed">
                         {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
-                      <input value={fTags} onChange={e => setFTags(e.target.value)} placeholder="标签（逗号分隔）"
+                      <input value={fTags} onChange={e => setFTags(e.target.value)} placeholder={t("标签（逗号分隔）", "Tags (comma separated)")}
                         className="flex-1 min-w-[150px] bg-[#252536] border border-[#383850] rounded px-2 py-1 text-[#e2e2f0]" />
                     </>
                   ) : (
@@ -407,14 +413,14 @@ export default function ResearchPlansPage() {
                           {projName(selected.project_id)}
                         </span>
                       )}
-                      <span className="text-[#6b6b80]">更新于 {new Date(selected.updated_at).toLocaleString()}</span>
-                      <span className="px-1.5 py-0.5 rounded border border-[#383850] text-[#9898b0]">可持续修订</span>
+                      <span className="text-[#6b6b80]">{t("更新于", "Updated")} {new Date(selected.updated_at).toLocaleString(getLocale())}</span>
+                      <span className="px-1.5 py-0.5 rounded border border-[#383850] text-[#9898b0]">{t("可持续修订", "Revisable")}</span>
                     </>
                   )}
                 </div>
                 {editingMeta && editingProjectTasks.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
-                    <span className="text-[10px] text-[#6b6b80]">关联任务：</span>
+                    <span className="text-[10px] text-[#6b6b80]">{t("关联任务：", "Related tasks:")}</span>
                     {editingProjectTasks.map(t => (
                       <button key={t.id} onClick={() => toggleLinkedTask(t.id)}
                         className={`text-[10px] px-1.5 py-0.5 rounded border ${
@@ -433,22 +439,22 @@ export default function ResearchPlansPage() {
                   <>
                     <button onClick={() => { setEditingMeta(false); loadSelected(); }}
                       className="px-3 py-1.5 text-xs bg-[#252536] border border-[#383850] text-[#e2e2f0] rounded-lg hover:bg-[#2d2d44]">
-                      取消
+                      {t("取消", "Cancel")}
                     </button>
                     <button onClick={handleSaveMeta}
                       className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#22c55e] text-white rounded-lg hover:bg-[#16a34a]">
-                      <CheckCircle2 size={13} /> 保存元数据
+                      <CheckCircle2 size={13} /> {t("保存元数据", "Save metadata")}
                     </button>
                   </>
                 ) : (
                   <>
                     <button onClick={() => setEditingMeta(true)}
                       className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#252536] border border-[#383850] text-[#e2e2f0] rounded-lg hover:bg-[#2d2d44]">
-                      <Edit3 size={13} /> 编辑信息
+                      <Edit3 size={13} /> {t("编辑信息", "Edit details")}
                     </button>
                     <button onClick={() => handleDelete(selected.id)}
                       className="flex items-center gap-1 px-3 py-1.5 text-xs bg-[#252536] border border-[#ef4444]/30 text-[#ef4444] rounded-lg hover:bg-[#ef4444]/10">
-                      <Trash2 size={13} /> 删除
+                      <Trash2 size={13} /> {t("删除", "Delete")}
                     </button>
                   </>
                 )}
@@ -456,7 +462,7 @@ export default function ResearchPlansPage() {
             </div>
 
             <div className="border-b border-[#2d2d44] bg-[#171725] px-6 py-3 text-[10px] leading-5 text-[#9898b0]">
-              <strong className="text-[#c4b5fd]">修订规则：</strong>这里编辑的是可持续修订的研究方案，普通保存直接更新 Markdown，不为每个小改动生成完整版本。Research Run 的 Task Spec 单独记录已确认边界和 Codex 可自主调整的工作计划；发现科学缺漏时按影响范围修订并标记受影响证据。
+              <strong className="text-[#c4b5fd]">{t("修订规则：", "Revision rules: ")}</strong>{t("这里编辑的是可持续修订的研究方案，普通保存直接更新 Markdown，不为每个小改动生成完整版本。Research Run 的 Task Spec 单独记录已确认边界和 Codex 可自主调整的工作计划；发现科学缺漏时按影响范围修订并标记受影响证据。", "This research plan can be revised continuously. Saving updates the Markdown file directly without creating a full version for every small edit. The Research Run's Task Spec separately records the confirmed boundaries and the Working Plan that Codex can adjust autonomously. When scientific omissions are found, revise according to their impact and flag affected evidence.")}
             </div>
 
             {/* Toolbar: preview/edit + save content */}
@@ -464,17 +470,17 @@ export default function ResearchPlansPage() {
               <div className="flex gap-1">
                 <button onClick={() => switchMode('view')}
                   className={`flex items-center gap-1 px-3 py-1 text-xs rounded ${mode === 'view' ? 'bg-[#8b5cf6]/20 text-[#a78bfa]' : 'text-[#6b6b80] hover:text-white'}`}>
-                  <Eye size={12} /> 预览
+                  <Eye size={12} /> {t("预览", "Preview")}
                 </button>
                 <button onClick={() => switchMode('edit')}
                   className={`flex items-center gap-1 px-3 py-1 text-xs rounded ${mode === 'edit' ? 'bg-[#8b5cf6]/20 text-[#a78bfa]' : 'text-[#6b6b80] hover:text-white'}`}>
-                  <Edit3 size={12} /> 编辑
+                  <Edit3 size={12} /> {t("编辑", "Edit")}
                 </button>
               </div>
-              {dirty && (
+              {dirty && !contentError && (
                 <button onClick={handleSaveContent}
                   className="flex items-center gap-1 px-3 py-1 text-xs bg-[#22c55e] text-white rounded-lg hover:bg-[#16a34a]">
-                  <Save size={12} /> 保存正文
+                  <Save size={12} /> {t("保存正文", "Save content")}
                 </button>
               )}
             </div>
@@ -482,7 +488,9 @@ export default function ResearchPlansPage() {
             {/* Body */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
               {loadingContent ? (
-                <div className="flex items-center justify-center h-full text-sm text-[#6b6b80]">加载中...</div>
+                <div className="flex items-center justify-center h-full text-sm text-[#6b6b80]">{t("加载中...", "Loading...")}</div>
+              ) : contentError ? (
+                <div role="alert" className="m-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{contentError}</div>
               ) : mode === 'view' ? (
                 <div className="research-plan-markdown max-w-4xl mx-auto px-8 py-6">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
@@ -498,7 +506,7 @@ export default function ResearchPlansPage() {
                     }
                   }}
                   className="w-full bg-[#1a1a28] text-[#e2e2f0] font-mono text-sm p-6 resize-none focus:outline-none border-0"
-                  placeholder="在此编辑 Markdown..."
+                  placeholder={t("在此编辑 Markdown...", "Edit Markdown here...")}
                   style={{ minHeight: '100%', height: Math.max(content.split('\n').length * 21 + 48, 600) }}
                 />
               )}
@@ -512,27 +520,27 @@ export default function ResearchPlansPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowImport(false)}>
           <div className="bg-[#252536] border border-[#383850] rounded-xl p-6 w-[520px] max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-white">导入研究方案</h3>
-              <button onClick={() => setShowImport(false)} className="text-[#6b6b80] hover:text-white">
+              <h3 className="text-base font-semibold text-white">{t("导入研究方案", "Import research plan")}</h3>
+              <button aria-label={t("关闭", "Close")} onClick={() => setShowImport(false)} className="text-[#6b6b80] hover:text-white">
                 <X size={18} />
               </button>
             </div>
             <div className="flex gap-2 mb-4">
               <button onClick={() => setImportMode('path')}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg ${importMode === 'path' ? 'bg-[#8b5cf6] text-white' : 'bg-[#1a1a28] text-[#9898b0]'}`}>
-                从本机路径复制
+                {t("从本机路径复制", "Copy from a local path")}
               </button>
               <button onClick={() => setImportMode('paste')}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg ${importMode === 'paste' ? 'bg-[#8b5cf6] text-white' : 'bg-[#1a1a28] text-[#9898b0]'}`}>
-                粘贴 Markdown 内容
+                {t("粘贴 Markdown 内容", "Paste Markdown content")}
               </button>
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-[#9898b0] mb-1 block">所属项目</label>
+                <label className="text-xs text-[#9898b0] mb-1 block">{t("所属项目", "Owning project")}</label>
                 <select value={importProjectId} onChange={e => setImportProjectId(e.target.value)}
                   className="w-full bg-[#1a1a28] border border-[#383850] rounded-lg px-3 py-2 text-xs text-[#e2e2f0]">
-                  <option value="">请选择已配置工作目录的项目</option>
+                  <option value="">{t("请选择已配置工作目录的项目", "Select a project with a working directory")}</option>
                   {writableProjects.map(project => (
                     <option key={project.id} value={project.id}>{project.name}</option>
                   ))}
@@ -540,30 +548,30 @@ export default function ResearchPlansPage() {
               </div>
               {importMode === 'path' ? (
                 <div>
-                  <label className="text-xs text-[#9898b0] mb-1 block">本机文件绝对路径</label>
+                  <label className="text-xs text-[#9898b0] mb-1 block">{t("本机文件绝对路径", "Absolute path to local file")}</label>
                   <input value={importPath} onChange={e => setImportPath(e.target.value)}
                     placeholder="D:\path\to\plan.md"
                     className="w-full bg-[#1a1a28] border border-[#383850] rounded-lg px-3 py-2 text-xs text-[#e2e2f0] font-mono" />
                 </div>
               ) : (
                 <div>
-                  <label className="text-xs text-[#9898b0] mb-1 block">Markdown 内容</label>
+                  <label className="text-xs text-[#9898b0] mb-1 block">{t("Markdown 内容", "Markdown content")}</label>
                   <textarea value={importContent} onChange={e => setImportContent(e.target.value)}
-                    placeholder="# 方案标题..."
+                    placeholder={t("# 方案标题...", "# Plan title...")}
                     className="w-full h-40 bg-[#1a1a28] border border-[#383850] rounded-lg px-3 py-2 text-xs text-[#e2e2f0] font-mono resize-none" />
                 </div>
               )}
               <div>
-                <label className="text-xs text-[#9898b0] mb-1 block">目标文件名（可选，默认用源文件名）</label>
+                <label className="text-xs text-[#9898b0] mb-1 block">{t("目标文件名（可选，默认用源文件名）", "Destination filename (optional; defaults to the source filename)")}</label>
                 <input value={importName} onChange={e => setImportName(e.target.value)}
                   placeholder="my_plan.md"
                   className="w-full bg-[#1a1a28] border border-[#383850] rounded-lg px-3 py-2 text-xs text-[#e2e2f0] font-mono" />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={() => setShowImport(false)}
-                  className="px-4 py-2 text-xs bg-[#1a1a28] border border-[#383850] text-[#e2e2f0] rounded-lg">取消</button>
+                  className="px-4 py-2 text-xs bg-[#1a1a28] border border-[#383850] text-[#e2e2f0] rounded-lg">{t("取消", "Cancel")}</button>
                 <button onClick={handleImport}
-                  className="px-4 py-2 text-xs bg-[#8b5cf6] text-white rounded-lg hover:bg-[#7c3aed]">导入</button>
+                  className="px-4 py-2 text-xs bg-[#8b5cf6] text-white rounded-lg hover:bg-[#7c3aed]">{t("导入", "Import")}</button>
               </div>
             </div>
           </div>

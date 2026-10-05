@@ -1,5 +1,7 @@
 # 关键设计决定
 
+[English](DECISIONS.en.md) | 中文
+
 本文只记录当前有效决定。历史 V1/V2 方案保留在 `docs/plans/`，其中 Contract、分层 Policy、不可变 Context 与逐 Action 授权已被 V3 取代。
 
 ## 1. Codex 是 Agent，Web 是观察面
@@ -35,7 +37,7 @@ Task Spec 分为：
 
 ## 7. Codex Pending 与 Researcher Pending 分开
 
-运行环境、失败诊断、恢复、绘图和边界内纠错面向 `codex`；材料科学选择、Envelope 改变和结论歧义面向 `researcher`。阻塞默认按 Stage 定位，不冻结无关工作。
+运行环境、失败诊断、恢复、绘图和边界内纠错面向 `codex`；材料科学选择、Envelope 改变和结论歧义面向 `researcher`。应尽可能把阻塞绑定到受影响 Stage；`detail.blocksRun=true` 的 researcher 条目若未指定 Stage，则会阻塞所有 Stage 的 Action。显式限定 Stage 后，不应冻结无关阶段的 Action。
 
 ## 8. Codex 自主安排 Task 内目录
 
@@ -47,11 +49,11 @@ Workbench 只固定 Project 工作根与 Task 写根，不自动创建 Stage 目
 
 ## 10. Task 会话负责日常执行，Action 只记录科学里程碑
 
-Envelope 确认后，`remote exec/upload/download` 自动派生 host/root，在登记边界内直接执行并追加 Event，不创建 Action。直接本地处理也不需要 Action。提交/取消、多 Job 批次或证据验证等科学里程碑才保存规范化 spec、SHA-256、Stage、幂等键与输入快照；Action 是溯源记录，不是微操作许可。
+Envelope 确认后，`remote exec/upload/download` 自动派生 host/root，在登记边界内直接执行并追加 Event，不创建 Action。直接本地处理也不需要 Action。提交/取消、多 Job 批次或证据验证等科学里程碑保存规范化 spec、SHA-256、Stage 与幂等键；需要执行输入的 capability 还保存相应输入快照。Action 是溯源记录，不是微操作许可。
 
 ## 11. 远程提交必须可恢复
 
-Job 行在 `bsub` 前以 `prepared` 写入，作业名由稳定 token 生成。`bsub` 返回后立即核对 scheduler ID/name。超时、丢响应或核对失败一律记 `submission_uncertain`，进入 Codex 待处理事项，只能按唯一作业名对账，不能重提。
+Job 行在 `bsub` 前以 `prepared` 写入，作业名由稳定 token 生成。`bsub` 返回有效 ID 后立即核对 scheduler ID/name。无法判断是否已提交的超时、丢响应或核对失败记为 `submission_uncertain`，进入 Codex 待处理事项，只能按唯一作业名对账，不能重提。提交前准备失败或调度器明确拒收使用 `preparation_failed`；有证据证明未进入调度器的失败，不应与不确定提交混为一谈。
 
 ## 12. 证据与经验分离
 
@@ -59,7 +61,7 @@ Job 行在 `bsub` 前以 `prepared` 写入，作业名由稳定 token 生成。`
 
 ## 13. schema v5 迁移 fail closed
 
-v4 正式库的运行控制表为空，因此 v5 可以备份后替换旧 Policy/Context/Review/Promotion 表，保留 Project/Task/Plan/Workflow/Experience。若任何旧运行控制表非空，迁移拒绝启动，要求显式转换方案，避免丢失历史。
+v5 迁移先备份，再检查待替换的 v4 运行控制表。只有这些表全部为空时，才替换旧 Policy/Context/Review/Promotion 等运行表，并保留 Project/Task/Plan/Workflow/Experience。若任何旧运行控制表非空，迁移拒绝启动，要求显式转换方案，避免丢失历史。不能因某个既往安装当时没有运行历史，就假定其他用户的数据库也是空的。
 
 ## 14. 当前安全边界的含义
 
@@ -67,7 +69,7 @@ Workbench 对自身入口强制 Task 根、HPC binding、capability、资源、�
 
 ## 15. Scheduled Task 唤醒，Stop Hook 守门
 
-长作业不能依赖一次 Codex 回合持续运行。每个 Job 的检查策略由提交它的 Codex 根据真实计算规模判断并固化在 Action spec；Workbench 只计算下一次到期时间与建议 heartbeat cadence。每个有非终态 Job 的 Run 绑定一个当前任务 heartbeat，且只有 Codex 自动化接口确认 ACTIVE 后才能记为 `scheduled`。heartbeat lease 用于发现已暂停或失联的假绑定。最后一个 Job 终止后，Workbench 返回删除指令并保留 reference；Codex 删除自动化、回写 `monitor close` 后才完成。Stop Hook 守住缺失、过期与待清理三种状态，但不轮询、不执行、不创建第二个 Agent。服务不可用时 Hook fail open 并提示下次先运行 doctor。
+长作业不能依赖一次 Codex 回合持续运行。每个 Job 的检查策略应由提交它的 Codex 根据真实计算规模判断并固化在 Action spec；缺少策略的旧规格有基于 wall-time 的兼容回退。Workbench 计算下一次到期时间与建议 heartbeat cadence。每个有非终态 Job 的 Run 绑定一个当前任务 heartbeat，且只有 Codex 自动化接口确认 ACTIVE 后才能记为 `scheduled`。heartbeat lease 用于发现已暂停或失联的假绑定。最后一个 Job 终止后，Workbench 返回删除指令并保留 reference；Codex 删除自动化、回写 `monitor close` 后才完成。Stop Hook 检查缺失、过期与待清理三种状态，但不轮询、不执行、不创建第二个 Agent；同一次 Hook 已触发时只提醒，避免重复阻塞循环。服务不可用时 Hook fail open 并提示下次先运行 doctor。
 
 ## 16. 自动重试必须有谱系和预算
 

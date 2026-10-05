@@ -2,7 +2,11 @@
 
 感谢你愿意参与建设。这个项目正在从 DFT+DMFT 工作台发展为一个面向计算物理与理论物理的 Agent 协作研究系统：Agent 负责计划和执行，研究者负责科学承诺、关键判断与证据审阅。
 
+Thank you for contributing. This project is growing from a DFT+DMFT workbench into an Agent-assisted research system for computational and theoretical physics: the Agent plans and executes, while the researcher owns scientific commitments, critical judgments and evidence review.
+
 The project welcomes focused contributions that improve reproducibility, scientific traceability, agent safety, workflow portability, documentation, and support for additional physics methods.
+
+The agent plans and executes research while the researcher owns scientific commitments, critical decisions and evidence review. Use [English onboarding](docs/GETTING_STARTED.en.md), the [English project guide](AGENTS.en.md) and [testing instructions](TESTING.en.md), or their linked Chinese counterparts. Node.js 22.12+ is required.
 
 ## Before opening a pull request
 
@@ -20,7 +24,7 @@ The project welcomes focused contributions that improve reproducibility, scienti
 5. Run the checks below before requesting review.
 
 ```powershell
-npm install
+npm ci
 npm run lint
 npm run typecheck
 npm test
@@ -28,6 +32,8 @@ npm run build
 ```
 
 Tests must use disposable databases and temporary directories. They must never reset or write to a contributor's real `data/` or `repository/` directories.
+
+For interface changes, build and run the applicable browser tests (`npm run test:e2e`). Verify English and Chinese selection, authored-content preservation, accessible labels, validation/errors and the affected user journey. Update both user-guide entry points. Keep stable IDs, API keys, scientific notation and immutable recorded specs unchanged; translate presentation instead. Distinguish mocked application checks from live-cluster and scientific validation in your report.
 
 ## Pull request expectations
 
